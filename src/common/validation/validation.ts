@@ -28,13 +28,35 @@ const CONSTRAINT_TO_CODE: Record<string, string> = {
   matches: FieldErrorCode.INVALID_FORMAT,
   minLength: FieldErrorCode.TOO_SHORT,
   maxLength: FieldErrorCode.TOO_LONG,
-  arrayMinSize: FieldErrorCode.TOO_SHORT,
-  arrayMaxSize: FieldErrorCode.TOO_LONG,
+  isPositive: FieldErrorCode.OUT_OF_RANGE,
+  isNegative: FieldErrorCode.OUT_OF_RANGE,
+  minDate: FieldErrorCode.OUT_OF_RANGE,
+  maxDate: FieldErrorCode.OUT_OF_RANGE,
+  isDate: FieldErrorCode.INVALID_FORMAT,
+  isUrl: FieldErrorCode.INVALID_FORMAT,
+  isPhoneNumber: FieldErrorCode.INVALID_FORMAT,
+  isMobilePhone: FieldErrorCode.INVALID_FORMAT,
+  isNumberString: FieldErrorCode.INVALID_FORMAT,
+  isDecimal: FieldErrorCode.INVALID_FORMAT,
+  arrayNotEmpty: FieldErrorCode.REQUIRED,
+  arrayUnique: FieldErrorCode.INVALID_VALUE,
+  arrayMinSize: FieldErrorCode.TOO_FEW,
+  arrayMaxSize: FieldErrorCode.TOO_MANY,
   min: FieldErrorCode.OUT_OF_RANGE,
   max: FieldErrorCode.OUT_OF_RANGE,
-  isIn: FieldErrorCode.INVALID_VALUE,
-  isEnum: FieldErrorCode.INVALID_VALUE,
+  // Code-list fields (API design 12.1).
+  isIn: FieldErrorCode.INVALID_CODE,
+  isEnum: FieldErrorCode.INVALID_CODE,
 };
+
+/**
+ * `@Length(min, max)` reports one constraint for both ends; class-validator's
+ * message says which end failed ("longer than" means the value is too short).
+ */
+function lengthCode(constraint: string, text: string | undefined): string | undefined {
+  if (constraint !== 'isLength') return undefined;
+  return text?.includes('longer than') ? FieldErrorCode.TOO_SHORT : FieldErrorCode.TOO_LONG;
+}
 
 /** The order in which a field's failed constraints are reported; first wins. */
 const PRIORITY = ['whitelistValidation', 'isDefined', 'isNotEmpty'];
@@ -55,6 +77,7 @@ export function toFieldErrors(errors: ValidationError[], parentPath = ''): Field
       if (first) {
         const code =
           (error.contexts?.[first]?.['code'] as string | undefined) ??
+          lengthCode(first, error.constraints[first]) ??
           CONSTRAINT_TO_CODE[first] ??
           FieldErrorCode.INVALID_VALUE;
         result.push({ field: path, code, message: message(code, language) });
@@ -85,7 +108,10 @@ export function createValidationPipe(): ValidationPipe {
 function trimDeep(value: unknown): unknown {
   if (typeof value === 'string') return value.trim();
   if (Array.isArray(value)) return value.map(trimDeep);
-  if (value && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype) {
+  // Express 5 builds req.query with a null prototype, so both kinds of plain object count.
+  const proto: unknown =
+    value && typeof value === 'object' ? Object.getPrototypeOf(value) : undefined;
+  if (value && typeof value === 'object' && (proto === Object.prototype || proto === null)) {
     return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, trimDeep(v)]));
   }
   return value;

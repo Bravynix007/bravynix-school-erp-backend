@@ -70,6 +70,33 @@ describe('HTTP stack', () => {
 
       const page = await request(http).get('/v1/fixtures/page?page=2&limit=1').expect(200);
       expect(page.body.meta).toEqual({ page: 2, limit: 1, totalItems: 2, totalPages: 2 });
+
+      const queued = await request(http).post('/v1/fixtures/queued').expect(202);
+      expect(queued.body).toMatchObject({ statusCode: 202, code: 'ACCEPTED' });
+    });
+
+    it('answers a plain POST with 200, not the Nest default of 201 (API design 7.5)', async () => {
+      const res = await request(http).post('/v1/fixtures/plain-post').expect(200);
+      expect(res.body).toMatchObject({ statusCode: 200, code: 'OK', data: { ok: true } });
+    });
+
+    it('trims query strings, which Express 5 parses with a null prototype', async () => {
+      const res = await request(http).get('/v1/fixtures/page?q=%20%20vidya%20').expect(200);
+      expect(res.body.data.q).toBe('vidya');
+    });
+
+    it('accepts a quoted charset and refuses the utf8 alias with the envelope', async () => {
+      await request(http)
+        .post('/v1/fixtures/echo')
+        .set('Content-Type', 'application/json; charset="UTF-8"')
+        .send(JSON.stringify({ name: 'Asha' }))
+        .expect(201);
+      const res = await request(http)
+        .post('/v1/fixtures/echo')
+        .set('Content-Type', 'application/json; charset=utf8')
+        .send(JSON.stringify({ name: 'Asha' }))
+        .expect(415);
+      expect(res.body).toMatchObject({ success: false, code: 'UNSUPPORTED_MEDIA_TYPE' });
     });
 
     it('echoes a client request ID when it is a UUID, and replaces it when not', async () => {
@@ -199,6 +226,12 @@ describe('HTTP stack', () => {
         .expect(200);
     });
 
+    it('lets a support session read with GET and HEAD', async () => {
+      const auth = `Bearer role-${RoleCode.SuperAdmin}-support`;
+      await request(http).get('/v1/fixtures/admin-only').set('Authorization', auth).expect(200);
+      await request(http).head('/v1/fixtures/admin-only').set('Authorization', auth).expect(200);
+    });
+
     it('keeps support sessions read-only', async () => {
       const res = await request(http)
         .post('/v1/fixtures/owner-write')
@@ -220,8 +253,11 @@ describe('HTTP stack', () => {
       await request(http)
         .post('/v1/fixtures/mail')
         .send({ to: 'SO-A1@two-worlds.test' })
-        .expect(201);
-      expect(t.email.latest('so-a1@two-worlds.test', 'otp')?.variables?.code).toBe('123456');
+        .expect(200);
+      const sent = t.email.latest('so-a1@two-worlds.test', 'otp');
+      expect(sent?.variables?.code).toBe('123456');
+      // Stamped by the injectable clock, so FixedClock tests don't drift.
+      expect(sent?.sentAt.toISOString()).toBe(t.clock.now().toISOString());
     });
   });
 

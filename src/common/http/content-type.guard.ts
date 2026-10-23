@@ -23,7 +23,12 @@ export class ContentTypeGuard implements CanActivate {
 
     const contentType = (request.header('content-type') ?? '').toLowerCase();
     const [mime, ...params] = contentType.split(';').map((part) => part.trim());
-    const charset = params.find((p) => p.startsWith('charset='))?.slice('charset='.length);
+    const charset = params
+      .find((p) => p.startsWith('charset='))
+      ?.slice('charset='.length)
+      .replace(/^"(.*)"$/, '$1');
+    // body-parser has already unquoted the charset and refused anything not
+    // `utf-*` (so `utf8` is a 415 there); this narrows it to UTF-8 alone.
     if (mime !== 'application/json' || (charset && charset !== 'utf-8')) {
       throw new AppException(HttpStatus.UNSUPPORTED_MEDIA_TYPE, ErrorCode.UNSUPPORTED_MEDIA_TYPE);
     }

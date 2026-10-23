@@ -5,6 +5,7 @@ import { Test } from '@nestjs/testing';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from '../../src/app.module.js';
 import { configureApp } from '../../src/bootstrap/configure-app.js';
+import { EnvelopeExpressAdapter } from '../../src/bootstrap/http-adapter.js';
 import { AccessTokenVerifier } from '../../src/common/auth/access-token-verifier.js';
 import { Clock, FixedClock } from '../../src/common/time/clock.js';
 import { EmailSender } from '../../src/platform/email/email-sender.js';
@@ -31,7 +32,7 @@ export interface TestAppOptions {
  */
 export async function createTestApp(options: TestAppOptions = {}): Promise<TestApp> {
   const clock = new FixedClock(options.clockStart);
-  const email = new InMemoryEmailSender();
+  const email = new InMemoryEmailSender(clock);
   let builder = Test.createTestingModule({ imports: [AppModule, ...(options.imports ?? [])] })
     .overrideProvider(Clock)
     .useValue(clock)
@@ -41,10 +42,13 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
     builder = builder.overrideProvider(AccessTokenVerifier).useValue(options.verifier);
   }
   const moduleRef = await builder.compile();
-  const app = moduleRef.createNestApplication<NestExpressApplication>({
-    bodyParser: false,
-    bufferLogs: true,
-  });
+  const app = moduleRef.createNestApplication<NestExpressApplication>(
+    new EnvelopeExpressAdapter(),
+    {
+      bodyParser: false,
+      bufferLogs: true,
+    },
+  );
   // Logs follow LOG_LEVEL (silent by default in tests).
   app.useLogger(app.get(Logger));
   configureApp(app);

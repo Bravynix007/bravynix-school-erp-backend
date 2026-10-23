@@ -46,6 +46,9 @@ const en: Catalogue = {
   INVALID_FORMAT: 'This value has the wrong format',
   TOO_SHORT: 'This value is too short',
   TOO_LONG: 'This value is too long',
+  TOO_FEW: 'Add more items',
+  TOO_MANY: 'There are too many items',
+  INVALID_CODE: 'This value is not in the list',
   INVALID_VALUE: 'This value is not allowed',
 };
 
@@ -57,8 +60,11 @@ export function resolveLanguage(acceptLanguage: string | undefined): Language {
     .split(',')
     .map((part) => {
       const [tag = '', q] = part.trim().split(';q=');
-      return { lang: tag.toLowerCase().split('-')[0], q: q === undefined ? 1 : Number(q) };
+      const weight = q === undefined ? 1 : Number(q);
+      // A malformed weight counts as 1; q=0 means "not acceptable" (RFC 9110 12.4.2).
+      return { lang: tag.toLowerCase().split('-')[0], q: Number.isFinite(weight) ? weight : 1 };
     })
+    .filter((t) => t.q > 0)
     .toSorted((a, b) => b.q - a.q);
   const match = tags.find((t) => (SUPPORTED_LANGUAGES as readonly string[]).includes(t.lang ?? ''));
   return (match?.lang as Language | undefined) ?? 'en';

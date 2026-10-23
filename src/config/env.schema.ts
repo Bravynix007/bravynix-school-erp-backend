@@ -74,6 +74,14 @@ export const envSchema = z
         message: 'must be smtp in staging and production',
       });
     }
+    // SES rejects an @localhost sender, which would stop every login code (B7).
+    if (deployed && /@localhost>?$/i.test(env.EMAIL_FROM)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['EMAIL_FROM'],
+        message: 'must be a verified sender address in staging and production',
+      });
+    }
     if (env.NODE_ENV === 'production' && env.OPENAPI_UI) {
       ctx.addIssue({
         code: 'custom',

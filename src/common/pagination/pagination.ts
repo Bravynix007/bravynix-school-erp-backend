@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { HttpStatus } from '@nestjs/common';
+import { sql, type RawBuilder } from 'kysely';
 import { Type } from 'class-transformer';
 import { IsInt, IsOptional, IsString, Length, Max, Min } from 'class-validator';
 import { AppException } from '../http/app-exception.js';
@@ -90,8 +91,38 @@ export function parseSort<F extends string>(
   });
 }
 
+/**
+ * A row's position in a newest-first `(created_at, id)` list (API design
+ * 13.2). `createdAt` keeps PostgreSQL's microseconds, which a JS `Date`
+ * would round to milliseconds and make the next page skip rows.
+ */
+export interface CursorPosition {
+  /** UTC, microsecond precision: `2026-10-23T04:25:00.123456Z`. */
+  createdAt: string;
+  id: string;
+}
+
+const MICROS_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/;
+
+/**
+ * Selects a timestamp column as a microsecond UTC string for the cursor:
+ * `.select(cursorTimestamp('n.created_at').as('cursorAt'))`.
+ */
+export function cursorTimestamp(column = 'created_at'): RawBuilder<string> {
+  return sql<string>`to_char(${sql.ref(column)} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
+}
+
+/** `(created_at, id) < cursor`, the keyset condition for the next newest-first page. */
+export function beforeCursor(
+  position: CursorPosition,
+  column = 'created_at',
+  idColumn = 'id',
+): RawBuilder<boolean> {
+  return sql<boolean>`(${sql.ref(column)}, ${sql.ref(idColumn)}) < (${position.createdAt}::timestamptz, ${position.id}::uuid)`;
+}
+
 interface CursorPayload {
-  /** createdAt of the last row, ISO string. */
+  /** createdAt of the last row, microsecond UTC string. */
   t: string;
   /** id of the last row. */
   id: string;
@@ -108,15 +139,11 @@ function filterHash(filters: Record<string, unknown>): string {
   return createHash('sha256').update(canonical).digest('base64url').slice(0, 16);
 }
 
-export function encodeCursor(
-  last: { createdAt: Date | string; id: string },
-  filters: Record<string, unknown>,
-): string {
-  const payload: CursorPayload = {
-    t: new Date(last.createdAt).toISOString(),
-    id: last.id,
-    f: filterHash(filters),
-  };
+export function encodeCursor(last: CursorPosition, filters: Record<string, unknown>): string {
+  if (!MICROS_ISO.test(last.createdAt)) {
+    throw new Error('Cursor timestamps must come from cursorTimestamp(), with microseconds');
+  }
+  const payload: CursorPayload = { t: last.createdAt, id: last.id, f: filterHash(filters) };
   return Buffer.from(JSON.stringify(payload)).toString('base64url');
 }
 
@@ -126,29 +153,33 @@ function invalidCursor(): AppException {
   });
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /** Decodes a cursor; a tampered cursor or one reused with other filters is 400 CURSOR_INVALID. */
-export function decodeCursor(
-  cursor: string,
-  filters: Record<string, unknown>,
-): { createdAt: Date; id: string } {
+export function decodeCursor(cursor: string, filters: Record<string, unknown>): CursorPosition {
   let payload: CursorPayload;
   try {
     payload = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as CursorPayload;
   } catch {
     throw invalidCursor();
   }
-  const createdAt = new Date(payload?.t);
   if (
-    typeof payload?.id !== 'string' ||
-    Number.isNaN(createdAt.getTime()) ||
+    typeof payload?.t !== 'string' ||
+    !MICROS_ISO.test(payload.t) ||
+    typeof payload.id !== 'string' ||
+    !UUID.test(payload.id) ||
     payload.f !== filterHash(filters)
   ) {
     throw invalidCursor();
   }
-  return { createdAt, id: payload.id };
+  return { createdAt: payload.t, id: payload.id };
 }
 
-export function cursorMeta<T extends { createdAt: Date | string; id: string }>(
+/**
+ * Splits `limit + 1` fetched rows into the page and its meta. Rows carry
+ * `cursorAt` from `cursorTimestamp()` alongside their `id`.
+ */
+export function cursorMeta<T extends { cursorAt: string; id: string }>(
   rows: T[],
   limit: number,
   filters: Record<string, unknown>,
@@ -158,6 +189,11 @@ export function cursorMeta<T extends { createdAt: Date | string; id: string }>(
   const last = items.at(-1);
   return {
     items,
-    meta: { limit, hasMore, nextCursor: hasMore && last ? encodeCursor(last, filters) : null },
+    meta: {
+      limit,
+      hasMore,
+      nextCursor:
+        hasMore && last ? encodeCursor({ createdAt: last.cursorAt, id: last.id }, filters) : null,
+    },
   };
 }

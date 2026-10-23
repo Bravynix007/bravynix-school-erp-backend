@@ -1,5 +1,5 @@
 import type { ValidationError } from '@nestjs/common';
-import { toFieldErrors } from './validation.js';
+import { TrimStringsPipe, toFieldErrors } from './validation.js';
 
 describe('toFieldErrors', () => {
   it('maps constraints to field codes and builds JSON paths', () => {
@@ -37,5 +37,44 @@ describe('toFieldErrors', () => {
       },
     ];
     expect(toFieldErrors(errors)[0]?.code).toBe('MONEY_POSITIVE');
+  });
+
+  it('tells too short from too long for @Length, and uses the API codes for arrays and code lists', () => {
+    const errors: ValidationError[] = [
+      {
+        property: 'name',
+        constraints: { isLength: 'name must be longer than or equal to 2 characters' },
+      },
+      {
+        property: 'note',
+        constraints: { isLength: 'note must be shorter than or equal to 500 characters' },
+      },
+      { property: 'guardians', constraints: { arrayMinSize: 'x' } },
+      { property: 'tags', constraints: { arrayMaxSize: 'x' } },
+      { property: 'gender', constraints: { isIn: 'x' } },
+    ];
+    expect(toFieldErrors(errors).map((e) => e.code)).toEqual([
+      'TOO_SHORT',
+      'TOO_LONG',
+      'TOO_FEW',
+      'TOO_MANY',
+      'INVALID_CODE',
+    ]);
+  });
+});
+
+describe('TrimStringsPipe', () => {
+  const pipe = new TrimStringsPipe();
+
+  it('trims Express 5 query objects, which have a null prototype', () => {
+    const query = Object.assign(Object.create(null) as Record<string, unknown>, {
+      q: '  vidya ',
+      status: [' 1', '2 '],
+    });
+    expect(pipe.transform(query, { type: 'query' })).toEqual({ q: 'vidya', status: ['1', '2'] });
+  });
+
+  it('leaves route params alone', () => {
+    expect(pipe.transform(' id ', { type: 'param' })).toBe(' id ');
   });
 });

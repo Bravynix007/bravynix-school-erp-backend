@@ -63,9 +63,24 @@ class FixtureController {
   }
 
   @Public()
+  @Post('plain-post')
+  plainPost(): { ok: true } {
+    return { ok: true };
+  }
+
+  @Public()
+  @Post('queued')
+  queued(): ApiResult<{ operationId: string }> {
+    return ApiResult.accepted({ operationId: 'op-1' });
+  }
+
+  @Public()
   @Get('page')
-  page(@Query() query: PageQueryDto): ApiResult<number[]> {
-    return ApiResult.list([1, 2], pageMeta(query.page, query.limit, 2));
+  page(@Query() query: PageQueryDto): ApiResult<{ items: number[]; q: string | null }> {
+    return new ApiResult(
+      { items: [1, 2], q: query.q ?? null },
+      { meta: pageMeta(query.page, query.limit, 2) },
+    );
   }
 
   @Public()

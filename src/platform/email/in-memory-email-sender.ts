@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Clock, SystemClock } from '../../common/time/clock.js';
 import { EmailSender, type EmailMessage } from './email-sender.js';
 
 export interface SentEmail extends EmailMessage {
@@ -10,8 +11,12 @@ export interface SentEmail extends EmailMessage {
 export class InMemoryEmailSender extends EmailSender {
   private readonly outbox: SentEmail[] = [];
 
+  constructor(private readonly clock: Clock = new SystemClock()) {
+    super();
+  }
+
   send(message: EmailMessage): Promise<void> {
-    this.outbox.push({ ...message, sentAt: new Date() });
+    this.outbox.push({ ...message, sentAt: this.clock.now() });
     return Promise.resolve();
   }
 

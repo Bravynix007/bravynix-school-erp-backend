@@ -44,6 +44,14 @@ describe('parseEnv', () => {
     ).toThrow(/OPENAPI_UI/);
   });
 
+  it('needs a real sender address when deployed', () => {
+    const deployed = { ...base, NODE_ENV: 'staging', EMAIL_DRIVER: 'smtp', SMTP_URL: 'smtp://x' };
+    expect(() => parseEnv(deployed)).toThrow(/EMAIL_FROM/);
+    expect(
+      parseEnv({ ...deployed, EMAIL_FROM: 'BravyNix <no-reply@bravynix.in>' }).EMAIL_FROM,
+    ).toBe('BravyNix <no-reply@bravynix.in>');
+  });
+
   it('validates minimum app versions', () => {
     expect(() => parseEnv({ ...base, MIN_APP_VERSION_IOS: '1.2' })).toThrow(/MIN_APP_VERSION_IOS/);
     expect(parseEnv({ ...base, MIN_APP_VERSION_IOS: '1.2.0' }).MIN_APP_VERSION_IOS).toBe('1.2.0');

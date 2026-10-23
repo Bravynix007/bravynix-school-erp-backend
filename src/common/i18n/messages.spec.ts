@@ -11,6 +11,11 @@ describe('resolveLanguage', () => {
     expect(resolveLanguage('kn')).toBe('kn');
     expect(resolveLanguage('en;q=0.4, te;q=0.9')).toBe('te');
   });
+
+  it('ignores q=0 and treats a malformed weight as 1', () => {
+    expect(resolveLanguage('hi;q=0, ta;q=0.2')).toBe('ta');
+    expect(resolveLanguage('kn;q=abc, te;q=0.9')).toBe('kn');
+  });
 });
 
 describe('message', () => {

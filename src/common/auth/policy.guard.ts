@@ -9,6 +9,9 @@ import { POLICY_METADATA, type RoutePolicy } from './policy.decorator.js';
 
 export type AuthenticatedRequest = Request & { principal?: Principal };
 
+/** A support session may only read (API design 6.7). */
+const SAFE_METHODS = new Set(['GET', 'HEAD']);
+
 /**
  * Check 1 of 3 on every request (API design 6.4): is there a valid session,
  * and may the active role call this endpoint at all? Tenant scope (check 2)
@@ -45,7 +48,7 @@ export class PolicyGuard implements CanActivate {
     }
 
     if (!policy.roles.includes(principal.roleCode)) throw AppException.forbidden();
-    if (principal.viaSupportAccess && request.method !== 'GET') {
+    if (principal.viaSupportAccess && !SAFE_METHODS.has(request.method)) {
       throw AppException.forbidden(ErrorCode.SUPPORT_READ_ONLY);
     }
 
