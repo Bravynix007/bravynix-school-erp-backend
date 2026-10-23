@@ -1,0 +1,69 @@
+/**
+ * Stable, machine-readable result codes (API design 7.1 and 8.1). Clients
+ * branch on these, never on `message`. A code, once shipped, never changes
+ * meaning. Module-specific codes live with their module and are added here
+ * only when they are shared.
+ */
+export const ErrorCode = {
+  // 400
+  MALFORMED_JSON: 'MALFORMED_JSON',
+  VALIDATION_FAILED: 'VALIDATION_FAILED',
+  IDEMPOTENCY_KEY_REQUIRED: 'IDEMPOTENCY_KEY_REQUIRED',
+  OUT_OF_RANGE: 'OUT_OF_RANGE',
+  INVALID_SORT: 'INVALID_SORT',
+  CURSOR_INVALID: 'CURSOR_INVALID',
+  RANGE_TOO_LARGE: 'RANGE_TOO_LARGE',
+  // 401
+  TOKEN_INVALID: 'TOKEN_INVALID',
+  TOKEN_EXPIRED: 'TOKEN_EXPIRED',
+  SESSION_ENDED: 'SESSION_ENDED',
+  // 403
+  FORBIDDEN: 'FORBIDDEN',
+  NOT_ASSIGNED: 'NOT_ASSIGNED',
+  ACCESS_BLOCKED: 'ACCESS_BLOCKED',
+  SUPPORT_READ_ONLY: 'SUPPORT_READ_ONLY',
+  // 404
+  NOT_FOUND: 'NOT_FOUND',
+  // 409
+  VERSION_CONFLICT: 'VERSION_CONFLICT',
+  INVALID_STATE: 'INVALID_STATE',
+  DUPLICATE: 'DUPLICATE',
+  IDEMPOTENCY_IN_PROGRESS: 'IDEMPOTENCY_IN_PROGRESS',
+  // 413, 415
+  PAYLOAD_TOO_LARGE: 'PAYLOAD_TOO_LARGE',
+  UNSUPPORTED_MEDIA_TYPE: 'UNSUPPORTED_MEDIA_TYPE',
+  // 422
+  IDEMPOTENCY_KEY_REUSED: 'IDEMPOTENCY_KEY_REUSED',
+  // 423
+  ACCESS_PAUSED: 'ACCESS_PAUSED',
+  // 426
+  APP_UPDATE_REQUIRED: 'APP_UPDATE_REQUIRED',
+  // 429
+  RATE_LIMITED: 'RATE_LIMITED',
+  // 5xx
+  INTERNAL_ERROR: 'INTERNAL_ERROR',
+  SERVICE_UNAVAILABLE: 'SERVICE_UNAVAILABLE',
+} as const;
+
+export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
+
+/** Field-level validation codes used inside `errors[]` (API design 8). */
+export const FieldErrorCode = {
+  REQUIRED: 'REQUIRED',
+  FIELD_NOT_ALLOWED: 'FIELD_NOT_ALLOWED',
+  INVALID_TYPE: 'INVALID_TYPE',
+  INVALID_FORMAT: 'INVALID_FORMAT',
+  TOO_SHORT: 'TOO_SHORT',
+  TOO_LONG: 'TOO_LONG',
+  OUT_OF_RANGE: 'OUT_OF_RANGE',
+  INVALID_VALUE: 'INVALID_VALUE',
+} as const;
+
+export type FieldErrorCode = (typeof FieldErrorCode)[keyof typeof FieldErrorCode];
+
+/** Success codes shared across modules. */
+export const ResultCode = {
+  OK: 'OK',
+  CREATED: 'CREATED',
+  ACCEPTED: 'ACCEPTED',
+} as const;
