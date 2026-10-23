@@ -22,9 +22,11 @@ import { createValidationPipe, TrimStringsPipe } from './validation/validation.j
     { provide: Clock, useClass: SystemClock },
     { provide: AccessTokenVerifier, useClass: RejectAllAccessTokenVerifier },
     PolicyRegistry,
-    { provide: APP_GUARD, useClass: ContentTypeGuard },
+    // Order matters: a client too old to work gets 426 first, then who is
+    // calling (401/403) is settled before what they sent (415).
     { provide: APP_GUARD, useClass: AppVersionGuard },
     { provide: APP_GUARD, useClass: PolicyGuard },
+    { provide: APP_GUARD, useClass: ContentTypeGuard },
     { provide: APP_PIPE, useClass: TrimStringsPipe },
     { provide: APP_PIPE, useFactory: createValidationPipe },
     { provide: APP_INTERCEPTOR, useClass: ResponseEnvelopeInterceptor },

@@ -61,10 +61,11 @@ export class AllExceptionsFilter implements ExceptionFilter {
       statusCode: normalised.status,
       code: normalised.code,
       message: normalised.message ?? message(normalised.code, ctx?.language),
-      data: null,
+      // Details such as `attemptsLeft`, `reason` or `storeUrl` go in `data`, so
+      // they can never overwrite an envelope key (API design 8).
+      data: normalised.details ?? null,
       meta: null,
       ...(normalised.errors?.length ? { errors: normalised.errors } : {}),
-      ...normalised.details,
       requestId: ctx?.requestId ?? '',
     };
 
@@ -75,6 +76,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       );
     }
     response.setHeader('Cache-Control', 'no-store');
+    response.locals['code'] = body.code;
     response.status(normalised.status).json(body);
   }
 

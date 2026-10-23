@@ -1,5 +1,39 @@
 import type { ValidationError } from '@nestjs/common';
+import {
+  ArrayMaxSize,
+  IsInt,
+  IsNotEmpty,
+  IsString,
+  Length,
+  Max,
+  MaxLength,
+  validate,
+} from 'class-validator';
+import { AppException } from '../http/app-exception.js';
 import { TrimStringsPipe, toFieldErrors } from './validation.js';
+
+class LimitsDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(20)
+  name!: unknown;
+
+  @IsInt()
+  @Max(100)
+  score!: unknown;
+
+  @IsString()
+  @Length(2, 100)
+  q!: unknown;
+
+  @ArrayMaxSize(5)
+  tags!: unknown;
+}
+
+async function errorsFor(values: Partial<Record<keyof LimitsDto, unknown>>) {
+  const dto = Object.assign(new LimitsDto(), { name: 'x', score: 1, q: 'ab', tags: [] }, values);
+  return toFieldErrors(await validate(dto, { validationError: { target: true, value: false } }));
+}
 
 describe('toFieldErrors', () => {
   it('maps constraints to field codes and builds JSON paths', () => {
@@ -63,6 +97,28 @@ describe('toFieldErrors', () => {
   });
 });
 
+describe('toFieldErrors with real decorators', () => {
+  it('reports a wrong type as INVALID_TYPE before any length rule', async () => {
+    const errors = await errorsFor({ name: 123 });
+    expect(errors).toEqual([expect.objectContaining({ field: 'name', code: 'INVALID_TYPE' })]);
+  });
+
+  it('carries the limit as params (API design 12.1)', async () => {
+    const errors = await errorsFor({
+      name: 'x'.repeat(21),
+      score: 101,
+      q: 'a',
+      tags: [1, 2, 3, 4, 5, 6],
+    });
+    expect(errors.map(({ field, code, params }) => ({ field, code, params }))).toEqual([
+      { field: 'name', code: 'TOO_LONG', params: { max: 20 } },
+      { field: 'score', code: 'OUT_OF_RANGE', params: { max: 100 } },
+      { field: 'q', code: 'TOO_SHORT', params: { min: 2 } },
+      { field: 'tags', code: 'TOO_MANY', params: { max: 5 } },
+    ]);
+  });
+});
+
 describe('TrimStringsPipe', () => {
   const pipe = new TrimStringsPipe();
 
@@ -76,5 +132,24 @@ describe('TrimStringsPipe', () => {
 
   it('leaves route params alone', () => {
     expect(pipe.transform(' id ', { type: 'param' })).toBe(' id ');
+  });
+});
+
+describe('TrimStringsPipe reserved keys', () => {
+  const pipe = new TrimStringsPipe();
+
+  it('refuses __proto__ and constructor keys, with their paths', () => {
+    const body = JSON.parse('{"name":"x","__proto__":{"a":1},"items":[{"constructor":1}]}');
+    let thrown: unknown;
+    try {
+      pipe.transform(body, { type: 'body' });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(AppException);
+    expect((thrown as AppException).options.errors?.map((e) => [e.field, e.code])).toEqual([
+      ['__proto__', 'FIELD_NOT_ALLOWED'],
+      ['items[0].constructor', 'FIELD_NOT_ALLOWED'],
+    ]);
   });
 });

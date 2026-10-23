@@ -13,7 +13,7 @@ export interface AppExceptionOptions {
   /** Overrides the catalogue message for this code. Must be safe to show a user. */
   message?: string;
   errors?: FieldError[];
-  /** Extra fields merged into the envelope, e.g. `attemptsLeft` or `reason`. */
+  /** Sent as the error's `data`, e.g. `attemptsLeft` or `reason`. */
   details?: Record<string, unknown>;
   /** Seconds; sets the `Retry-After` header (429, 423, 503). */
   retryAfterSeconds?: number;

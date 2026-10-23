@@ -62,10 +62,9 @@ export class PolicyGuard implements CanActivate {
     return true;
   }
 
+  /** Exactly `Bearer <token>`; anything else is no token at all. */
   private bearerToken(request: Request): string | null {
-    const header = request.header('authorization');
-    if (!header) return null;
-    const [scheme, token] = header.split(' ');
-    return scheme?.toLowerCase() === 'bearer' && token ? token : null;
+    const match = /^Bearer ([^\s]+)$/i.exec(request.header('authorization') ?? '');
+    return match?.[1] ?? null;
   }
 }

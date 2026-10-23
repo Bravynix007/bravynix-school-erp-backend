@@ -9,17 +9,17 @@ code comments point into them.
 
 ## Stack
 
-| Concern    | Choice                                                                          |
-| ---------- | ------------------------------------------------------------------------------- |
-| Runtime    | Node.js 24, TypeScript 6, ES modules                                            |
-| Framework  | NestJS 12 (Express)                                                             |
-| Database   | PostgreSQL 16, [Kysely](https://kysely.dev) query builder, versioned migrations |
-| Validation | class-validator DTOs; unknown fields are rejected                               |
-| Config     | zod-validated environment variables; the app refuses to boot on a bad value     |
-| Logging    | pino JSON lines with request IDs; no headers or bodies are logged               |
-| API docs   | OpenAPI generated from the code                                                 |
-| Tests      | Vitest (unit, e2e through the full HTTP stack, integration on a real database)  |
-| Lint       | oxlint, Prettier, dependency-cruiser for module boundaries                      |
+| Concern    | Choice                                                                           |
+| ---------- | -------------------------------------------------------------------------------- |
+| Runtime    | Node.js 24, TypeScript 6, ES modules                                             |
+| Framework  | NestJS 12 (Express)                                                              |
+| Database   | PostgreSQL 16, [Kysely](https://kysely.dev) query builder, versioned migrations  |
+| Validation | class-validator DTOs; unknown fields are rejected                                |
+| Config     | zod-validated environment variables; the app refuses to boot on a bad value      |
+| Logging    | pino JSON lines with request IDs and route templates; no URLs, headers or bodies |
+| API docs   | OpenAPI generated from the code                                                  |
+| Tests      | Vitest (unit, e2e through the full HTTP stack, integration on a real database)   |
+| Lint       | oxlint, Prettier, dependency-cruiser for module boundaries                       |
 
 ## Getting started
 

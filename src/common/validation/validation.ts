@@ -5,6 +5,7 @@ import {
   type PipeTransform,
   type ValidationError,
 } from '@nestjs/common';
+import { getMetadataStorage } from 'class-validator';
 import { AppException, type FieldError } from '../http/app-exception.js';
 import { FieldErrorCode } from '../http/error-codes.js';
 import { message } from '../i18n/messages.js';
@@ -58,8 +59,51 @@ function lengthCode(constraint: string, text: string | undefined): string | unde
   return text?.includes('longer than') ? FieldErrorCode.TOO_SHORT : FieldErrorCode.TOO_LONG;
 }
 
-/** The order in which a field's failed constraints are reported; first wins. */
-const PRIORITY = ['whitelistValidation', 'isDefined', 'isNotEmpty'];
+/**
+ * The order in which a field's failed constraints are reported; first wins.
+ * A wrong type comes straight after a missing value, so `{"name": 123}` is
+ * INVALID_TYPE rather than whichever length rule happened to fail too.
+ */
+const PRIORITY = [
+  'whitelistValidation',
+  'isDefined',
+  'isNotEmpty',
+  'isString',
+  'isInt',
+  'isNumber',
+  'isBoolean',
+  'isArray',
+  'isObject',
+];
+
+/** The limit a failed constraint carries, as `params` (API design 8, 12.1). */
+const PARAMS: Record<string, (args: unknown[], code: string) => Record<string, unknown>> = {
+  minLength: ([min]) => ({ min }),
+  maxLength: ([max]) => ({ max }),
+  isLength: ([min, max], code) =>
+    code === FieldErrorCode.TOO_SHORT ? { min } : max === undefined ? {} : { max },
+  min: ([min]) => ({ min }),
+  max: ([max]) => ({ max }),
+  arrayMinSize: ([min]) => ({ min }),
+  arrayMaxSize: ([max]) => ({ max }),
+};
+
+/** Looks up the arguments a decorator was given, e.g. 20 for `@MaxLength(20)`. */
+function constraintArgs(error: ValidationError, name: string): unknown[] | undefined {
+  const target: unknown = error.target;
+  if (!target || typeof target !== 'object') return undefined;
+  return getMetadataStorage()
+    .getTargetValidationMetadatas(target.constructor, '', true, false)
+    .find((meta) => meta.propertyName === error.property && meta.name === name)?.constraints;
+}
+
+function paramsFor(error: ValidationError, name: string, code: string) {
+  const build = PARAMS[name];
+  const args = build && constraintArgs(error, name);
+  if (!build || !args) return undefined;
+  const params = build(args, code);
+  return Object.keys(params).length ? params : undefined;
+}
 
 export function toFieldErrors(errors: ValidationError[], parentPath = ''): FieldError[] {
   const language = RequestContext.current()?.language;
@@ -80,7 +124,13 @@ export function toFieldErrors(errors: ValidationError[], parentPath = ''): Field
           lengthCode(first, error.constraints[first]) ??
           CONSTRAINT_TO_CODE[first] ??
           FieldErrorCode.INVALID_VALUE;
-        result.push({ field: path, code, message: message(code, language) });
+        const params = paramsFor(error, first, code);
+        result.push({
+          field: path,
+          code,
+          message: message(code, language),
+          ...(params ? { params } : {}),
+        });
       }
     }
     if (error.children?.length) result.push(...toFieldErrors(error.children, path));
@@ -100,28 +150,55 @@ export function createValidationPipe(): ValidationPipe {
     forbidUnknownValues: true,
     transform: true,
     transformOptions: { enableImplicitConversion: false },
-    validationError: { target: false, value: false },
+    // The target is kept only to look up a constraint's limit for `params`;
+    // values never reach the error (they may be personal data).
+    validationError: { target: true, value: false },
     exceptionFactory: (errors) => AppException.validation(toFieldErrors(errors)),
   });
 }
 
-function trimDeep(value: unknown): unknown {
+/** Keys JSON.parse keeps but class-transformer drops without a word; refused like any unknown field. */
+const RESERVED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object') return false;
+  // Express 5 builds req.query with a null prototype, so both kinds count.
+  const proto: unknown = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+function trimDeep(value: unknown, path: string, refused: string[]): unknown {
   if (typeof value === 'string') return value.trim();
-  if (Array.isArray(value)) return value.map(trimDeep);
-  // Express 5 builds req.query with a null prototype, so both kinds of plain object count.
-  const proto: unknown =
-    value && typeof value === 'object' ? Object.getPrototypeOf(value) : undefined;
-  if (value && typeof value === 'object' && (proto === Object.prototype || proto === null)) {
-    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, trimDeep(v)]));
+  if (Array.isArray(value)) return value.map((item, i) => trimDeep(item, `${path}[${i}]`, refused));
+  if (isPlainObject(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => {
+        const at = path ? `${path}.${key}` : key;
+        if (RESERVED_KEYS.has(key)) refused.push(at);
+        return [key, trimDeep(item, at, refused)];
+      }),
+    );
   }
   return value;
 }
 
-/** Trims every string in the body and query before validation (API design 7.4). */
+/**
+ * Trims every string in the body and query before validation, and refuses
+ * `__proto__`, `constructor` and `prototype` keys (API design 7.4).
+ */
 @Injectable()
 export class TrimStringsPipe implements PipeTransform {
   transform(value: unknown, metadata: ArgumentMetadata): unknown {
-    if (metadata.type === 'body' || metadata.type === 'query') return trimDeep(value);
-    return value;
+    if (metadata.type !== 'body' && metadata.type !== 'query') return value;
+    const refused: string[] = [];
+    const trimmed = trimDeep(value, '', refused);
+    if (refused.length) {
+      const language = RequestContext.current()?.language;
+      const code = FieldErrorCode.FIELD_NOT_ALLOWED;
+      throw AppException.validation(
+        refused.map((field) => ({ field, code, message: message(code, language) })),
+      );
+    }
+    return trimmed;
   }
 }

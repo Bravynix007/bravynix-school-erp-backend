@@ -2,10 +2,11 @@ import '../bootstrap/load-env.js';
 import { Kysely, PostgresDialect, sql } from 'kysely';
 import { createPool } from '../platform/database/database.service.js';
 import { children, institutions, personas, societies } from '../seeds/two-worlds.js';
+import { assertSeedable } from './seed-guard.js';
 
 /**
  * `npm run db:seed [scenario]` writes a named data set into a local or test
- * database. Refused in staging and production.
+ * database. Refused in staging and production, and for any non-local host.
  *
  * Each module that owns tables registers a writer here as it is built; until
  * the Identity and Tenancy modules exist, the two-worlds scenario only checks
@@ -20,11 +21,9 @@ const writers: SeedWriter[] = [
 async function main(): Promise<void> {
   const scenario = process.argv[2] ?? 'two-worlds';
   if (scenario !== 'two-worlds') throw new Error(`Unknown scenario "${scenario}"`);
-  if (['staging', 'production'].includes(process.env.NODE_ENV ?? '')) {
-    throw new Error('Seeding is refused in staging and production');
-  }
   const url = process.env.DATABASE_MIGRATION_URL ?? process.env.DATABASE_URL;
   if (!url) throw new Error('Set DATABASE_MIGRATION_URL (or DATABASE_URL)');
+  assertSeedable(url, process.env.NODE_ENV);
 
   const db = new Kysely<unknown>({
     dialect: new PostgresDialect({ pool: createPool(url, 1, 60_000) }),

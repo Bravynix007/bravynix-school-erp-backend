@@ -174,10 +174,11 @@ describe('HTTP stack', () => {
       expect(JSON.stringify(res.body)).not.toMatch(/students_pkey|\/srv\/app|stack/);
     });
 
-    it('sets Retry-After and merges details', async () => {
+    it('sets Retry-After and sends details as data', async () => {
       const res = await request(http).get('/v1/fixtures/limited').expect(429);
       expect(res.headers['retry-after']).toBe('43');
-      expect(res.body).toMatchObject({ code: 'OTP_RESEND_TOO_SOON', attemptsLeft: 2 });
+      expect(res.body).toMatchObject({ code: 'OTP_RESEND_TOO_SOON', data: { attemptsLeft: 2 } });
+      expect(res.body).not.toHaveProperty('attemptsLeft');
     });
 
     it('translates catalogue messages from Accept-Language, falling back to English', async () => {

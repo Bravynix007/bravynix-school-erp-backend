@@ -9,6 +9,8 @@ import { ErrorCode, FieldErrorCode } from '../http/error-codes.js';
 
 export const DEFAULT_LIMIT = 20;
 export const MAX_LIMIT = 100;
+/** Keeps OFFSET small enough for PostgreSQL to answer quickly (API design 13.1). */
+export const MAX_PAGE = 10_000;
 
 /** Query parameters for page-mode lists (API design 13.1). */
 export class PageQueryDto {
@@ -16,6 +18,7 @@ export class PageQueryDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
+  @Max(MAX_PAGE)
   page: number = 1;
 
   @IsOptional()

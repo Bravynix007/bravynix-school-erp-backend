@@ -12,6 +12,11 @@ function parseVersion(value: string): [number, number, number] | null {
   return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
 }
 
+/** A store build always sends `major.minor.patch`, optionally with `+build`. */
+export function isReadableVersion(version: string): boolean {
+  return parseVersion(version) !== null;
+}
+
 export function isOlderThan(version: string, minimum: string): boolean {
   const a = parseVersion(version);
   const b = parseVersion(minimum);
@@ -45,7 +50,8 @@ export class AppVersionGuard implements CanActivate {
         : platform === 'ios'
           ? [env.MIN_APP_VERSION_IOS, env.APP_STORE_URL]
           : [undefined, undefined];
-    if (minimum && isOlderThan(version, minimum)) {
+    // A version the API cannot read is treated as too old: it is not a store build.
+    if (minimum && (!isReadableVersion(version) || isOlderThan(version, minimum))) {
       throw new AppException(UPGRADE_REQUIRED, ErrorCode.APP_UPDATE_REQUIRED, {
         details: { storeUrl: storeUrl ?? null, minimumVersion: minimum },
       });
