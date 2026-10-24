@@ -10,6 +10,11 @@ export default defineConfig({
       include: ['src/**/*.ts'],
       exclude: ['src/**/*.spec.ts', 'src/main.ts', 'src/cli/**', 'src/**/migrations/**'],
       reporter: ['text-summary', 'lcov'],
+      // The floor the QA strategy sets (section 10), so a new module cannot
+      // pull the total down unnoticed. Per-folder branch thresholds are added
+      // as auth, fees, attendance and marks land: those business-rule
+      // branches must be covered in full.
+      thresholds: { statements: 80, lines: 80 },
     },
   },
 });

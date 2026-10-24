@@ -37,19 +37,19 @@ Mail sent locally lands in Mailpit at http://localhost:8025.
 
 ## Scripts
 
-| Script                                           | What it does                                                                               |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------ |
-| `start:dev`                                      | Runs the API with reload                                                                   |
-| `build`, `start:prod`                            | Compiles to `dist/` and runs it                                                            |
-| `test`                                           | Unit tests (`src/**/*.spec.ts`)                                                            |
-| `test:cov`                                       | Unit and e2e suites in one run, with merged coverage                                       |
-| `test:e2e`                                       | HTTP tests through the full stack (`test/e2e`)                                             |
-| `test:int`                                       | Integration tests on PostgreSQL (`test/integration`)                                       |
-| `lint`, `lint:boundaries`, `typecheck`, `format` | Static checks                                                                              |
-| `db:migrate`, `db:migrate:down`                  | Applies or rolls back migrations (migration user)                                          |
-| `db:seed [scenario]`                             | Writes test data; refused in staging and production                                        |
-| `openapi`                                        | Writes `openapi.json`                                                                      |
-| `policies`                                       | Writes `policies.json`: every endpoint with its role policy, for QA's authorization matrix |
+| Script                                           | What it does                                                                                 |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| `start:dev`                                      | Runs the API with reload                                                                     |
+| `build`, `start:prod`                            | Compiles to `dist/` and runs it                                                              |
+| `test`                                           | Unit tests (`src/**/*.spec.ts`)                                                              |
+| `test:cov`                                       | Unit and e2e suites in one run, with merged coverage; fails under 80% of lines or statements |
+| `test:e2e`                                       | HTTP tests through the full stack (`test/e2e`)                                               |
+| `test:int`                                       | Integration tests on PostgreSQL (`test/integration`)                                         |
+| `lint`, `lint:boundaries`, `typecheck`, `format` | Static checks                                                                                |
+| `db:migrate`, `db:migrate:down`                  | Applies or rolls back migrations (migration user)                                            |
+| `db:seed [scenario]`                             | Writes test data; refused in staging and production                                          |
+| `openapi`                                        | Writes `openapi.json`                                                                        |
+| `policies`                                       | Writes `policies.json`: every endpoint with its role policy, for QA's authorization matrix   |
 
 ## Layout
 
