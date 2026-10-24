@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Lint, types, unit and e2e tests with coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run lint
+      - run: npm run lint:boundaries
+      - run: npm run typecheck
+      # Coverage over the unit and e2e suites together (QA strategy 10).
+      - run: npm run test:cov
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-unit-e2e
+          path: coverage/lcov.info
+          retention-days: 7
+      - run: npm run build
+      - name: Every endpoint declares a policy; export the OpenAPI and policy files
+        run: |
+          node dist/cli/policies.js policies.json
+          node dist/cli/openapi.js openapi.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: api-contract
+          path: |
+            openapi.json
+            policies.json
+
+  database:
+    name: E2E and integration tests (PostgreSQL 16)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      TEST_DATABASE_URL: postgres://erp_app:erp_app@localhost:5432/school_erp_test
+      TEST_DATABASE_MIGRATION_URL: postgres://erp_migrator:erp_migrator@localhost:5432/school_erp_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Create the database users and databases
+        run: psql postgres://postgres:postgres@localhost:5432/postgres -v ON_ERROR_STOP=1 -f docker/postgres/init.sql
+      - run: npm run test:int
+      - run: npm run test:e2e
+
+  docker:
+    name: Container image builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: bravynix-school-erp-backend:ci
