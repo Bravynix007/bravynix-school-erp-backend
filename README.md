@@ -14,7 +14,7 @@ code comments point into them.
 | Runtime    | Node.js 24, TypeScript 6, ES modules                                             |
 | Framework  | NestJS 12 (Express)                                                              |
 | Database   | PostgreSQL 16, [Kysely](https://kysely.dev) query builder, versioned migrations  |
-| Validation | class-validator DTOs; unknown fields are rejected                                |
+| Validation | class-validator DTOs; unknown fields are rejected; bodies are never type-coerced |
 | Config     | zod-validated environment variables; the app refuses to boot on a bad value      |
 | Logging    | pino JSON lines with request IDs and route templates; no URLs, headers or bodies |
 | API docs   | OpenAPI generated from the code                                                  |
@@ -41,7 +41,8 @@ Mail sent locally lands in Mailpit at http://localhost:8025.
 | ------------------------------------------------ | ------------------------------------------------------------------------------------------ |
 | `start:dev`                                      | Runs the API with reload                                                                   |
 | `build`, `start:prod`                            | Compiles to `dist/` and runs it                                                            |
-| `test`, `test:cov`                               | Unit tests (`src/**/*.spec.ts`)                                                            |
+| `test`                                           | Unit tests (`src/**/*.spec.ts`)                                                            |
+| `test:cov`                                       | Unit and e2e suites in one run, with merged coverage                                       |
 | `test:e2e`                                       | HTTP tests through the full stack (`test/e2e`)                                             |
 | `test:int`                                       | Integration tests on PostgreSQL (`test/integration`)                                       |
 | `lint`, `lint:boundaries`, `typecheck`, `format` | Static checks                                                                              |

@@ -6,6 +6,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   resolve: { tsconfigPaths: true },
   test: {
+    name: 'int',
     globals: true,
     root: './',
     include: ['test/integration/**/*.int-spec.ts'],

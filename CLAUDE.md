@@ -8,6 +8,9 @@ Read `README.md` first; its "Rules every change follows" section is binding.
 - New endpoint checklist: DTO with class-validator, `@Policy` or `@Public`, envelope via
   return value or `ApiResult`, errors via `AppException` with a stable code, unit tests for
   rules, an e2e or integration test for the endpoint.
+- Body DTOs never carry `@Type(() => Number)` or any other transform of a primitive: JSON
+  already has types, and a converted `"5"` would pass where the contract wants 400
+  `INVALID_TYPE` (API design 12.1). Query DTOs do need it, because query values are strings.
 - New table checklist: migration file in the owning module, registered in
   `src/platform/database/migrations/index.ts`; standard columns (DDD 5.2); `society_id` /
   `institution_id` on tenant rows; row-level security policy using `app_current_*()`;

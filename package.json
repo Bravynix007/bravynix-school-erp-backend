@@ -21,7 +21,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:cov": "vitest run --coverage",
+    "test:cov": "vitest run --config ./vitest.config.cov.ts --coverage",
     "test:e2e": "vitest run --config ./vitest.config.e2e.ts",
     "test:int": "vitest run --config ./vitest.config.int.ts",
     "db:migrate": "tsx src/cli/migrate.ts latest",

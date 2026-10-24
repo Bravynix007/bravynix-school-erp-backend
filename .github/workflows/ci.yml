@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   checks:
-    name: Lint, types, unit tests
+    name: Lint, types, unit and e2e tests with coverage
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -28,7 +28,13 @@ jobs:
       - run: npm run lint
       - run: npm run lint:boundaries
       - run: npm run typecheck
+      # Coverage over the unit and e2e suites together (QA strategy 10).
       - run: npm run test:cov
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-unit-e2e
+          path: coverage/lcov.info
+          retention-days: 7
       - run: npm run build
       - name: Every endpoint declares a policy; export the OpenAPI and policy files
         run: |

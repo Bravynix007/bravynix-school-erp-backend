@@ -9,7 +9,6 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import { Type } from 'class-transformer';
 import { Policy, Public } from '../../src/common/auth/policy.decorator.js';
 import { RoleCode } from '../../src/common/auth/roles.js';
 import { ApiResult } from '../../src/common/http/api-result.js';
@@ -28,8 +27,10 @@ class EchoDto {
   @IsEmail()
   email?: string;
 
+  // No @Type here: a body is JSON, which already has numbers, so "5" must
+  // fail as INVALID_TYPE (API design 12.1). @Type belongs on query DTOs only,
+  // where every value arrives as a string.
   @IsOptional()
-  @Type(() => Number)
   @IsInt()
   @Min(0)
   @Max(100)

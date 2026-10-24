@@ -80,6 +80,14 @@ describe('HTTP stack', () => {
       expect(res.body).toMatchObject({ statusCode: 200, code: 'OK', data: { ok: true } });
     });
 
+    it('refuses a numeric string in a body as INVALID_TYPE, never coercing it', async () => {
+      const res = await request(http).post('/v1/fixtures/echo').send({ name: 'Asha', score: '5' });
+      expect(res.status).toBe(400);
+      expect(res.body.errors).toContainEqual(
+        expect.objectContaining({ field: 'score', code: 'INVALID_TYPE' }),
+      );
+    });
+
     it('trims query strings, which Express 5 parses with a null prototype', async () => {
       const res = await request(http).get('/v1/fixtures/page?q=%20%20vidya%20').expect(200);
       expect(res.body.data.q).toBe('vidya');

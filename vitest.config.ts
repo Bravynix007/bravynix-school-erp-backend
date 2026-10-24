@@ -4,15 +4,12 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   resolve: { tsconfigPaths: true },
   test: {
+    name: 'unit',
     globals: true,
     root: './',
     include: ['src/**/*.spec.ts'],
     setupFiles: ['./test/support/setup-env.ts'],
-    coverage: {
-      provider: 'v8',
-      include: ['src/**/*.ts'],
-      exclude: ['src/**/*.spec.ts', 'src/main.ts', 'src/cli/**', 'src/**/migrations/**'],
-      reporter: ['text-summary', 'lcov'],
-    },
+    // Coverage is measured over the unit and e2e suites together: see
+    // vitest.config.cov.ts, which `npm run test:cov` uses.
   },
 });
