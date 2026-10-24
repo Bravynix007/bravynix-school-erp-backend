@@ -2,7 +2,7 @@ import { HttpStatus, Injectable, type CanActivate, type ExecutionContext } from 
 import type { Request } from 'express';
 import { AppException } from './app-exception.js';
 import { ErrorCode } from './error-codes.js';
-import { isNonUtf8Json, parseMediaType } from './media-type.js';
+import { mediaTypeOf } from './media-type.js';
 
 const BODY_METHODS = new Set(['POST', 'PUT', 'PATCH']);
 
@@ -24,8 +24,7 @@ export class ContentTypeGuard implements CanActivate {
 
     // The JSON middleware has already refused JSON in any other charset;
     // this refuses every other media type.
-    const type = parseMediaType(request.header('content-type'));
-    if (type.mime !== 'application/json' || isNonUtf8Json(type)) {
+    if (mediaTypeOf(request.header('content-type')) !== 'application/json') {
       throw new AppException(HttpStatus.UNSUPPORTED_MEDIA_TYPE, ErrorCode.UNSUPPORTED_MEDIA_TYPE);
     }
     return true;

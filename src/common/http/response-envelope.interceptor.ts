@@ -49,7 +49,9 @@ export class ResponseEnvelopeInterceptor implements NestInterceptor {
     const status =
       result.options.status ??
       (declared === undefined || declared === HttpStatus.NO_CONTENT ? HttpStatus.OK : declared);
-    // The adapter sets the HTTP status from the marked envelope.
+    // The adapter sets the HTTP status from the marked envelope; setting it
+    // here too keeps it if a later interceptor copies the body.
+    response.status(status);
     if (!response.getHeader('Cache-Control')) response.setHeader('Cache-Control', 'no-store');
     const code = result.options.code ?? ResultCode.OK;
     return markEnvelope({

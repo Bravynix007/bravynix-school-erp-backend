@@ -96,15 +96,19 @@ function valueOf(owner: Owner, property: string): unknown {
 
 /**
  * `@Length(min, max)` reports one constraint for both ends. The value's length
- * against `min` says which end failed; without the value, class-validator's
+ * against `min` says which end failed, item by item for `{ each: true }`; without the value, class-validator's
  * default message does ("longer than" means the value is too short).
  */
 function lengthCode(error: ValidationError, owner: Owner, constraint: string): string | undefined {
   if (constraint !== 'isLength') return undefined;
   const value = valueOf(owner, error.property);
   const [min] = constraintArgs(owner, error.property, constraint) ?? [];
-  if (typeof value === 'string' && typeof min === 'number') {
-    return value.length < min ? FieldErrorCode.TOO_SHORT : FieldErrorCode.TOO_LONG;
+  // With `{ each: true }` the value is the list; any item under `min` failed short.
+  const items = Array.isArray(value) ? value : [value];
+  if (typeof min === 'number' && items.every((item) => typeof item === 'string')) {
+    return items.some((item: string) => item.length < min)
+      ? FieldErrorCode.TOO_SHORT
+      : FieldErrorCode.TOO_LONG;
   }
   return error.constraints?.[constraint]?.includes('longer than')
     ? FieldErrorCode.TOO_SHORT

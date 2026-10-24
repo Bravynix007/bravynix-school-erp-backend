@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Request, Response } from 'express';
+import { API_PREFIX } from '../../bootstrap/routes.js';
 import type { AuthenticatedRequest } from '../auth/policy.guard.js';
 import { RequestContext, type RequestContextData } from '../request-context/request-context.js';
 import { CONTEXT_LOCAL } from '../request-context/request-id.middleware.js';
@@ -10,29 +11,31 @@ function header(req: IncomingMessage, name: string): string | undefined {
   return typeof value === 'string' ? value.slice(0, 20) : undefined;
 }
 
-/** The route Nest's Express adapter mounts under the global prefix to answer 404s. */
-const NOT_FOUND_ROUTE = '*path';
-
 /**
  * The route template (`/v1/students/:studentId`), never the filled path or
  * query, which can hold names, emails and phone numbers (API design 20.2).
- * Unmatched requests, including those Nest's 404 catch-all answers, have none.
+ * Unmatched requests have none. No route of ours has a wildcard, so a
+ * wildcard route is a catch-all, such as the one Nest mounts to answer 404s.
  */
 export function routeTemplate(req: IncomingMessage): string | undefined {
   const { route, baseUrl } = req as Request;
   const path: unknown = route?.path;
-  if (typeof path !== 'string' || path === NOT_FOUND_ROUTE) return undefined;
+  if (typeof path !== 'string' || path.includes('*')) return undefined;
   return `${baseUrl ?? ''}${path}`;
 }
 
-/** A path segment that reads as a word (`v1`, `wp-admin`); anything else may be data. */
-const WORD = /^[a-z][a-z0-9-]{0,39}$/i;
+/**
+ * Leading segments known to be ours: the version prefix and the health
+ * checks. Any other segment, even one that reads as a word, may be a name
+ * or a token (`/v1/students/ananya-rao`), so it is never logged.
+ */
+const KNOWN_FIRST_SEGMENTS = new Set([API_PREFIX, 'health']);
 const MAX_SEGMENTS = 6;
 
 /**
- * The path of an unmatched request (a 404 or a scan), without its query and
- * with every segment that is not a plain word replaced by `:value`, so an
- * email, phone number or ID never reaches the log (SDD 17.1).
+ * The path of an unmatched request (a 404 or a scan), without its query:
+ * a known first segment, then `:value` for every other segment, so an
+ * email, phone number, name or ID never reaches the log (SDD 17.1).
  */
 export function sanitisedPath(req: IncomingMessage): string {
   // Express shortens req.url inside a mounted router; originalUrl is the full path.
@@ -41,7 +44,9 @@ export function sanitisedPath(req: IncomingMessage): string {
   const segments = path.split('/').filter(Boolean);
   const shown = segments
     .slice(0, MAX_SEGMENTS)
-    .map((segment) => (WORD.test(segment) ? segment : ':value'));
+    .map((segment, index) =>
+      index === 0 && KNOWN_FIRST_SEGMENTS.has(segment) ? segment : ':value',
+    );
   if (segments.length > MAX_SEGMENTS) shown.push('…');
   return `/${shown.join('/')}`;
 }

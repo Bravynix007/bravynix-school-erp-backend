@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { LoggerModule } from 'nestjs-pino';
 import type { Options } from 'pino-http';
 import { CommonModule } from './common/common.module.js';
+import { JsonBodyModule } from './common/http/json-body.module.js';
 import { LogDestination, LogDestinationModule } from './common/logging/log-destination.js';
 import { requestLogProps, serializeRequest } from './common/logging/request-log.js';
 import { AppConfig, AppConfigModule } from './config/app-config.js';
@@ -28,8 +29,10 @@ import { EmailModule } from './platform/email/email.module.js';
           },
           customProps: requestLogProps,
           // A 5xx is an error to look at; the exception filter has already
-          // logged its cause with the same request ID.
-          customLogLevel: (_req, res, error) => (error || res.statusCode >= 500 ? 'error' : 'info'),
+          // logged its cause with the same request ID. A client that hung up,
+          // common on mobile networks, is only a warning.
+          customLogLevel: (_req, res, error) =>
+            res.statusCode >= 500 ? 'error' : error ? 'warn' : 'info',
           // Never log tokens, cookies or bodies (SDD 17.1, QA strategy 4).
           redact: {
             paths: [
@@ -50,6 +53,7 @@ import { EmailModule } from './platform/email/email.module.js';
       },
     }),
     CommonModule,
+    JsonBodyModule,
     DatabaseModule,
     EmailModule,
     HealthModule,

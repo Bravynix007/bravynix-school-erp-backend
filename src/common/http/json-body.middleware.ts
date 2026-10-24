@@ -2,7 +2,6 @@ import { HttpStatus } from '@nestjs/common';
 import express, { type RequestHandler } from 'express';
 import { AppException } from './app-exception.js';
 import { ErrorCode } from './error-codes.js';
-import { isNonUtf8Json, parseMediaType } from './media-type.js';
 
 /** Errors body-parser raises, by their `type` (see the body-parser README). */
 const PARSER_ERRORS: Record<string, [HttpStatus, string]> = {
@@ -51,24 +50,25 @@ export function nestsDeeperThan(body: Uint8Array, max: number): boolean {
  * Parses JSON bodies up to `limit` (1 MB) and `MAX_JSON_DEPTH` levels
  * (API design 7.4), and turns parser failures into `AppException`s, so they
  * reach the global filter with their own codes instead of a generic 400.
- * JSON in any charset but UTF-8 is refused before parsing (API design 7.2):
+ * JSON in any charset but UTF-8 is refused before decoding (API design 7.2):
  * body-parser would decode `utf-16`, and the depth scan reads UTF-8 bytes.
+ * The check uses the charset body-parser itself read from the header, and
+ * runs only when there is a body to decode.
  */
 export function jsonBodyMiddleware(limit: string): RequestHandler {
   const parse = express.json({
     limit,
     strict: true,
-    verify: (_req, _res, body) => {
+    verify: (_req, _res, body, encoding) => {
+      if (encoding !== 'utf-8') {
+        throw Object.assign(new Error('JSON must be UTF-8'), { type: 'charset.unsupported' });
+      }
       if (nestsDeeperThan(body, MAX_JSON_DEPTH)) {
         throw Object.assign(new Error('JSON nested too deeply'), { type: 'entity.too.deep' });
       }
     },
   });
   return (req, res, next) => {
-    if (isNonUtf8Json(parseMediaType(req.header('content-type')))) {
-      next(new AppException(HttpStatus.UNSUPPORTED_MEDIA_TYPE, ErrorCode.UNSUPPORTED_MEDIA_TYPE));
-      return;
-    }
     parse(req, res, (error?: unknown) => {
       if (!error) return next();
       const type = (error as { type?: string }).type ?? '';

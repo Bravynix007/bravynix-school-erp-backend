@@ -118,6 +118,25 @@ describe('HTTP stack', () => {
       expect(res.body).toMatchObject({ success: false, code: 'UNSUPPORTED_MEDIA_TYPE' });
     });
 
+    it.each([
+      ['spaces around the charset', 'application/json; charset = utf-16le'],
+      ['a second charset after UTF-8', 'application/json; charset=utf-16le; charset=utf-8'],
+    ])('refuses UTF-16 JSON written with %s', async (_name, contentType) => {
+      const res = await request(http)
+        .post('/v1/fixtures/echo')
+        .set('Content-Type', contentType)
+        .send(Buffer.from('{"name":"Asha"}', 'utf16le'))
+        .expect(415);
+      expect(res.body).toMatchObject({ success: false, code: 'UNSUPPORTED_MEDIA_TYPE' });
+    });
+
+    it('ignores the charset of a request without a body', async () => {
+      await request(http)
+        .get('/v1/fixtures/page')
+        .set('Content-Type', 'application/json; charset=utf-16le')
+        .expect(200);
+    });
+
     it('keeps the status of a raw body that only looks like an envelope', async () => {
       const res = await request(http).get('/v1/fixtures/raw-lookalike').expect(200);
       expect(res.body).toEqual({ success: false, statusCode: 418, code: 'TEAPOT' });

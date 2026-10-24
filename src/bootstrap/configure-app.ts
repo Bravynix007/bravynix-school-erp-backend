@@ -1,7 +1,6 @@
 import { RequestMethod, type INestApplication } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import helmet from 'helmet';
-import { jsonBodyMiddleware } from '../common/http/json-body.middleware.js';
 import { requestIdMiddleware } from '../common/request-context/request-id.middleware.js';
 import { AppConfig } from '../config/app-config.js';
 import { API_PREFIX, UNPREFIXED_PATHS } from './routes.js';
@@ -42,8 +41,7 @@ export function configureApp(app: NestExpressApplication): INestApplication {
     exposedHeaders: ['X-Request-Id', 'Retry-After'],
     maxAge: 600,
   });
-  // JSON bodies are limited to 1 MB (API design 7.4).
-  app.use(jsonBodyMiddleware('1mb'));
+  // JSON bodies are parsed by JsonBodyModule, after the request logger.
   app.setGlobalPrefix(API_PREFIX, {
     exclude: UNPREFIXED_PATHS.map((path) => ({ path, method: RequestMethod.GET })),
   });

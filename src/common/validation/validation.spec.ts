@@ -4,6 +4,7 @@ import {
   ArrayMaxSize,
   IsInt,
   IsNotEmpty,
+  IsOptional,
   IsString,
   Length,
   Max,
@@ -54,6 +55,11 @@ class FamilyDto {
   @ValidateNested({ each: true })
   @Type(() => GuardianDto)
   guardians!: unknown;
+
+  @IsOptional()
+  @IsString({ each: true })
+  @Length(2, 4, { each: true, message: 'Each nickname must be longer than one letter' })
+  nicknames?: unknown;
 }
 
 async function pipeErrors(body: unknown) {
@@ -179,6 +185,13 @@ describe('the validation pipe', () => {
   it('decides too short or too long from the length, not the message', async () => {
     const error = await pipeErrors({ surname: 'x'.repeat(11), guardians: [] });
     expect(error.options.errors?.[0]).toMatchObject({ field: 'surname', code: 'TOO_LONG' });
+  });
+
+  it('decides it item by item for a list checked with each', async () => {
+    const tooLong = await pipeErrors({ surname: 'x', guardians: [], nicknames: ['Ani', 'Ananya'] });
+    expect(tooLong.options.errors?.[1]).toMatchObject({ field: 'nicknames', code: 'TOO_LONG' });
+    const tooShort = await pipeErrors({ surname: 'x', guardians: [], nicknames: ['Ani', 'A'] });
+    expect(tooShort.options.errors?.[1]).toMatchObject({ field: 'nicknames', code: 'TOO_SHORT' });
   });
 });
 

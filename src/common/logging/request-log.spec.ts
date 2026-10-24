@@ -38,13 +38,18 @@ describe('request log (API design 20.2)', () => {
   it('logs a sanitised path for an unmatched request', async () => {
     const props = await propsFor('/v1/people/ananya.rao@gmail.com/9876543210?q=x');
     expect(props.route).toBeUndefined();
-    expect(props.path).toBe('/v1/people/:value/:value');
+    expect(props.path).toBe('/v1/:value/:value/:value');
     expect(JSON.stringify(props)).not.toMatch(/ananya|9876543210/);
   });
 
+  it('logs only a known first segment, never a word that may be a name', async () => {
+    expect((await propsFor('/v1/pupils/ananya-rao')).path).toBe('/v1/:value/:value');
+    expect((await propsFor('/wp-admin/setup.php')).path).toBe('/:value/:value');
+  });
+
   it('caps a long unmatched path', async () => {
-    const props = await propsFor('/a/b/c/d/e/f/g/h');
-    expect(props.path).toBe('/a/b/c/d/e/f/…');
+    const props = await propsFor('/v1/b/c/d/e/f/g/h');
+    expect(props.path).toBe('/v1/:value/:value/:value/:value/:value/…');
   });
 
   it('adds nothing before the response is sent, so no field repeats', () => {

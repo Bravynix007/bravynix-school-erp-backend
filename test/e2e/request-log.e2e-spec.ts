@@ -99,7 +99,7 @@ describe('request log line (API design 20.2)', () => {
   it('logs the error code, and a sanitised path when no route matched', async () => {
     const res = await request(http).get('/v1/people/ananya.rao@gmail.com').expect(404);
     const line = await lineFor(res.body.requestId);
-    expect(line).toMatchObject({ path: '/v1/people/:value', code: 'NOT_FOUND' });
+    expect(line).toMatchObject({ path: '/v1/:value/:value', code: 'NOT_FOUND' });
     expect(line['route']).toBeUndefined();
     expect(JSON.stringify(line)).not.toContain('ananya');
   });
