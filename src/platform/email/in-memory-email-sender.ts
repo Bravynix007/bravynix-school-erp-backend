@@ -1,17 +1,20 @@
 import { Injectable } from '@nestjs/common';
-import { Clock, SystemClock } from '../../common/time/clock.js';
+import { Clock } from '../../common/time/clock.js';
 import { EmailSender, type EmailMessage } from './email-sender.js';
 
 export interface SentEmail extends EmailMessage {
   sentAt: Date;
 }
 
-/** Keeps sent mail in memory so tests can read it, e.g. the OTP a login sent. */
+/**
+ * Keeps sent mail in memory so tests can read it, e.g. the OTP a login sent.
+ * The clock is required, so `sentAt` always follows the test's clock.
+ */
 @Injectable()
 export class InMemoryEmailSender extends EmailSender {
   private readonly outbox: SentEmail[] = [];
 
-  constructor(private readonly clock: Clock = new SystemClock()) {
+  constructor(private readonly clock: Clock) {
     super();
   }
 

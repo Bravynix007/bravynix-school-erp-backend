@@ -94,14 +94,22 @@ export function parseSort<F extends string>(
   });
 }
 
+declare const cursorAtBrand: unique symbol;
+
+/**
+ * A UTC timestamp with microseconds, `2026-10-23T04:25:00.123456Z`. Only
+ * `cursorTimestamp()` and `decodeCursor()` make one, so a JS `Date` string,
+ * which has milliseconds, cannot reach a cursor by mistake.
+ */
+export type CursorAt = string & { readonly [cursorAtBrand]: true };
+
 /**
  * A row's position in a newest-first `(created_at, id)` list (API design
  * 13.2). `createdAt` keeps PostgreSQL's microseconds, which a JS `Date`
  * would round to milliseconds and make the next page skip rows.
  */
 export interface CursorPosition {
-  /** UTC, microsecond precision: `2026-10-23T04:25:00.123456Z`. */
-  createdAt: string;
+  createdAt: CursorAt;
   id: string;
 }
 
@@ -111,8 +119,8 @@ const MICROS_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/;
  * Selects a timestamp column as a microsecond UTC string for the cursor:
  * `.select(cursorTimestamp('n.created_at').as('cursorAt'))`.
  */
-export function cursorTimestamp(column = 'created_at'): RawBuilder<string> {
-  return sql<string>`to_char(${sql.ref(column)} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
+export function cursorTimestamp(column = 'created_at'): RawBuilder<CursorAt> {
+  return sql<CursorAt>`to_char(${sql.ref(column)} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
 }
 
 /** `(created_at, id) < cursor`, the keyset condition for the next newest-first page. */
@@ -143,6 +151,7 @@ function filterHash(filters: Record<string, unknown>): string {
 }
 
 export function encodeCursor(last: CursorPosition, filters: Record<string, unknown>): string {
+  // The type already demands cursorTimestamp(); this catches a NULL column.
   if (!MICROS_ISO.test(last.createdAt)) {
     throw new Error('Cursor timestamps must come from cursorTimestamp(), with microseconds');
   }
@@ -175,23 +184,25 @@ export function decodeCursor(cursor: string, filters: Record<string, unknown>): 
   ) {
     throw invalidCursor();
   }
-  return { createdAt: payload.t, id: payload.id };
+  return { createdAt: payload.t as CursorAt, id: payload.id };
 }
 
 /**
  * Splits `limit + 1` fetched rows into the page and its meta. Rows carry
- * `cursorAt` from `cursorTimestamp()` alongside their `id`.
+ * `cursorAt` from `cursorTimestamp()` alongside their `id`; it builds the
+ * next cursor and is then dropped, since it is not part of any item's
+ * contract (API design 13.2).
  */
-export function cursorMeta<T extends { cursorAt: string; id: string }>(
+export function cursorMeta<T extends { cursorAt: CursorAt; id: string }>(
   rows: T[],
   limit: number,
   filters: Record<string, unknown>,
-): { items: T[]; meta: CursorMeta } {
+): { items: Omit<T, 'cursorAt'>[]; meta: CursorMeta } {
   const hasMore = rows.length > limit;
-  const items = hasMore ? rows.slice(0, limit) : rows;
-  const last = items.at(-1);
+  const page = hasMore ? rows.slice(0, limit) : rows;
+  const last = page.at(-1);
   return {
-    items,
+    items: page.map(({ cursorAt: _cursorAt, ...item }) => item),
     meta: {
       limit,
       hasMore,

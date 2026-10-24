@@ -1,29 +1,18 @@
 import { ExpressAdapter } from '@nestjs/platform-express';
 import type { Response } from 'express';
-
-interface EnvelopeHead {
-  statusCode: number;
-  code: string;
-}
-
-function envelopeHead(body: unknown): EnvelopeHead | undefined {
-  if (typeof body !== 'object' || body === null || !('success' in body)) return undefined;
-  const { statusCode, code } = body as { statusCode?: unknown; code?: unknown };
-  return typeof statusCode === 'number' && typeof code === 'string'
-    ? { statusCode, code }
-    : undefined;
-}
+import { isMarkedEnvelope } from '../common/http/api-result.js';
 
 /**
  * The HTTP status always equals the envelope's `statusCode`. Without this,
  * Nest answers every POST with 201, so a logout or an OTP request would say
  * 201 while the contract says 200 (API design 7.1, 7.5). The envelope's
- * `code` is kept for the request log line (API design 20.2).
+ * `code` is kept for the request log line (API design 20.2). Only envelopes
+ * the interceptor marked count; raw bodies keep Nest's status.
  */
 export class EnvelopeExpressAdapter extends ExpressAdapter {
   override reply(response: unknown, body: unknown, statusCode?: number): unknown {
-    const head = envelopeHead(body);
-    if (head) (response as Response).locals['code'] = head.code;
-    return super.reply(response, body, head?.statusCode ?? statusCode);
+    if (!isMarkedEnvelope(body)) return super.reply(response, body, statusCode);
+    (response as Response).locals['code'] = body.code;
+    return super.reply(response, body, body.statusCode);
   }
 }

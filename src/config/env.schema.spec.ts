@@ -47,9 +47,12 @@ describe('parseEnv', () => {
   it('needs a real sender address when deployed', () => {
     const deployed = { ...base, NODE_ENV: 'staging', EMAIL_DRIVER: 'smtp', SMTP_URL: 'smtp://x' };
     expect(() => parseEnv(deployed)).toThrow(/EMAIL_FROM/);
-    expect(
-      parseEnv({ ...deployed, EMAIL_FROM: 'BravyNix <no-reply@bravynix.in>' }).EMAIL_FROM,
-    ).toBe('BravyNix <no-reply@bravynix.in>');
+    for (const bad of ['', 'no-reply', 'BravyNix <no-reply@bravynix>', 'a b@bravynix.in']) {
+      expect(() => parseEnv({ ...deployed, EMAIL_FROM: bad })).toThrow(/EMAIL_FROM/);
+    }
+    for (const good of ['BravyNix <no-reply@bravynix.in>', 'no-reply@mail.bravynix.in']) {
+      expect(parseEnv({ ...deployed, EMAIL_FROM: good }).EMAIL_FROM).toBe(good);
+    }
   });
 
   it('validates minimum app versions', () => {

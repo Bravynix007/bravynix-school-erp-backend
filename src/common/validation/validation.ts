@@ -5,7 +5,7 @@ import {
   type PipeTransform,
   type ValidationError,
 } from '@nestjs/common';
-import { getMetadataStorage } from 'class-validator';
+import { getMetadataStorage, type ValidatorOptions } from 'class-validator';
 import { AppException, type FieldError } from '../http/app-exception.js';
 import { FieldErrorCode } from '../http/error-codes.js';
 import { message } from '../i18n/messages.js';
@@ -51,15 +51,6 @@ const CONSTRAINT_TO_CODE: Record<string, string> = {
 };
 
 /**
- * `@Length(min, max)` reports one constraint for both ends; class-validator's
- * message says which end failed ("longer than" means the value is too short).
- */
-function lengthCode(constraint: string, text: string | undefined): string | undefined {
-  if (constraint !== 'isLength') return undefined;
-  return text?.includes('longer than') ? FieldErrorCode.TOO_SHORT : FieldErrorCode.TOO_LONG;
-}
-
-/**
  * The order in which a field's failed constraints are reported; first wins.
  * A wrong type comes straight after a missing value, so `{"name": 123}` is
  * INVALID_TYPE rather than whichever length rule happened to fail too.
@@ -88,24 +79,56 @@ const PARAMS: Record<string, (args: unknown[], code: string) => Record<string, u
   arrayMaxSize: ([max]) => ({ max }),
 };
 
+/** The object a field belongs to, when the caller has it: the DTO instance or a nested one. */
+type Owner = object | undefined;
+
 /** Looks up the arguments a decorator was given, e.g. 20 for `@MaxLength(20)`. */
-function constraintArgs(error: ValidationError, name: string): unknown[] | undefined {
-  const target: unknown = error.target;
-  if (!target || typeof target !== 'object') return undefined;
+function constraintArgs(owner: Owner, property: string, name: string): unknown[] | undefined {
+  if (!owner) return undefined;
   return getMetadataStorage()
-    .getTargetValidationMetadatas(target.constructor, '', true, false)
-    .find((meta) => meta.propertyName === error.property && meta.name === name)?.constraints;
+    .getTargetValidationMetadatas(owner.constructor, '', true, false)
+    .find((meta) => meta.propertyName === property && meta.name === name)?.constraints;
 }
 
-function paramsFor(error: ValidationError, name: string, code: string) {
+function valueOf(owner: Owner, property: string): unknown {
+  return owner ? (owner as Record<string, unknown>)[property] : undefined;
+}
+
+/**
+ * `@Length(min, max)` reports one constraint for both ends. The value's length
+ * against `min` says which end failed; without the value, class-validator's
+ * default message does ("longer than" means the value is too short).
+ */
+function lengthCode(error: ValidationError, owner: Owner, constraint: string): string | undefined {
+  if (constraint !== 'isLength') return undefined;
+  const value = valueOf(owner, error.property);
+  const [min] = constraintArgs(owner, error.property, constraint) ?? [];
+  if (typeof value === 'string' && typeof min === 'number') {
+    return value.length < min ? FieldErrorCode.TOO_SHORT : FieldErrorCode.TOO_LONG;
+  }
+  return error.constraints?.[constraint]?.includes('longer than')
+    ? FieldErrorCode.TOO_SHORT
+    : FieldErrorCode.TOO_LONG;
+}
+
+function paramsFor(error: ValidationError, owner: Owner, name: string, code: string) {
   const build = PARAMS[name];
-  const args = build && constraintArgs(error, name);
+  const args = build && constraintArgs(owner, error.property, name);
   if (!build || !args) return undefined;
   const params = build(args, code);
   return Object.keys(params).length ? params : undefined;
 }
 
-export function toFieldErrors(errors: ValidationError[], parentPath = ''): FieldError[] {
+/**
+ * Turns class-validator errors into field errors (API design 8). `owner` is
+ * the validated object; with it, `params` carry each decorator's limit. The
+ * errors themselves never hold the object or its values (SDD 17.1).
+ */
+export function toFieldErrors(
+  errors: ValidationError[],
+  owner?: object,
+  parentPath = '',
+): FieldError[] {
   const language = RequestContext.current()?.language;
   const result: FieldError[] = [];
   for (const error of errors) {
@@ -121,10 +144,10 @@ export function toFieldErrors(errors: ValidationError[], parentPath = ''): Field
       if (first) {
         const code =
           (error.contexts?.[first]?.['code'] as string | undefined) ??
-          lengthCode(first, error.constraints[first]) ??
+          lengthCode(error, owner, first) ??
           CONSTRAINT_TO_CODE[first] ??
           FieldErrorCode.INVALID_VALUE;
-        const params = paramsFor(error, first, code);
+        const params = paramsFor(error, owner, first, code);
         result.push({
           field: path,
           code,
@@ -133,9 +156,36 @@ export function toFieldErrors(errors: ValidationError[], parentPath = ''): Field
         });
       }
     }
-    if (error.children?.length) result.push(...toFieldErrors(error.children, path));
+    if (error.children?.length) {
+      const child = valueOf(owner, error.property);
+      const childOwner = child && typeof child === 'object' ? child : undefined;
+      result.push(...toFieldErrors(error.children, childOwner, path));
+    }
   }
   return result;
+}
+
+/**
+ * Field errors worked out while the validated object was still at hand, keyed
+ * by the error list Nest hands to the exception factory next.
+ */
+const converted = new WeakMap<ValidationError[], FieldError[]>();
+
+/**
+ * Nest's ValidationPipe, with the conversion to field errors done inside
+ * `validate`, where the DTO instance is known. That keeps `target: false`:
+ * no ValidationError ever carries the DTO, which may hold an OTP, an email or
+ * other personal data (SDD 17.1).
+ */
+export class AppValidationPipe extends ValidationPipe {
+  protected override async validate(
+    object: object,
+    options?: ValidatorOptions,
+  ): Promise<ValidationError[]> {
+    const errors = await super.validate(object, options);
+    if (errors.length) converted.set(errors, toFieldErrors(errors, object));
+    return errors;
+  }
 }
 
 /**
@@ -144,16 +194,16 @@ export function toFieldErrors(errors: ValidationError[], parentPath = ''): Field
  * such as `createdBy` or `status`.
  */
 export function createValidationPipe(): ValidationPipe {
-  return new ValidationPipe({
+  return new AppValidationPipe({
     whitelist: true,
     forbidNonWhitelisted: true,
     forbidUnknownValues: true,
     transform: true,
     transformOptions: { enableImplicitConversion: false },
-    // The target is kept only to look up a constraint's limit for `params`;
-    // values never reach the error (they may be personal data).
-    validationError: { target: true, value: false },
-    exceptionFactory: (errors) => AppException.validation(toFieldErrors(errors)),
+    // Neither the DTO nor its values reach an error (they may be personal data).
+    validationError: { target: false, value: false },
+    exceptionFactory: (errors) =>
+      AppException.validation(converted.get(errors) ?? toFieldErrors(errors)),
   });
 }
 

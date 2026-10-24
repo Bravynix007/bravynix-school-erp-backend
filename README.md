@@ -9,17 +9,17 @@ code comments point into them.
 
 ## Stack
 
-| Concern    | Choice                                                                           |
-| ---------- | -------------------------------------------------------------------------------- |
-| Runtime    | Node.js 24, TypeScript 6, ES modules                                             |
-| Framework  | NestJS 12 (Express)                                                              |
-| Database   | PostgreSQL 16, [Kysely](https://kysely.dev) query builder, versioned migrations  |
-| Validation | class-validator DTOs; unknown fields are rejected; bodies are never type-coerced |
-| Config     | zod-validated environment variables; the app refuses to boot on a bad value      |
-| Logging    | pino JSON lines with request IDs and route templates; no URLs, headers or bodies |
-| API docs   | OpenAPI generated from the code                                                  |
-| Tests      | Vitest (unit, e2e through the full HTTP stack, integration on a real database)   |
-| Lint       | oxlint, Prettier, dependency-cruiser for module boundaries                       |
+| Concern    | Choice                                                                                          |
+| ---------- | ----------------------------------------------------------------------------------------------- |
+| Runtime    | Node.js 24, TypeScript 6, ES modules                                                            |
+| Framework  | NestJS 12 (Express)                                                                             |
+| Database   | PostgreSQL 16, [Kysely](https://kysely.dev) query builder, versioned migrations                 |
+| Validation | class-validator DTOs; unknown fields are rejected; bodies are never type-coerced                |
+| Config     | zod-validated environment variables; the app refuses to boot on a bad value                     |
+| Logging    | pino JSON lines with request IDs, route templates and outcome codes; no URLs, headers or bodies |
+| API docs   | OpenAPI generated from the code                                                                 |
+| Tests      | Vitest (unit, e2e through the full HTTP stack, integration on a real database)                  |
+| Lint       | oxlint, Prettier, dependency-cruiser for module boundaries                                      |
 
 ## Getting started
 
@@ -86,6 +86,8 @@ test/
 - **Every response uses the envelope** `{ success, statusCode, code, message, data, meta,
 requestId }`. Return data, or an `ApiResult` for a named code, a 201 or list meta; throw
   `AppException` for errors. Never 204 (API design 7, 8).
+- **Cursor lists select `cursorTimestamp()` as `cursorAt`** and pass the rows through
+  `cursorMeta`, which builds the next cursor and drops `cursorAt` (API design 13.2).
 - **Never call `new Date()` in business code.** Inject `Clock`; tests use `FixedClock`.
 - **Never send email directly.** Inject `EmailSender`; tests read mail from
   `InMemoryEmailSender`. Never log an email body.
@@ -104,3 +106,4 @@ requestId }`. Return data, or an `ApiResult` for a named code, a 201 or list met
 | Authorization matrix | `npm run policies` → `policies.json`; also `x-policy` on each OpenAPI operation |
 | Two-tenant data      | `src/seeds/two-worlds.ts` (fixed IDs and `@two-worlds.test` emails)             |
 | Real HTTP stack      | `test/support/test-app.ts` → `createTestApp()`                                  |
+| Read the log lines   | `createTestApp({ captureLogs: true })` → `logs` (parsed pino lines at `info`)   |

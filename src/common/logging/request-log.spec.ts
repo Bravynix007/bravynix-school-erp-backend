@@ -35,10 +35,16 @@ describe('request log (API design 20.2)', () => {
     expect(JSON.stringify(props)).not.toMatch(/ananya|0192f6a1/);
   });
 
-  it('logs no route for an unmatched path', async () => {
-    const props = await propsFor('/v1/people/ananya.rao@gmail.com');
+  it('logs a sanitised path for an unmatched request', async () => {
+    const props = await propsFor('/v1/people/ananya.rao@gmail.com/9876543210?q=x');
     expect(props.route).toBeUndefined();
-    expect(JSON.stringify(props)).not.toContain('ananya');
+    expect(props.path).toBe('/v1/people/:value/:value');
+    expect(JSON.stringify(props)).not.toMatch(/ananya|9876543210/);
+  });
+
+  it('caps a long unmatched path', async () => {
+    const props = await propsFor('/a/b/c/d/e/f/g/h');
+    expect(props.path).toBe('/a/b/c/d/e/f/…');
   });
 
   it('adds nothing before the response is sent, so no field repeats', () => {

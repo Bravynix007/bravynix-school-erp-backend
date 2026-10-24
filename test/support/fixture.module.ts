@@ -13,6 +13,7 @@ import { Policy, Public } from '../../src/common/auth/policy.decorator.js';
 import { RoleCode } from '../../src/common/auth/roles.js';
 import { ApiResult } from '../../src/common/http/api-result.js';
 import { AppException } from '../../src/common/http/app-exception.js';
+import { RawResponse } from '../../src/common/http/raw-response.decorator.js';
 import { PageQueryDto, pageMeta } from '../../src/common/pagination/pagination.js';
 import { Clock } from '../../src/common/time/clock.js';
 import { EmailSender } from '../../src/platform/email/email-sender.js';
@@ -101,6 +102,14 @@ class FixtureController {
       variables: { code: '123456' },
     });
     return null;
+  }
+
+  /** A raw body shaped like an envelope; it must not set the status (R-B5). */
+  @Public()
+  @RawResponse()
+  @Get('raw-lookalike')
+  rawLookalike(): Record<string, unknown> {
+    return { success: false, statusCode: 418, code: 'TEAPOT' };
   }
 
   @Public()

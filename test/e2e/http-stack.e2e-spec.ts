@@ -107,6 +107,22 @@ describe('HTTP stack', () => {
       expect(res.body).toMatchObject({ success: false, code: 'UNSUPPORTED_MEDIA_TYPE' });
     });
 
+    it('refuses UTF-16 JSON before parsing it, even when nested deeply', async () => {
+      // U+2200 is the bytes 0x22 0x00 in UTF-16LE, which a UTF-8 scan reads as a quote.
+      const body = Buffer.from(`{"a":"\u2200${'['.repeat(40)}"}`, 'utf16le');
+      const res = await request(http)
+        .post('/v1/fixtures/echo')
+        .set('Content-Type', 'application/json; charset=utf-16le')
+        .send(body)
+        .expect(415);
+      expect(res.body).toMatchObject({ success: false, code: 'UNSUPPORTED_MEDIA_TYPE' });
+    });
+
+    it('keeps the status of a raw body that only looks like an envelope', async () => {
+      const res = await request(http).get('/v1/fixtures/raw-lookalike').expect(200);
+      expect(res.body).toEqual({ success: false, statusCode: 418, code: 'TEAPOT' });
+    });
+
     it('echoes a client request ID when it is a UUID, and replaces it when not', async () => {
       const id = '0192f6a1-7c40-7e21-8b55-1a2b3c4d5e6f';
       const kept = await request(http).get('/v1/fixtures/plain').set('X-Request-Id', id);

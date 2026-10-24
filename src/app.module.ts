@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { LoggerModule } from 'nestjs-pino';
+import type { Options } from 'pino-http';
 import { CommonModule } from './common/common.module.js';
+import { LogDestination, LogDestinationModule } from './common/logging/log-destination.js';
 import { requestLogProps, serializeRequest } from './common/logging/request-log.js';
 import { AppConfig, AppConfigModule } from './config/app-config.js';
 import { HealthModule } from './health/health.module.js';
@@ -11,10 +13,11 @@ import { EmailModule } from './platform/email/email.module.js';
   imports: [
     AppConfigModule,
     LoggerModule.forRootAsync({
-      inject: [AppConfig],
-      useFactory: ({ env }: AppConfig) => ({
-        pinoHttp: {
-          level: env.LOG_LEVEL,
+      imports: [LogDestinationModule],
+      inject: [AppConfig, LogDestination],
+      useFactory: ({ env }: AppConfig, destination: LogDestination) => {
+        const options: Options = {
+          level: destination.level ?? env.LOG_LEVEL,
           // The request ID middleware has already set req.id.
           genReqId: (req) => (req as { id?: string }).id ?? '',
           // Log the route template and outcome, never the URL, headers or
@@ -24,6 +27,9 @@ import { EmailModule } from './platform/email/email.module.js';
             res: (res: { statusCode: number }) => ({ statusCode: res.statusCode }),
           },
           customProps: requestLogProps,
+          // A 5xx is an error to look at; the exception filter has already
+          // logged its cause with the same request ID.
+          customLogLevel: (_req, res, error) => (error || res.statusCode >= 500 ? 'error' : 'info'),
           // Never log tokens, cookies or bodies (SDD 17.1, QA strategy 4).
           redact: {
             paths: [
@@ -36,11 +42,12 @@ import { EmailModule } from './platform/email/email.module.js';
           },
           autoLogging: { ignore: (req) => (req.url ?? '').startsWith('/health/') },
           transport:
-            env.NODE_ENV === 'development'
+            env.NODE_ENV === 'development' && !destination.stream
               ? { target: 'pino-pretty', options: { singleLine: true } }
               : undefined,
-        },
-      }),
+        };
+        return { pinoHttp: destination.stream ? [options, destination.stream] : options };
+      },
     }),
     CommonModule,
     DatabaseModule,

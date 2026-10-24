@@ -10,6 +10,9 @@ const csv = z
       .filter(Boolean),
   );
 
+/** `no-reply@example.in` or `Display Name <no-reply@example.in>`. */
+const SENDER = /^(?:[^<>@]+ <[^\s<>@]+@[^\s<>@]+\.[a-z]{2,}>|[^\s<>@]+@[^\s<>@]+\.[a-z]{2,})$/i;
+
 const semver = z
   .string()
   .regex(/^\d+\.\d+\.\d+$/, 'must look like 1.4.2')
@@ -74,8 +77,9 @@ export const envSchema = z
         message: 'must be smtp in staging and production',
       });
     }
-    // SES rejects an @localhost sender, which would stop every login code (B7).
-    if (deployed && /@localhost>?$/i.test(env.EMAIL_FROM)) {
+    // SES rejects an @localhost or malformed sender, which would stop every
+    // login code (B7).
+    if (deployed && (!SENDER.test(env.EMAIL_FROM) || /@localhost>?$/i.test(env.EMAIL_FROM))) {
       ctx.addIssue({
         code: 'custom',
         path: ['EMAIL_FROM'],

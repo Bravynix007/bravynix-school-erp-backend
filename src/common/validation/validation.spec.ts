@@ -1,4 +1,5 @@
-import type { ValidationError } from '@nestjs/common';
+import { ValidationPipe, type ValidationError } from '@nestjs/common';
+import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsInt,
@@ -7,10 +8,11 @@ import {
   Length,
   Max,
   MaxLength,
+  ValidateNested,
   validate,
 } from 'class-validator';
 import { AppException } from '../http/app-exception.js';
-import { TrimStringsPipe, toFieldErrors } from './validation.js';
+import { TrimStringsPipe, createValidationPipe, toFieldErrors } from './validation.js';
 
 class LimitsDto {
   @IsString()
@@ -32,7 +34,35 @@ class LimitsDto {
 
 async function errorsFor(values: Partial<Record<keyof LimitsDto, unknown>>) {
   const dto = Object.assign(new LimitsDto(), { name: 'x', score: 1, q: 'ab', tags: [] }, values);
-  return toFieldErrors(await validate(dto, { validationError: { target: true, value: false } }));
+  return toFieldErrors(
+    await validate(dto, { validationError: { target: false, value: false } }),
+    dto,
+  );
+}
+
+class GuardianDto {
+  @IsString()
+  @MaxLength(3)
+  name!: unknown;
+}
+
+class FamilyDto {
+  @IsString()
+  @Length(2, 10, { message: 'Pick a name between 2 and 10 characters, longer than a nickname' })
+  surname!: unknown;
+
+  @ValidateNested({ each: true })
+  @Type(() => GuardianDto)
+  guardians!: unknown;
+}
+
+async function pipeErrors(body: unknown) {
+  try {
+    await createValidationPipe().transform(body, { type: 'body', metatype: FamilyDto });
+  } catch (error) {
+    return error as AppException;
+  }
+  throw new Error('expected a validation error');
 }
 
 describe('toFieldErrors', () => {
@@ -116,6 +146,39 @@ describe('toFieldErrors with real decorators', () => {
       { field: 'q', code: 'TOO_SHORT', params: { min: 2 } },
       { field: 'tags', code: 'TOO_MANY', params: { max: 5 } },
     ]);
+  });
+});
+
+describe('the validation pipe', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('never attaches the DTO or its values to a validation error (SDD 17.1)', async () => {
+    // `validate` is protected; the spy sees what class-validator returned.
+    const proto = ValidationPipe.prototype as unknown as {
+      validate: (object: object) => Promise<ValidationError[]>;
+    };
+    const validateSpy = vi.spyOn(proto, 'validate');
+    await pipeErrors({ surname: 'x', guardians: [{ name: 'Ananya' }] });
+    const raw = await validateSpy.mock.results[0]?.value;
+    expect(raw.length).toBeGreaterThan(0);
+    expect(JSON.stringify(raw)).not.toMatch(/Ananya|"target"|"value"/);
+  });
+
+  it('still carries params, for nested objects too', async () => {
+    const error = await pipeErrors({ surname: 'x', guardians: [{ name: 'Ananya' }] });
+    expect(
+      error.options.errors?.map(({ field, code, params }) => ({ field, code, params })),
+    ).toEqual([
+      { field: 'surname', code: 'TOO_SHORT', params: { min: 2 } },
+      { field: 'guardians[0].name', code: 'TOO_LONG', params: { max: 3 } },
+    ]);
+  });
+
+  it('decides too short or too long from the length, not the message', async () => {
+    const error = await pipeErrors({ surname: 'x'.repeat(11), guardians: [] });
+    expect(error.options.errors?.[0]).toMatchObject({ field: 'surname', code: 'TOO_LONG' });
   });
 });
 

@@ -29,6 +29,22 @@ export interface ApiEnvelope<T = unknown> {
   [extra: string]: unknown;
 }
 
+const envelopes = new WeakSet<object>();
+
+/**
+ * Marks a body as an envelope this API built. Only marked bodies set the
+ * HTTP status (API design 7.1), so a `@RawResponse` body that happens to
+ * have `success` and `statusCode` keys is sent as it is.
+ */
+export function markEnvelope<T extends ApiEnvelope>(body: T): T {
+  envelopes.add(body);
+  return body;
+}
+
+export function isMarkedEnvelope(body: unknown): body is ApiEnvelope {
+  return typeof body === 'object' && body !== null && envelopes.has(body);
+}
+
 /**
  * What a controller returns when it needs more than plain data: a named
  * result code, a non-200 status, a custom message or list meta. Plain

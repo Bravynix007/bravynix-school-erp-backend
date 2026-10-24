@@ -11,7 +11,7 @@ import type { Response } from 'express';
 import { map, type Observable } from 'rxjs';
 import { message } from '../i18n/messages.js';
 import { RequestContext } from '../request-context/request-context.js';
-import { ApiResult, type ApiEnvelope } from './api-result.js';
+import { ApiResult, markEnvelope, type ApiEnvelope } from './api-result.js';
 import { ResultCode } from './error-codes.js';
 import { RAW_RESPONSE } from './raw-response.decorator.js';
 
@@ -49,10 +49,10 @@ export class ResponseEnvelopeInterceptor implements NestInterceptor {
     const status =
       result.options.status ??
       (declared === undefined || declared === HttpStatus.NO_CONTENT ? HttpStatus.OK : declared);
-    response.status(status);
+    // The adapter sets the HTTP status from the marked envelope.
     if (!response.getHeader('Cache-Control')) response.setHeader('Cache-Control', 'no-store');
     const code = result.options.code ?? ResultCode.OK;
-    return {
+    return markEnvelope({
       success: true,
       statusCode: status,
       code,
@@ -60,6 +60,6 @@ export class ResponseEnvelopeInterceptor implements NestInterceptor {
       data: (result.data ?? null) as unknown,
       meta: result.options.meta ?? null,
       requestId: ctx?.requestId ?? '',
-    };
+    });
   }
 }

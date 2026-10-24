@@ -6,6 +6,7 @@ import {
   pageMeta,
   pageOffset,
   parseSort,
+  type CursorAt,
 } from './pagination.js';
 
 const forge = (payload: unknown) => Buffer.from(JSON.stringify(payload)).toString('base64url');
@@ -44,7 +45,7 @@ describe('cursor mode', () => {
   const filters = { status: 1, institutionId: 'abc' };
   const row = {
     id: '0192f6a1-7c40-7e21-8b55-1a2b3c4d5e6f',
-    createdAt: '2026-10-23T04:10:00.123456Z',
+    createdAt: '2026-10-23T04:10:00.123456Z' as CursorAt,
   };
 
   it('round-trips a cursor with microseconds intact', () => {
@@ -53,9 +54,9 @@ describe('cursor mode', () => {
   });
 
   it('refuses to encode a millisecond timestamp, which would skip rows', () => {
-    expect(() => encodeCursor({ ...row, createdAt: '2026-10-23T04:10:00.123Z' }, filters)).toThrow(
-      /microseconds/,
-    );
+    expect(() =>
+      encodeCursor({ ...row, createdAt: '2026-10-23T04:10:00.123Z' as CursorAt }, filters),
+    ).toThrow(/microseconds/);
   });
 
   it('refuses a cursor reused with other filters', () => {
@@ -77,10 +78,14 @@ describe('cursor mode', () => {
   it('returns hasMore and a next cursor when more rows exist', () => {
     const rows = [1, 2, 3].map((n) => ({
       id: `0192f6a1-7c40-7e21-8b55-1a2b3c4d5e6${n}`,
-      cursorAt: `2026-10-2${n}T00:00:00.00000${n}Z`,
+      cursorAt: `2026-10-2${n}T00:00:00.00000${n}Z` as CursorAt,
+      name: `row ${n}`,
     }));
     const { items, meta } = cursorMeta(rows, 2, filters);
-    expect(items).toHaveLength(2);
+    expect(items).toEqual([
+      { id: rows[0]!.id, name: 'row 1' },
+      { id: rows[1]!.id, name: 'row 2' },
+    ]);
     expect(meta.hasMore).toBe(true);
     expect(decodeCursor(meta.nextCursor!, filters)).toEqual({
       id: rows[1]!.id,
