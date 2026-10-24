@@ -61,7 +61,7 @@ describe('request log line (API design 20.2)', () => {
 
   it('logs the route template and code, never the query', async () => {
     const res = await request(http)
-      .get('/v1/fixtures/page?q=ananya.rao@gmail.com')
+      .get('/v1/fixtures/page?q=ananya.rao@two-worlds.test')
       .set('X-App-Platform', 'android')
       .set('X-App-Version', '1.4.2+57')
       .expect(200);
@@ -97,7 +97,7 @@ describe('request log line (API design 20.2)', () => {
   });
 
   it('logs the error code, and a sanitised path when no route matched', async () => {
-    const res = await request(http).get('/v1/people/ananya.rao@gmail.com').expect(404);
+    const res = await request(http).get('/v1/people/ananya.rao@two-worlds.test').expect(404);
     const line = await lineFor(res.body.requestId);
     expect(line).toMatchObject({ path: '/v1/:value/:value', code: 'NOT_FOUND' });
     expect(line['route']).toBeUndefined();

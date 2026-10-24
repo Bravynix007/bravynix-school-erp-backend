@@ -22,7 +22,7 @@ async function propsFor(url: string, headers: Record<string, string> = {}) {
 
 describe('request log (API design 20.2)', () => {
   it('logs the route template, never the filled path or query', async () => {
-    const props = await propsFor('/v1/students/0192f6a1?q=ananya.rao@gmail.com', {
+    const props = await propsFor('/v1/students/0192f6a1?q=ananya.rao@two-worlds.test', {
       'X-App-Platform': 'android',
       'X-App-Version': '1.4.2+57',
     });
@@ -36,10 +36,10 @@ describe('request log (API design 20.2)', () => {
   });
 
   it('logs a sanitised path for an unmatched request', async () => {
-    const props = await propsFor('/v1/people/ananya.rao@gmail.com/9876543210?q=x');
+    const props = await propsFor('/v1/people/ananya.rao@two-worlds.test/0000012345?q=x');
     expect(props.route).toBeUndefined();
     expect(props.path).toBe('/v1/:value/:value/:value');
-    expect(JSON.stringify(props)).not.toMatch(/ananya|9876543210/);
+    expect(JSON.stringify(props)).not.toMatch(/ananya|0000012345/);
   });
 
   it('logs only a known first segment, never a word that may be a name', async () => {
