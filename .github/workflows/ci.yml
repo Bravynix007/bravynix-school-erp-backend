@@ -30,7 +30,7 @@ jobs:
       - run: npm run typecheck
       # Coverage over the unit and e2e suites together (QA strategy 10).
       - run: npm run test:cov
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: coverage-unit-e2e
           path: coverage/lcov.info
@@ -40,7 +40,7 @@ jobs:
         run: |
           node dist/cli/policies.js policies.json
           node dist/cli/openapi.js openapi.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: api-contract
           path: |
