@@ -23,8 +23,6 @@ export const OTP_LIMITS = {
 
 export interface OtpRequestFacts {
   now: Date;
-  /** Request times from this IP in the last minute. */
-  ipRequests: readonly Date[];
   /** Request times for this email in the last 15 minutes, newest first. */
   emailRequests: readonly Date[];
   /** The end of the longest active lock on this email, if any. */
@@ -46,21 +44,32 @@ function plusSeconds(date: Date, seconds: number): Date {
 }
 
 /**
+ * The per-IP limit on public calls (API design 18.1). `hits` are the calls
+ * from one IP in the last minute, oldest first, including the current one and
+ * calls that were refused for other reasons: a refused call still costs work.
+ * The 21st is refused until enough earlier calls leave the window for the
+ * count to be back at the limit.
+ */
+export function evaluateIpLimit(now: Date, hits: readonly Date[]): OtpRefusal | null {
+  const over = hits.length - OTP_LIMITS.ipRequestsPerMinute;
+  if (over <= 0) return null;
+  const blocking = hits[over - 1]!;
+  return {
+    status: HttpStatus.TOO_MANY_REQUESTS,
+    code: ErrorCode.RATE_LIMITED,
+    retryAfterSeconds: secondsUntil(plusSeconds(blocking, OTP_LIMITS.ipWindowSeconds), now),
+  };
+}
+
+/**
  * Decides whether a request for a login code is refused. Pure, and the same
  * for registered and unregistered emails, so no answer differs between them
- * (I-07). The first rule that applies wins: per-IP limit, lock, the 60-second
- * gap, then the 3-in-15-minutes limit.
+ * (I-07). The first rule that applies wins: lock, the 60-second gap, then the
+ * 3-in-15-minutes limit. The per-IP limit runs earlier, on every public call
+ * (`evaluateIpLimit`).
  */
 export function evaluateOtpRequest(facts: OtpRequestFacts): OtpRefusal | null {
   const { now } = facts;
-  if (facts.ipRequests.length >= OTP_LIMITS.ipRequestsPerMinute) {
-    const oldest = facts.ipRequests.reduce((a, b) => (a < b ? a : b));
-    return {
-      status: HttpStatus.TOO_MANY_REQUESTS,
-      code: ErrorCode.RATE_LIMITED,
-      retryAfterSeconds: secondsUntil(plusSeconds(oldest, OTP_LIMITS.ipWindowSeconds), now),
-    };
-  }
   if (facts.lockedUntil && facts.lockedUntil > now) {
     return {
       status: HttpStatus.LOCKED,

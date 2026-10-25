@@ -1,4 +1,4 @@
-import { Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
+import { HttpStatus, Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
 import { isIP } from 'node:net';
 import { AppException } from '../../common/http/app-exception.js';
 import { newId } from '../../common/ids/ids.js';
@@ -7,12 +7,15 @@ import { Clock } from '../../common/time/clock.js';
 import { AppConfig } from '../../config/app-config.js';
 import { DatabaseService } from '../database/index.js';
 import { EmailSender } from '../email/email-sender.js';
-import { ClientType } from './auth-codes.js';
+import { AuthCode, ClientType } from './auth-codes.js';
 import { canReceiveCode, IdentityRepository } from './identity.repository.js';
 import { otpEmail } from './otp-email.js';
 import { OtpHasher, generateOtpCode } from './otp-hasher.js';
 import { evaluateOtpRequest, OTP_LIMITS } from './otp-limits.js';
+import { PublicCallLimiter } from './public-call-limiter.js';
 import { withTimeout } from './with-timeout.js';
+
+const NIL_UUID = '00000000-0000-0000-0000-000000000000';
 
 /** SES gets this long before the send is given up on (SDD 11.3). */
 const SEND_TIMEOUT_MS = 3000;
@@ -60,29 +63,35 @@ export class OtpService implements OnModuleDestroy {
     private readonly config: AppConfig,
     private readonly email: EmailSender,
     private readonly hasher: OtpHasher,
+    private readonly limiter: PublicCallLimiter,
   ) {}
 
   async requestCode(request: OtpRequest): Promise<OtpRequestResult> {
     const email = request.email.trim().toLowerCase();
     const emailHmac = this.hasher.email(email);
     const ip = requestIp();
+    // First, before a connection is held for anything else: every call counts.
+    await this.limiter.check(ip);
 
     const issued = await this.database.transaction({}, async (tx) => {
       const now = this.clock.now();
       // One request at a time per email, so two parallel requests cannot both
-      // pass the limits.
-      await this.repository.lockEmail(tx, emailHmac);
+      // pass the limits. A request that finds another one running would meet
+      // the 60-second gap anyway, so it is answered at once instead of
+      // holding a connection; the answer is the same for every email.
+      if (!(await this.repository.tryLockEmail(tx, emailHmac))) {
+        throw new AppException(HttpStatus.TOO_MANY_REQUESTS, AuthCode.OTP_RESEND_TOO_SOON, {
+          retryAfterSeconds: OTP_LIMITS.resendGapSeconds,
+        });
+      }
       const user = await this.repository.findUserByEmail(tx, email);
 
       const windowStart = new Date(now.getTime() - OTP_LIMITS.requestWindowSeconds * 1000);
-      const ipStart = new Date(now.getTime() - OTP_LIMITS.ipWindowSeconds * 1000);
       const emailRequests = await this.repository.emailRequestTimes(tx, emailHmac, windowStart);
-      const ipRequests = ip ? await this.repository.ipRequestTimes(tx, ip, ipStart) : [];
       const challengeLock = await this.repository.activeChallengeLock(tx, emailHmac, now);
 
       const refusal = evaluateOtpRequest({
         now,
-        ipRequests,
         emailRequests,
         lockedUntil: later(user?.lockedUntil, challengeLock),
       });
@@ -94,11 +103,15 @@ export class OtpService implements OnModuleDestroy {
 
       // A code goes to an account that can sign in, and for the console only
       // to a Super Admin. Anything else gets the same answer and no mail.
+      // The grant is looked up for every console request, with a nil id when
+      // there is no account, so the work does not depend on the email.
+      const superAdmin =
+        request.clientType === ClientType.Console &&
+        (await this.repository.hasActiveSuperAdminGrant(tx, user?.id ?? NIL_UUID));
       const eligible =
         user !== undefined &&
         canReceiveCode(user.accountStatus) &&
-        (request.clientType === ClientType.Mobile ||
-          (await this.repository.hasActiveSuperAdminGrant(tx, user.id)));
+        (request.clientType === ClientType.Mobile || superAdmin);
 
       const code = eligible ? generateOtpCode() : null;
       await this.repository.supersedeLive(tx, emailHmac, now);

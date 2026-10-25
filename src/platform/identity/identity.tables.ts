@@ -55,3 +55,9 @@ export interface OtpChallengesTable {
   /** Set when failed attempts lock the email (also for an email with no account). */
   locked_until: Date | null;
 }
+
+export interface PublicCallHitsTable {
+  id: string;
+  created_at: Date;
+  ip: string;
+}

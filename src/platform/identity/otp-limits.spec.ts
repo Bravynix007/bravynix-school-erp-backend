@@ -1,9 +1,9 @@
 import { HttpStatus } from '@nestjs/common';
-import { evaluateOtpRequest, OTP_LIMITS } from './otp-limits.js';
+import { evaluateIpLimit, evaluateOtpRequest } from './otp-limits.js';
 
 const NOW = new Date('2026-10-25T10:00:00.000Z');
 const ago = (seconds: number): Date => new Date(NOW.getTime() - seconds * 1000);
-const base = { now: NOW, ipRequests: [], emailRequests: [], lockedUntil: null };
+const base = { now: NOW, emailRequests: [], lockedUntil: null };
 
 describe('evaluateOtpRequest', () => {
   it('lets a first request through', () => {
@@ -48,33 +48,38 @@ describe('evaluateOtpRequest', () => {
     expect(evaluateOtpRequest({ ...base, lockedUntil: ago(1) })).toBeNull();
   });
 
-  it('refuses the 21st request from one IP in a minute, before everything else', () => {
-    const ipRequests = Array.from({ length: OTP_LIMITS.ipRequestsPerMinute }, (_, i) =>
-      ago(50 - i),
-    );
-    expect(
-      evaluateOtpRequest({
-        ...base,
-        ipRequests,
-        lockedUntil: new Date(NOW.getTime() + 60_000),
-      }),
-    ).toEqual({
-      status: HttpStatus.TOO_MANY_REQUESTS,
-      code: 'RATE_LIMITED',
-      retryAfterSeconds: 10,
-    });
-  });
-
-  it('allows 19 requests from one IP', () => {
-    const ipRequests = Array.from({ length: 19 }, () => ago(5));
-    expect(evaluateOtpRequest({ ...base, ipRequests })).toBeNull();
-  });
-
   it('never says less than one second', () => {
     const refusal = evaluateOtpRequest({
       ...base,
       emailRequests: [new Date(NOW.getTime() - 59_999)],
     });
     expect(refusal?.retryAfterSeconds).toBe(1);
+  });
+});
+
+const hits = (count: number) => Array.from({ length: count }, (_, i) => ago(50 - i));
+
+describe('evaluateIpLimit', () => {
+  it('allows 20 calls in a minute, the current one included', () => {
+    expect(evaluateIpLimit(NOW, hits(20))).toBeNull();
+    expect(evaluateIpLimit(NOW, [])).toBeNull();
+  });
+
+  it('refuses the 21st, until the oldest call leaves the minute', () => {
+    expect(evaluateIpLimit(NOW, hits(21))).toEqual({
+      status: HttpStatus.TOO_MANY_REQUESTS,
+      code: 'RATE_LIMITED',
+      retryAfterSeconds: 10,
+    });
+  });
+
+  it('waits for as many calls to leave as are over the limit', () => {
+    // 23 calls: three must leave before the count is back at 20, so wait for the third oldest.
+    expect(evaluateIpLimit(NOW, hits(23))?.retryAfterSeconds).toBe(12);
+  });
+
+  it('never says less than one second', () => {
+    const edge = [new Date(NOW.getTime() - 59_999), ...Array.from({ length: 20 }, () => NOW)];
+    expect(evaluateIpLimit(NOW, edge)?.retryAfterSeconds).toBe(1);
   });
 });

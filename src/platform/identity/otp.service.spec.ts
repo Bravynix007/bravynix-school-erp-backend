@@ -9,6 +9,7 @@ import { AccountStatus, AuthCode, ClientType } from './auth-codes.js';
 import type { IdentityRepository, LoginUser, NewChallenge } from './identity.repository.js';
 import { OtpHasher } from './otp-hasher.js';
 import { OtpService } from './otp.service.js';
+import type { PublicCallLimiter } from './public-call-limiter.js';
 
 /** Rules of AUTH-01 with the database and mail replaced; the SQL itself is covered by the integration tests. */
 const EMAIL = 'asha@two-worlds.test';
@@ -20,14 +21,15 @@ const user = (patch: Partial<LoginUser> = {}): LoginUser => ({
   ...patch,
 });
 
-function build(options: { user?: LoginUser; superAdmin?: boolean; devEcho?: boolean } = {}) {
+function build(
+  options: { user?: LoginUser; superAdmin?: boolean; devEcho?: boolean; lockBusy?: boolean } = {},
+) {
   const stored: NewChallenge[] = [];
-  const times = { email: [] as Date[], ip: [] as Date[], lock: null as Date | null };
+  const times = { email: [] as Date[], lock: null as Date | null };
   const repository = {
-    lockEmail: vi.fn<IdentityRepository['lockEmail']>(async () => undefined),
+    tryLockEmail: vi.fn<IdentityRepository['tryLockEmail']>(async () => !options.lockBusy),
     findUserByEmail: vi.fn<IdentityRepository['findUserByEmail']>(async () => options.user),
     emailRequestTimes: vi.fn<IdentityRepository['emailRequestTimes']>(async () => times.email),
-    ipRequestTimes: vi.fn<IdentityRepository['ipRequestTimes']>(async () => times.ip),
     activeChallengeLock: vi.fn<IdentityRepository['activeChallengeLock']>(async () => times.lock),
     hasActiveSuperAdminGrant: vi.fn<IdentityRepository['hasActiveSuperAdminGrant']>(
       async () => options.superAdmin ?? false,
@@ -39,6 +41,7 @@ function build(options: { user?: LoginUser; superAdmin?: boolean; devEcho?: bool
       },
     ),
   };
+  const check = vi.fn<PublicCallLimiter['check']>(async () => undefined);
   const send = vi.fn<EmailSender['send']>(async () => undefined);
   const clock = new FixedClock();
   const service = new OtpService(
@@ -50,8 +53,9 @@ function build(options: { user?: LoginUser; superAdmin?: boolean; devEcho?: bool
     { env: { OTP_DEV_ECHO: options.devEcho ?? false } } as AppConfig,
     { send } as unknown as EmailSender,
     new OtpHasher('a'.repeat(32)),
+    { check } as unknown as PublicCallLimiter,
   );
-  return { service, repository, stored, times, send, clock };
+  return { service, repository, stored, times, send, clock, check };
 }
 
 const request = (clientType: ClientType = ClientType.Mobile, email = EMAIL) => ({
@@ -115,6 +119,16 @@ describe('OtpService.requestCode', () => {
     await admin.service.requestCode(request(ClientType.Console));
     await admin.service.flush();
     expect(admin.send).toHaveBeenCalledOnce();
+  });
+
+  it('looks up the grant for every console request, with a nil id when there is no account', async () => {
+    const t = build();
+    await t.service.requestCode(request(ClientType.Console));
+    expect(t.repository.hasActiveSuperAdminGrant).toHaveBeenCalledWith(
+      expect.anything(),
+      '00000000-0000-0000-0000-000000000000',
+    );
+    expect(t.stored[0]?.codeHmac).toBeNull();
   });
 
   it('does not look up a grant for the mobile app', async () => {
@@ -186,19 +200,29 @@ describe('OtpService.requestCode', () => {
       expect(error.options.retryAfterSeconds).toBe(900);
     });
 
-    it('counts requests from the IP', async () => {
+    it('asks the limiter about the IP first, and stops when it refuses', async () => {
       const t = build({ user: user() });
-      t.times.ip = Array.from({ length: 20 }, () => t.clock.now());
+      t.check.mockRejectedValue(new AppException(429, 'RATE_LIMITED'));
       await expect(
         RequestContext.run({ requestId: 'r1', language: 'en', ipAddress: '203.0.113.9' }, () =>
           t.service.requestCode(request()),
         ),
       ).rejects.toMatchObject({ code: 'RATE_LIMITED' });
-      expect(t.repository.ipRequestTimes).toHaveBeenCalledWith(
-        expect.anything(),
-        '203.0.113.9',
-        expect.any(Date),
-      );
+      expect(t.check).toHaveBeenCalledWith('203.0.113.9');
+      expect(t.repository.tryLockEmail).not.toHaveBeenCalled();
+      expect(t.stored).toHaveLength(0);
+    });
+
+    it('answers at once, as too soon, when another request for the email is running', async () => {
+      const t = build({ user: user(), lockBusy: true });
+      const error = (await t.service
+        .requestCode(request())
+        .catch((e: unknown) => e)) as AppException;
+      expect(error.status).toBe(429);
+      expect(error.code).toBe('OTP_RESEND_TOO_SOON');
+      expect(error.options.retryAfterSeconds).toBe(60);
+      expect(t.repository.findUserByEmail).not.toHaveBeenCalled();
+      expect(t.stored).toHaveLength(0);
     });
   });
 

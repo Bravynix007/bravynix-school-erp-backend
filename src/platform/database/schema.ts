@@ -1,6 +1,7 @@
 import type { AuditLogsTable } from '../audit/audit.tables.js';
 import type {
   OtpChallengesTable,
+  PublicCallHitsTable,
   RoleAssignmentsTable,
   UsersTable,
 } from '../identity/identity.tables.js';
@@ -15,4 +16,5 @@ export interface Database {
   users: UsersTable;
   role_assignments: RoleAssignmentsTable;
   otp_challenges: OtpChallengesTable;
+  public_call_hits: PublicCallHitsTable;
 }

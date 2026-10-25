@@ -68,6 +68,7 @@ describe('AUTH-01 request a login code', () => {
 
   beforeEach(async () => {
     await sql`delete from otp_challenges`.execute(owner);
+    await sql`delete from public_call_hits`.execute(owner);
     await sql`update users set locked_until = null`.execute(owner);
     t = await createTestApp();
     otp = t.app.get(OtpService);
@@ -272,6 +273,45 @@ describe('AUTH-01 request a login code', () => {
       await mobile('person99@two-worlds.test').expect(202);
     });
 
+    it('holds the limit under parallel calls from one address', async () => {
+      const results = await Promise.all(
+        Array.from({ length: 40 }, (_, i) => mobile(`parallel${i}@two-worlds.test`)),
+      );
+      const limited = results.filter((res) => res.body.code === 'RATE_LIMITED');
+      expect(results.filter((res) => res.status === 202)).toHaveLength(20);
+      expect(limited).toHaveLength(20);
+    });
+
+    it('counts refused calls too, so one address cannot hammer one email for free', async () => {
+      await mobile(registered).expect(202);
+      for (let i = 0; i < 19; i += 1) {
+        expect((await mobile(registered).expect(429)).body.code).toBe('OTP_RESEND_TOO_SOON');
+      }
+      const res = await mobile(registered).expect(429);
+      expect(res.body.code).toBe('RATE_LIMITED');
+      expect(Number(res.headers['retry-after'])).toBeGreaterThan(0);
+      expect(await challenges(registered)).toHaveLength(1);
+      // Refused-for-rate calls are counted as well, so the address stays limited while it keeps calling.
+      t.clock.advance(30_000);
+      expect((await mobile(registered).expect(429)).body.code).toBe('RATE_LIMITED');
+      t.clock.advance(61_000);
+      await mobile(registered).expect(202);
+    });
+
+    it('answers at once, as too soon, when another request for the email holds the lock', async () => {
+      const key = new OtpHasher(secret).email(registered).toString('hex');
+      await owner.transaction().execute(async (held) => {
+        await sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`.execute(held);
+        const started = Date.now();
+        const res = await mobile(registered).expect(429);
+        expect(Date.now() - started).toBeLessThan(1500);
+        expect(res.body.code).toBe('OTP_RESEND_TOO_SOON');
+        expect(res.headers['retry-after']).toBe('60');
+      });
+      expect(await challenges(registered)).toHaveLength(0);
+      await mobile(registered).expect(202);
+    });
+
     it('refuses a locked account with 423 and Retry-After', async () => {
       const until = new Date(t.clock.now().getTime() + 25 * 60_000);
       await sql`update users set locked_until = ${until} where email = ${registered}`.execute(
@@ -459,6 +499,12 @@ describe('identity tables', () => {
       );
       await expect(sql`truncate users`.execute(database.db)).rejects.toThrow(/permission denied/);
     });
+
+    it('cannot be deleted from by the app role: accounts are deactivated, not removed', async () => {
+      await expect(
+        sql`delete from users where email = ${personaByKey('SA1').email}`.execute(database.db),
+      ).rejects.toThrow(/permission denied/);
+    });
   });
 
   describe('role_assignments', () => {
@@ -557,6 +603,12 @@ describe('identity tables', () => {
   });
 
   describe('otp_challenges', () => {
+    it('is swept by a platform job, not by the app role', async () => {
+      await expect(sql`delete from otp_challenges`.execute(database.db)).rejects.toThrow(
+        /permission denied/,
+      );
+    });
+
     it('needs an account exactly when it has a code, and fixed-size hashes', async () => {
       await expect(insert('user_id', [personaByKey('SA1').id])).rejects.toThrow(
         /ck_otp_challenges_account/,
@@ -572,5 +624,27 @@ describe('identity tables', () => {
       await expect(insert('attempt_count', [6])).rejects.toThrow(/ck_otp_challenges_attempts/);
       await expect(insert('purpose', [3])).rejects.toThrow(/ck_otp_challenges_purpose/);
     });
+  });
+});
+
+describe('public_call_hits', () => {
+  it('lets the app role add and read hits but not change or remove them', async () => {
+    const t = await createTestApp();
+    try {
+      const { db } = t.app.get(DatabaseService);
+      await sql`insert into public_call_hits (ip) values ('203.0.113.50')`.execute(db);
+      const { rows } = await sql<{ n: number }>`
+        select count(*)::int as n from public_call_hits where ip = '203.0.113.50'`.execute(db);
+      expect(rows[0]?.n).toBeGreaterThan(0);
+      await expect(
+        sql`update public_call_hits set ip = '203.0.113.51'`.execute(db),
+      ).rejects.toThrow(/permission denied/);
+      await expect(sql`delete from public_call_hits`.execute(db)).rejects.toThrow(
+        /permission denied/,
+      );
+      await expect(sql`truncate public_call_hits`.execute(db)).rejects.toThrow(/permission denied/);
+    } finally {
+      await t.close();
+    }
   });
 });

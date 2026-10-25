@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { sql } from 'kysely';
+import { newId } from '../../common/ids/ids.js';
 import type { Tx } from '../database/index.js';
 import { AccountStatus } from './auth-codes.js';
 
@@ -53,11 +54,18 @@ export class IdentityRepository {
     return row !== undefined;
   }
 
-  /** One request at a time per email, so two parallel requests cannot both pass the limits. */
-  async lockEmail(tx: Tx, emailHmac: Buffer): Promise<void> {
-    await sql`select pg_advisory_xact_lock(hashtextextended(${emailHmac.toString('hex')}, 0))`.execute(
+  /**
+   * One request at a time per email, so two parallel requests cannot both pass
+   * the limits. Does not wait: false means another request for this email is
+   * running right now.
+   */
+  async tryLockEmail(tx: Tx, emailHmac: Buffer): Promise<boolean> {
+    const { rows } = await sql<{
+      locked: boolean;
+    }>`select pg_try_advisory_xact_lock(hashtextextended(${emailHmac.toString('hex')}, 0)) as locked`.execute(
       tx,
     );
+    return rows[0]?.locked === true;
   }
 
   /** Request times for an email since `since`, newest first. */
@@ -72,12 +80,31 @@ export class IdentityRepository {
     return rows.map((row) => row.created_at);
   }
 
-  async ipRequestTimes(tx: Tx, ip: string, since: Date): Promise<Date[]> {
+  /**
+   * One count at a time per IP, so parallel calls from one address cannot all
+   * read the count before any of them has added to it. Held only for the
+   * short transaction that records and counts.
+   */
+  async lockIp(tx: Tx, ip: string): Promise<void> {
+    await sql`select pg_advisory_xact_lock(hashtextextended(${`ip:${ip}`}, 0))`.execute(tx);
+  }
+
+  /** Notes a call to a public endpoint from this IP (API design 18.1). */
+  async recordPublicCall(tx: Tx, ip: string, at: Date): Promise<void> {
+    await tx
+      .insertInto('public_call_hits')
+      .values({ id: newId(), created_at: at, ip: sql<string>`${ip}::inet` })
+      .execute();
+  }
+
+  /** Calls from this IP since `since`, oldest first. */
+  async publicCallTimes(tx: Tx, ip: string, since: Date): Promise<Date[]> {
     const rows = await tx
-      .selectFrom('otp_challenges')
+      .selectFrom('public_call_hits')
       .select('created_at')
-      .where('request_ip', '=', sql<string>`${ip}::inet`)
+      .where('ip', '=', sql<string>`${ip}::inet`)
       .where('created_at', '>', since)
+      .orderBy('created_at', 'asc')
       .execute();
     return rows.map((row) => row.created_at);
   }
