@@ -10,6 +10,7 @@ import { HealthModule } from './health/health.module.js';
 import { AuditModule } from './platform/audit/audit.module.js';
 import { DatabaseModule } from './platform/database/database.module.js';
 import { EmailModule } from './platform/email/email.module.js';
+import { IdentityModule } from './platform/identity/identity.module.js';
 
 @Module({
   imports: [
@@ -58,8 +59,9 @@ import { EmailModule } from './platform/email/email.module.js';
     DatabaseModule,
     EmailModule,
     AuditModule,
+    IdentityModule,
     HealthModule,
-    // Platform modules (Identity, Tenancy, Files, Notifications, Jobs)
+    // Platform modules (Tenancy, Files, Notifications, Jobs)
     // and business modules are registered here as they are built.
   ],
 })

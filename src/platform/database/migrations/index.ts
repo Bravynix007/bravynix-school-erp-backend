@@ -1,6 +1,7 @@
 import type { Migration, MigrationProvider } from 'kysely/migration';
 import * as m0001 from './2026_10_23_0001_foundation.js';
 import * as m0002 from './2026_10_25_0002_audit_logs.js';
+import * as m0003 from './2026_10_25_0003_identity_users_otp.js';
 
 /**
  * Every migration, in order. Listed explicitly (not read from disk) so the
@@ -13,6 +14,7 @@ import * as m0002 from './2026_10_25_0002_audit_logs.js';
 const migrations: Record<string, Migration> = {
   '2026_10_23_0001_foundation': m0001,
   '2026_10_25_0002_audit_logs': m0002,
+  '2026_10_25_0003_identity_users_otp': m0003,
 };
 
 export const migrationProvider: MigrationProvider = {

@@ -1,6 +1,7 @@
 import '../bootstrap/load-env.js';
 import { Kysely, PostgresDialect, sql } from 'kysely';
 import { createPool } from '../platform/database/database.service.js';
+import { writeIdentitySeed } from '../seeds/identity-seed.js';
 import { children, institutions, personas, societies } from '../seeds/two-worlds.js';
 import { assertSeedable } from './seed-guard.js';
 
@@ -15,7 +16,8 @@ import { assertSeedable } from './seed-guard.js';
 type SeedWriter = (db: Kysely<unknown>) => Promise<void>;
 
 const writers: SeedWriter[] = [
-  // Phase 1: identity + tenancy writers go here.
+  writeIdentitySeed,
+  // Tenancy writers (Societies, Institutions, staff and role 3 grants) join as they are built.
 ];
 
 async function main(): Promise<void> {
@@ -42,9 +44,6 @@ async function main(): Promise<void> {
       `Scenario two-worlds: ${societies.length} Societies, ${institutions.length} Institutions,`,
     );
     console.log(`${personas.length} personas, ${children.length} children.`);
-    if (writers.length === 0) {
-      console.log('No tables to fill yet: writers arrive with the Identity and Tenancy modules.');
-    }
     for (const p of personas)
       console.log(`  ${p.key.padEnd(16)} ${p.email.padEnd(36)} ${p.status}`);
   } finally {

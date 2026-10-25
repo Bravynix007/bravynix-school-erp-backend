@@ -487,13 +487,21 @@ describe('audit log', () => {
 });
 
 describe('rolling back', () => {
-  it('is refused in production, so the audit history cannot be erased', async () => {
+  it('is refused in production, so accounts and the audit history cannot be erased', async () => {
     await runMigrations(migrationUrl, 'latest');
     const previous = process.env.NODE_ENV;
     process.env.NODE_ENV = 'production';
     try {
       const result = await runMigrations(migrationUrl, 'down');
-      expect(String(result.error)).toMatch(/Refusing to drop audit_logs in production/);
+      expect(String(result.error)).toMatch(/Refusing to drop the identity tables in production/);
+      // Each migration after the audit log carries the same guard; the audit one is checked
+      // directly, since 'down' only steps back the latest.
+      const { down } =
+        await import('../../src/platform/database/migrations/2026_10_25_0002_audit_logs.js');
+      process.env.NODE_ENV = 'production';
+      await expect(down(null as never)).rejects.toThrow(
+        /Refusing to drop audit_logs in production/,
+      );
     } finally {
       process.env.NODE_ENV = previous;
     }
@@ -518,6 +526,14 @@ describe('tenant tables (DDD 15.3 checks in the build)', () => {
     await t.close();
   });
 
+  /**
+   * Identity tables are global (DDD 15.3 "None"): the login reads a person's
+   * grants before any Society is known. `role_assignments` names a Society as
+   * the scope of a grant; it is not a tenant row. The list stays short and
+   * explicit so a new table cannot slip out of the check.
+   */
+  const globalIdentityTables = ['role_assignments'];
+
   const tenantTables = async () => {
     const { rows } = await sql<{ name: string; rls: boolean; forced: boolean }>`
       select c.relname as name, c.relrowsecurity as rls, c.relforcerowsecurity as forced
@@ -526,6 +542,7 @@ describe('tenant tables (DDD 15.3 checks in the build)', () => {
       where n.nspname = 'public'
         and c.relkind in ('r', 'p')
         and not c.relispartition
+        and c.relname <> all (${globalIdentityTables})
         and exists (
           select 1 from pg_attribute a
           where a.attrelid = c.oid and a.attname in ('society_id', 'institution_id') and not a.attisdropped

@@ -39,6 +39,11 @@ const en: Catalogue = {
   RATE_LIMITED: 'Too many requests, please try again shortly',
   INTERNAL_ERROR: 'Something went wrong',
   SERVICE_UNAVAILABLE: 'The service is temporarily unavailable, please try again',
+  // Login (API design 6.2, 10.1, 10.2)
+  OTP_SENT_IF_REGISTERED: 'If this email is registered, a code has been sent',
+  OTP_RESEND_TOO_SOON: 'Please wait a minute before asking for another code',
+  OTP_REQUEST_LIMIT: 'Too many code requests, please try again later',
+  AUTH_LOCKED: 'Too many failed attempts, please try again later',
   // Field codes
   REQUIRED: 'This field is required',
   FIELD_NOT_ALLOWED: 'This field is not allowed',

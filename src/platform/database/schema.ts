@@ -1,4 +1,9 @@
 import type { AuditLogsTable } from '../audit/audit.tables.js';
+import type {
+  OtpChallengesTable,
+  RoleAssignmentsTable,
+  UsersTable,
+} from '../identity/identity.tables.js';
 
 /**
  * Kysely table types, one interface per table, added by the module that owns
@@ -7,4 +12,7 @@ import type { AuditLogsTable } from '../audit/audit.tables.js';
  */
 export interface Database {
   audit_logs: AuditLogsTable;
+  users: UsersTable;
+  role_assignments: RoleAssignmentsTable;
+  otp_challenges: OtpChallengesTable;
 }

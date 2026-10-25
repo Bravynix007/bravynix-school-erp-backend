@@ -49,6 +49,22 @@ export const envSchema = z
     SMTP_URL: z.string().optional(),
     EMAIL_FROM: z.string().default('BravyNix School ERP <no-reply@localhost>'),
 
+    /**
+     * Secret for the keyed hashes of emails and login codes (SDD 13.2), at
+     * least 32 characters. Required in staging and production; elsewhere a
+     * random one is made at start, so codes do not survive a restart.
+     */
+    OTP_HMAC_SECRET: z.string().min(32).optional(),
+    /**
+     * Development only: a login code request for a registered account also
+     * returns the code, so the app can be tried without a mail server. The
+     * process refuses to start with it on in staging or production.
+     */
+    OTP_DEV_ECHO: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((value) => value === 'true'),
+
     /** Below these app versions the API answers 426 APP_UPDATE_REQUIRED (API design 5.2). */
     MIN_APP_VERSION_ANDROID: semver,
     MIN_APP_VERSION_IOS: semver,
@@ -84,6 +100,20 @@ export const envSchema = z
         code: 'custom',
         path: ['EMAIL_FROM'],
         message: 'must be a verified sender address in staging and production',
+      });
+    }
+    if (deployed && !env.OTP_HMAC_SECRET) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['OTP_HMAC_SECRET'],
+        message: 'is required in staging and production',
+      });
+    }
+    if (deployed && env.OTP_DEV_ECHO) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['OTP_DEV_ECHO'],
+        message: 'must be false in staging and production',
       });
     }
     if (env.NODE_ENV === 'production' && env.OPENAPI_UI) {
