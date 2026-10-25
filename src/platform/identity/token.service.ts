@@ -57,6 +57,13 @@ export class TokenService {
   ) {
     if (signingKeyPem) {
       this.privateKey = createPrivateKey(signingKeyPem.replaceAll(String.raw`\n`, '\n'));
+      // Fail at start, not at the first login after a code has been used up.
+      if (
+        this.privateKey.asymmetricKeyType !== 'ec' ||
+        this.privateKey.asymmetricKeyDetails?.namedCurve !== 'prime256v1'
+      ) {
+        throw new Error('JWT_SIGNING_KEY must be a P-256 (ES256) private key');
+      }
       this.publicKey = createPublicKey(this.privateKey);
     } else {
       const pair = generateKeyPairSync('ec', { namedCurve: 'P-256' });

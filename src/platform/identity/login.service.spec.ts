@@ -203,7 +203,21 @@ describe('LoginService.verify', () => {
       0,
       expect.any(Date),
     );
-    expect(unknown.identity.setUserFailures).not.toHaveBeenCalled();
+    // The same statement runs for an unknown email, with an id that matches no row.
+    expect(unknown.identity.setUserFailures).toHaveBeenCalledWith(
+      expect.anything(),
+      '00000000-0000-0000-0000-000000000000',
+      0,
+      expect.any(Date),
+    );
+    expect(unknown.record).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.not.objectContaining({ entityId: expect.anything() }),
+    );
+    expect(registered.record).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ entityType: 'user', entityId: user().id }),
+    );
   });
 
   it('never matches a code stored for no account', async () => {

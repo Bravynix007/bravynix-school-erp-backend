@@ -53,6 +53,7 @@ const DAY_MS = 24 * 3600 * 1000;
 /** Mobile sessions last 30 days from last use (SDD NFR-14); console sessions arrive with slice B8. */
 const MOBILE_SESSION_MS = 30 * DAY_MS;
 const NO_CODE = Buffer.alloc(32);
+const NIL_UUID = '00000000-0000-0000-0000-000000000000';
 
 type Outcome =
   | { kind: 'refused'; error: AppException }
@@ -265,13 +266,15 @@ export class LoginService {
       const until = new Date(now.getTime() + OTP_LIMITS.lockSeconds * 1000);
       const since = new Date(now.getTime() - 24 * 3600 * 1000);
       await this.identity.lockChallenges(tx, emailHmac, until, since);
-      if (user) await this.identity.setUserFailures(tx, user.id, 0, until);
+      // The update runs for an unknown email too (a nil id matches no row), so the work is the same.
+      await this.identity.setUserFailures(tx, user?.id ?? NIL_UUID, 0, until);
       // The same entry for a registered and an unknown email.
       await this.audit.record(tx, {
         action: 'auth.lockout',
         institutionId: null,
         societyId: null,
         outcome: AuditOutcome.Denied,
+        ...(user ? { entityType: 'user', entityId: user.id } : {}),
         actor: { userId: null, roleCode: null, displayName: null },
       });
       return refused(
@@ -280,7 +283,7 @@ export class LoginService {
         OTP_LIMITS.lockSeconds,
       );
     }
-    if (user) await this.identity.setUserFailures(tx, user.id, tries, null);
+    await this.identity.setUserFailures(tx, user?.id ?? NIL_UUID, tries, null);
     return {
       kind: 'refused',
       error: new AppException(HttpStatus.UNAUTHORIZED, AuthCode.OTP_INVALID, {
