@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   changedFields,
   MAX_AUDIT_VALUES_BYTES,
@@ -146,6 +147,38 @@ describe('redactValues', () => {
       note: 'Aadhaar XXXX XXXX 9012 given',
       remarks: ['seen XXXX XXXX 9012', 'ref XXXX XXXX 9012.'],
       nested: { text: 'no. XXXX XXXX 7777' },
+    });
+  });
+
+  it('leaves a UUID alone even when its last group is 12 digits (N1)', () => {
+    const id = '0192f6b0-11aa-7c3d-9b4f-123456789012';
+    expect(redactValues({ sectionId: id, nested: { ids: [id] }, note: `section ${id}.` })).toEqual({
+      sectionId: id,
+      nested: { ids: [id] },
+      note: `section ${id}.`,
+    });
+  });
+
+  it('leaves randomly generated UUIDs unchanged (N1)', () => {
+    for (let i = 0; i < 20_000; i += 1) {
+      const id = randomUUID();
+      expect(redactValues({ id }).id).toBe(id);
+    }
+  });
+
+  it('still masks an Aadhaar number set off by punctuation (N1)', () => {
+    expect(
+      redactValues({
+        a: '(1234 5678 9012).',
+        b: 'ID:123456789012',
+        c: '1234-5678-9012',
+        d: '123456789012',
+      }),
+    ).toEqual({
+      a: '(XXXX XXXX 9012).',
+      b: 'ID:XXXX XXXX 9012',
+      c: 'XXXX XXXX 9012',
+      d: 'XXXX XXXX 9012',
     });
   });
 

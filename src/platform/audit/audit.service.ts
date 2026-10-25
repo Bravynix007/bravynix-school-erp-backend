@@ -106,7 +106,8 @@ export function buildAuditRow(
     throw new Error(`Audit action "${entry.action}" needs a Society inside a tenant request`);
   }
   const { old: oldValues, new: newValues } = changedFields(entry.before, entry.after);
-  const ip = context?.ipAddress;
+  // A link-local IPv6 address may carry a zone ("fe80::1%eth0"), which inet refuses.
+  const ip = context?.ipAddress?.split('%')[0];
   return {
     id,
     created_at: now,

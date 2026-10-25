@@ -36,13 +36,13 @@ const NEVER_LOGGED = new RegExp(
       'authorization',
       'credential',
       'cvv',
-      'api_key',
+      'api_?key',
       'private_key',
       'access_key',
       'recovery_code',
       'backup_code',
     ].join('|') +
-    ')(_|e?s$|$)',
+    ')(_|\\d|e?s$|$)|(^|_)m?pins?$',
 );
 
 /**
@@ -53,12 +53,18 @@ const NEVER_LOGGED = new RegExp(
 const MASKED = [
   /(^|_)aadhaa?r(_(no|num|number|id))?$/,
   /(^|_)(bank_)?(account|acct)(_(no|num|number))?$/,
+  /(^|_)ac_(no|num|number)$/,
 ];
 
 const LAST4_SUFFIX = /_last4$/;
 
-/** A 12-digit Aadhaar shape, with or without separators, inside any text. */
-const AADHAAR_SHAPE = /\b(\d{4})[ -]?(\d{4})[ -]?(\d{4})\b/g;
+/**
+ * A 12-digit Aadhaar shape, with or without separators, inside any text. Not
+ * part of a longer word or dash-joined token, so the 12-digit last group of a
+ * UUID is left alone (about 1 UUID in 90 has one). The cost: "ID-123456789012"
+ * is not caught here; the key patterns catch named fields.
+ */
+const AADHAAR_SHAPE = /(?<![\w-])(\d{4})[ -]?(\d{4})[ -]?(\d{4})(?![\w-])/g;
 
 function snake(name: string): string {
   return name
@@ -143,10 +149,19 @@ export function changedFields(
   return { old: redactValues(oldValues), new: redactValues(newValues) };
 }
 
+/** Half of a UTF-16 pair with no other half. */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
 /** Serialises for the jsonb column and refuses a value that is too large. */
 export function serializeValues(values: AuditValues | null): string | null {
   if (values === null) return null;
-  const text = JSON.stringify(values);
+  // jsonb cannot hold U+0000 or a lone surrogate; either would fail the change
+  // being recorded, so drop the first and replace the second.
+  const text = JSON.stringify(values, (_key, value: unknown) =>
+    typeof value === 'string'
+      ? value.replaceAll('\u0000', '').replace(LONE_SURROGATE, '\uFFFD')
+      : value,
+  );
   if (Buffer.byteLength(text, 'utf8') > MAX_AUDIT_VALUES_BYTES) {
     throw new Error(
       `Audit values are over ${MAX_AUDIT_VALUES_BYTES} bytes; record the changed fields only`,

@@ -130,6 +130,11 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     declare
       month_start date;
       part_name text;
+      month_from timestamptz;
+      month_to timestamptz;
+      strays boolean;
+      moved bigint;
+      removed bigint;
       made integer := 0;
     begin
       if months_ahead < 0 or months_ahead > 24 then
@@ -139,17 +144,50 @@ export async function up(db: Kysely<unknown>): Promise<void> {
         month_start := (date_trunc('month', first_month) + make_interval(months => i))::date;
         part_name := format('audit_logs_%s', to_char(month_start, 'YYYY_MM'));
         if to_regclass(format('public.%I', part_name)) is null then
+          month_from := (to_char(month_start, 'YYYY-MM-DD') || ' 00:00:00+00')::timestamptz;
+          month_to := (to_char((month_start + interval '1 month')::date, 'YYYY-MM-DD')
+            || ' 00:00:00+00')::timestamptz;
+          -- A row that reached the default partition for this month (a wrong
+          -- clock, or a missed upkeep run) would make PostgreSQL refuse the new
+          -- partition, and so every later month in this call. Move such rows
+          -- into the new month: detach the default partition (a detached table
+          -- has no copied row trigger), make the month, copy, remove, reattach,
+          -- all in this transaction. Rows are moved, never lost; the count is
+          -- checked.
+          strays := false;
+          if to_regclass('public.audit_logs_default') is not null then
+            select exists (
+              select 1 from public.audit_logs_default
+              where created_at >= month_from and created_at < month_to
+            ) into strays;
+          end if;
+          if strays then
+            alter table public.audit_logs detach partition public.audit_logs_default;
+          end if;
           execute format(
             'create table public.%I partition of public.audit_logs for values from (%L) to (%L)',
-            part_name,
-            to_char(month_start, 'YYYY-MM-DD') || ' 00:00:00+00',
-            to_char((month_start + interval '1 month')::date, 'YYYY-MM-DD') || ' 00:00:00+00'
+            part_name, month_from, month_to
           );
           execute format(
             'create trigger trg_audit_logs_no_truncate before truncate on public.%I '
             'for each statement execute function public.audit_logs_reject_change()',
             part_name
           );
+          if strays then
+            execute format(
+              'insert into public.%I select * from public.audit_logs_default '
+              'where created_at >= %L and created_at < %L',
+              part_name, month_from, month_to
+            );
+            get diagnostics moved = row_count;
+            delete from public.audit_logs_default
+              where created_at >= month_from and created_at < month_to;
+            get diagnostics removed = row_count;
+            if moved <> removed then
+              raise exception 'audit_logs: moved % rows but removed %', moved, removed;
+            end if;
+            alter table public.audit_logs attach partition public.audit_logs_default default;
+          end if;
           -- Policies on the parent do not apply to a partition addressed by
           -- name, so the app role gets no rights on it at all.
           if exists (select 1 from pg_roles where rolname = 'erp_app') then
@@ -203,6 +241,12 @@ export async function up(db: Kysely<unknown>): Promise<void> {
 }
 
 export async function down(db: Kysely<unknown>): Promise<void> {
+  // The history is append-only and kept for three years: a rollback must not
+  // erase it. Development and test databases may be reset; production
+  // migrations only add (SDD 16.6).
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('Refusing to drop audit_logs in production: it holds the audit history');
+  }
   await sql`drop table if exists audit_logs cascade`.execute(db);
   await sql`drop function if exists audit_logs_reject_change()`.execute(db);
   await sql`drop function if exists maintenance.ensure_audit_partitions(date, integer)`.execute(db);

@@ -435,6 +435,46 @@ describe('audit log', () => {
       ).rejects.toThrow(/permission denied/);
     });
 
+    it('move a stray default-partition row into its month, keep it, and leave the default attached (D1)', async () => {
+      for (const month of ['04', '05', '06', '07']) {
+        await asOwner(`drop table if exists audit_logs_2045_${month}`);
+      }
+      const strayId = newId();
+      await asOwner(
+        `insert into audit_logs (id, action, created_at) values ($1, 'qa.stray', '2045-05-10T00:00:00Z')`,
+        [strayId],
+      );
+      const before = await asOwner<{ part: string }>(
+        `select tableoid::regclass::text as part from audit_logs_default where id = $1`,
+        [strayId],
+      );
+      expect(before.rows).toEqual([{ part: 'audit_logs_default' }]);
+
+      const made = await asOwner<{ made: number }>(
+        `select maintenance.ensure_audit_partitions('2045-04-01', 3) as made`,
+      );
+      expect(made.rows[0]?.made).toBe(4);
+
+      const kept = await asOwner<{ part: string }>(
+        `select tableoid::regclass::text as part from audit_logs_2045_05 where id = $1`,
+        [strayId],
+      );
+      expect(kept.rows).toEqual([{ part: 'audit_logs_2045_05' }]);
+      const left = await asOwner<{ n: number }>(
+        `select count(*)::int as n from audit_logs_default where id = $1`,
+        [strayId],
+      );
+      expect(left.rows[0]?.n).toBe(0);
+
+      // The default partition is attached again and still guarded.
+      const attached = await asOwner<{ bound: string }>(
+        `select pg_get_expr(relpartbound, oid) as bound from pg_class where relname = 'audit_logs_default'`,
+      );
+      expect(attached.rows).toEqual([{ bound: 'DEFAULT' }]);
+      await expect(asOwner(`truncate audit_logs_default`)).rejects.toThrow(/append-only/);
+      await expect(asOwner(`delete from audit_logs_default`)).rejects.toThrow(/append-only/);
+    });
+
     it('refuses an out-of-range look-ahead', async () => {
       await expect(
         asOwner(`select maintenance.ensure_audit_partitions('2032-01-01', 25)`),
@@ -443,6 +483,24 @@ describe('audit log', () => {
         asOwner(`select maintenance.ensure_audit_partitions('2032-01-01', -1)`),
       ).rejects.toThrow(/months_ahead/);
     });
+  });
+});
+
+describe('rolling back', () => {
+  it('is refused in production, so the audit history cannot be erased', async () => {
+    await runMigrations(migrationUrl, 'latest');
+    const previous = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      const result = await runMigrations(migrationUrl, 'down');
+      expect(String(result.error)).toMatch(/Refusing to drop audit_logs in production/);
+    } finally {
+      process.env.NODE_ENV = previous;
+    }
+    const { rows } = await asOwner<{ found: boolean }>(
+      `select to_regclass('public.audit_logs') is not null as found`,
+    );
+    expect(rows[0]?.found).toBe(true);
   });
 });
 
