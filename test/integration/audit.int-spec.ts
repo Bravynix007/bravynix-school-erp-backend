@@ -144,7 +144,7 @@ describe('audit log', () => {
     it('refuses an entry for another Society or an Institution outside the caller’s scope', async () => {
       await expect(
         database.transaction({ societyId: societyA, institutionIds: [institutionA1] }, (tx) =>
-          audit.record(tx, { action: 'student.create', societyId: societyB }),
+          audit.record(tx, { action: 'student.create', institutionId: null, societyId: societyB }),
         ),
       ).rejects.toThrow(/row-level security/);
       await expect(
@@ -161,9 +161,19 @@ describe('audit log', () => {
     it('refuses an entry written with no scope at all that names a Society', async () => {
       await expect(
         database.transaction({}, (tx) =>
-          audit.record(tx, { action: 'student.create', societyId: societyA }),
+          audit.record(tx, { action: 'student.create', institutionId: null, societyId: societyA }),
         ),
       ).rejects.toThrow(/row-level security/);
+    });
+
+    it('refuses a tenant action written with no Society, which the tenant could never see (S2)', async () => {
+      await expect(
+        RequestContext.run({ requestId: newId(), language: 'en', societyId: societyA }, () =>
+          database.transaction({ societyId: societyA }, (tx) =>
+            audit.record(tx, { action: 'student.update', societyId: null, institutionId: null }),
+          ),
+        ),
+      ).rejects.toThrow(/needs a Society/);
     });
 
     it('accepts an entry that belongs to no Society (a login), which no tenant can read', async () => {
@@ -171,6 +181,7 @@ describe('audit log', () => {
       await database.transaction({}, (tx) =>
         audit.record(tx, {
           action: 'auth.login',
+          institutionId: null,
           societyId: null,
           entityType: 'user',
           entityId,
@@ -189,7 +200,12 @@ describe('audit log', () => {
       const entityId = newId();
       await expect(
         database.transaction({ societyId: societyA }, async (tx) => {
-          await audit.record(tx, { action: 'student.delete', entityId, societyId: societyA });
+          await audit.record(tx, {
+            action: 'student.delete',
+            institutionId: null,
+            entityId,
+            societyId: societyA,
+          });
           throw new Error('the change failed');
         }),
       ).rejects.toThrow('the change failed');
@@ -204,7 +220,7 @@ describe('audit log', () => {
     it('fails the change when the entry cannot be written', async () => {
       await expect(
         database.transaction({ societyId: societyA }, (tx) =>
-          audit.record(tx, { action: 'Not A Valid Action' }),
+          audit.record(tx, { action: 'Not A Valid Action', institutionId: null }),
         ),
       ).rejects.toThrow(/Invalid audit action/);
     });
@@ -214,6 +230,7 @@ describe('audit log', () => {
       await database.transaction({ societyId: societyA }, (tx) =>
         audit.record(tx, {
           action: 'access.revoke',
+          institutionId: null,
           entityId,
           societyId: societyA,
           outcome: AuditOutcome.Denied,
@@ -229,7 +246,12 @@ describe('audit log', () => {
     beforeAll(async () => {
       const entityId = newId();
       rowId = await database.transaction({ societyId: societyA }, (tx) =>
-        audit.record(tx, { action: 'society.update', entityId, societyId: societyA }),
+        audit.record(tx, {
+          action: 'society.update',
+          institutionId: null,
+          entityId,
+          societyId: societyA,
+        }),
       );
     });
 
@@ -293,6 +315,31 @@ describe('audit log', () => {
       expect(rows.filter((row) => !row.guarded)).toEqual([]);
     });
 
+    it('refuses TRUNCATE even from the table owner, on the table and on every kind of partition (S3)', async () => {
+      await asOwner(`select maintenance.ensure_audit_partitions('2032-01-01', 0)`);
+      for (const target of [
+        'audit_logs',
+        TEST_PARTITION,
+        'audit_logs_default',
+        'audit_logs_2032_01',
+      ]) {
+        await expect(asOwner(`truncate ${target}`)).rejects.toThrow(/append-only/);
+      }
+      const { rows } = await asOwner<{ name: string; guarded: boolean }>(`
+        select c.relname as name,
+               exists (
+                 select 1 from pg_trigger g
+                 where g.tgrelid = c.oid and g.tgname = 'trg_audit_logs_no_truncate' and not g.tgisinternal
+               ) as guarded
+        from pg_class c
+        where c.relkind in ('r', 'p')
+          and (c.relname = 'audit_logs' or (c.relispartition and c.relname like 'audit\\_logs\\_%'))
+      `);
+      expect(rows.length).toBeGreaterThanOrEqual(6);
+      expect(rows.filter((row) => !row.guarded)).toEqual([]);
+      await asOwner(`drop table if exists audit_logs_2032_01`);
+    });
+
     it('also refuses a change made directly on a partition', async () => {
       await expect(
         asOwner(`update ${TEST_PARTITION} set reason = 'edited' where id = $1`, [rowId]),
@@ -332,7 +379,12 @@ describe('audit log', () => {
       t.clock.set('2031-02-10T10:00:00.000Z');
       const entityId = newId();
       await database.transaction({ societyId: societyA }, (tx) =>
-        audit.record(tx, { action: 'society.update', entityId, societyId: societyA }),
+        audit.record(tx, {
+          action: 'society.update',
+          institutionId: null,
+          entityId,
+          societyId: societyA,
+        }),
       );
       t.clock.set(TEST_INSTANT);
       const where = await asOwner<{ part: string }>(
@@ -347,7 +399,12 @@ describe('audit log', () => {
       t.clock.set('2040-07-01T00:00:00.000Z');
       const entityId = newId();
       await database.transaction({ societyId: societyA }, (tx) =>
-        audit.record(tx, { action: 'society.update', entityId, societyId: societyA }),
+        audit.record(tx, {
+          action: 'society.update',
+          institutionId: null,
+          entityId,
+          societyId: societyA,
+        }),
       );
       t.clock.set(TEST_INSTANT);
       const where = await asOwner<{ part: string }>(
@@ -429,7 +486,9 @@ describe('tenant tables (DDD 15.3 checks in the build)', () => {
   it('shows the app role no rows from any of them when no tenant is set', async () => {
     // A tenant-less row exists, to prove the policy hides it rather than the table being empty.
     await database.transaction({}, (tx) =>
-      t.app.get(AuditService).record(tx, { action: 'auth.login', societyId: null }),
+      t.app
+        .get(AuditService)
+        .record(tx, { action: 'auth.login', institutionId: null, societyId: null }),
     );
     for (const table of await tenantTables()) {
       const { rows } = await sql<{ n: number }>`

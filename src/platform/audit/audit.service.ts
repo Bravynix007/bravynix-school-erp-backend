@@ -28,7 +28,12 @@ export interface AuditEntry {
    * `null` is for entries that belong to no Society (logins, platform actions).
    */
   societyId?: string | null;
-  institutionId?: string | null;
+  /**
+   * The Institution the action happened in, or `null` for a Society-level or
+   * person-level action. Required, so an Institution-level action cannot be
+   * written as a Society-level row by forgetting it.
+   */
+  institutionId: string | null;
   outcome?: AuditOutcome;
   /** Required by the rules that ask for one: cancellations, reveals, support access. */
   reason?: string;
@@ -43,6 +48,14 @@ export interface AuditEntry {
    */
   actor?: AuditActor;
 }
+
+/**
+ * Actions that belong to a person or to the platform rather than to one
+ * Society, so they may carry no Society even inside a tenant request. Any
+ * other action in a tenant request needs its Society, or the tenant's own
+ * audit view would never show it (API design 20.3).
+ */
+const SOCIETYLESS_ACTION = /^(auth|platform)\./;
 
 /** The row as inserted; exported so tests can check it without a database. */
 export interface AuditRow {
@@ -89,13 +102,16 @@ export function buildAuditRow(
     roleCode: context?.roleCode ?? null,
     displayName: context?.displayName ?? null,
   };
+  if (entry.societyId === null && context?.societyId && !SOCIETYLESS_ACTION.test(entry.action)) {
+    throw new Error(`Audit action "${entry.action}" needs a Society inside a tenant request`);
+  }
   const { old: oldValues, new: newValues } = changedFields(entry.before, entry.after);
   const ip = context?.ipAddress;
   return {
     id,
     created_at: now,
     society_id: entry.societyId === undefined ? (context?.societyId ?? null) : entry.societyId,
-    institution_id: entry.institutionId ?? null,
+    institution_id: entry.institutionId,
     actor_user_id: actor.userId,
     actor_role_code: actor.roleCode,
     actor_display_name: actor.displayName ? control(actor.displayName).slice(0, 200) : null,
@@ -125,7 +141,11 @@ export function buildAuditRow(
 export class AuditService {
   constructor(private readonly clock: Clock) {}
 
-  /** Returns the new entry's ID. */
+  /**
+   * Returns the new entry's ID. The insert must not use `.returning()`: the
+   * SELECT policy would apply to the returned row, and an entry with no
+   * Society (a login) is not readable by anyone in a tenant session.
+   */
   async record(tx: Tx, entry: AuditEntry): Promise<string> {
     const id = newId();
     const row = buildAuditRow(entry, RequestContext.current(), this.clock.now(), id);

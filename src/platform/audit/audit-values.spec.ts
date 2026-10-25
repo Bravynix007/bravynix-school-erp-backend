@@ -34,6 +34,14 @@ describe('changedFields', () => {
     expect(changedFields({ a: 1, b: 2 }, { a: 1 })).toEqual({ old: { b: 2 }, new: {} });
   });
 
+  it('ignores the order of keys inside a nested value (m6)', () => {
+    const result = changedFields(
+      { address: { city: 'Mysuru', pin: '570001' } },
+      { address: { pin: '570001', city: 'Mysuru' } },
+    );
+    expect(result).toEqual({ old: {}, new: {} });
+  });
+
   it('compares nested values by content', () => {
     const same = changedFields({ address: { city: 'Mysuru' } }, { address: { city: 'Mysuru' } });
     expect(same).toEqual({ old: {}, new: {} });
@@ -55,6 +63,95 @@ describe('redactValues', () => {
       totp_secret_ciphertext: 'zz',
     });
     expect(result).toEqual({ name: 'Asha' });
+  });
+
+  it('drops secrets under every common spelling, including acronyms and plurals (S1)', () => {
+    const secrets = [
+      'OTPCode',
+      'TOTPSecret',
+      'APIKey',
+      'JWT',
+      'jwt',
+      'pwd',
+      'passwd',
+      'mpin',
+      'pinHash',
+      'tokens',
+      'passwords',
+      'recoveryCodes',
+      'backup_codes',
+      'refreshTokens',
+      'cvv',
+      'salt',
+      'cookie',
+      'Authorization',
+      'credentials',
+      'privateKey',
+      'accessKey',
+      'secrets',
+      'hashes',
+    ];
+    const result = redactValues({
+      keep: 'yes',
+      ...Object.fromEntries(secrets.map((k) => [k, 'x'])),
+    });
+    expect(result).toEqual({ keep: 'yes' });
+  });
+
+  it('masks Aadhaar and bank numbers under every common spelling (S1)', () => {
+    const names = [
+      'aadhaarNo',
+      'aadhaar_no',
+      'aadhar_number',
+      'aadharNo',
+      'aadhaarNumber',
+      'aadhaar_id',
+      'bankAccountNo',
+      'bank_account_no',
+      'account_number',
+      'accountNumber',
+      'acct_no',
+      'account',
+      'studentAadhaar',
+      'guardian_aadhaar_number',
+    ];
+    const result = redactValues(Object.fromEntries(names.map((k) => [k, '1234 5678 9012'])));
+    for (const name of names) expect(result[name]).toEqual({ changed: true, last4: '9012' });
+    // Also inside a nested object.
+    expect(redactValues({ student: { aadhar_number: '123456789012' } })).toEqual({
+      student: { aadhar_number: { changed: true, last4: '9012' } },
+    });
+  });
+
+  it('keeps names that only share a word with a secret or an ID number', () => {
+    const kept = {
+      tokens_used: 1,
+      account_holder_name: 'Asha',
+      bank_name: 'SBI',
+      ifsc: 'SBIN0000001',
+      pin_code: '570001',
+      uid: 'u1',
+    };
+    expect(redactValues(kept)).toEqual(kept);
+  });
+
+  it('masks an Aadhaar-shaped number in any text, whatever the key (S1)', () => {
+    expect(
+      redactValues({
+        note: 'Aadhaar 1234 5678 9012 given',
+        remarks: ['seen 123456789012', 'ref 1234-5678-9012.'],
+        nested: { text: 'no. 9999 8888 7777' },
+      }),
+    ).toEqual({
+      note: 'Aadhaar XXXX XXXX 9012 given',
+      remarks: ['seen XXXX XXXX 9012', 'ref XXXX XXXX 9012.'],
+      nested: { text: 'no. XXXX XXXX 7777' },
+    });
+  });
+
+  it('leaves short numbers and ordinary text alone', () => {
+    const kept = { phone: '9999999999', roll: '12345', year: '2026-2027', note: 'Class 7A' };
+    expect(redactValues(kept)).toEqual(kept);
   });
 
   it('keeps fields that only look similar', () => {

@@ -16,7 +16,7 @@ const context = {
 describe('buildAuditRow', () => {
   it('takes the actor, tenant and request details from the request', () => {
     const row = buildAuditRow(
-      { action: 'student.update', entityType: 'student' },
+      { action: 'student.update', institutionId: null, entityType: 'student' },
       context,
       NOW,
       ID,
@@ -41,6 +41,7 @@ describe('buildAuditRow', () => {
     const row = buildAuditRow(
       {
         action: 'auth.login',
+        institutionId: null,
         societyId: null,
         actor: { userId: 'u-1', roleCode: 4, displayName: 'Ravi' },
       },
@@ -57,12 +58,22 @@ describe('buildAuditRow', () => {
   });
 
   it('uses null, not the caller’s Society, when the entry says it has none', () => {
-    const row = buildAuditRow({ action: 'society.create', societyId: null }, context, NOW, ID);
+    const row = buildAuditRow(
+      { action: 'platform.society.create', institutionId: null, societyId: null },
+      context,
+      NOW,
+      ID,
+    );
     expect(row.society_id).toBeNull();
   });
 
   it('leaves the actor empty for a system job', () => {
-    const row = buildAuditRow({ action: 'jobs.partition_upkeep' }, undefined, NOW, ID);
+    const row = buildAuditRow(
+      { action: 'jobs.partition_upkeep', institutionId: null },
+      undefined,
+      NOW,
+      ID,
+    );
     expect(row).toMatchObject({
       actor_user_id: null,
       actor_role_code: null,
@@ -78,6 +89,7 @@ describe('buildAuditRow', () => {
     const row = buildAuditRow(
       {
         action: 'student.update',
+        institutionId: null,
         before: { firstName: 'Diya', otp: '1' },
         after: { firstName: 'Diya R', otp: '2' },
       },
@@ -99,7 +111,9 @@ describe('buildAuditRow', () => {
     '1auth.login',
     `a.${'b'.repeat(60)}`,
   ])('refuses the action %j', (action) => {
-    expect(() => buildAuditRow({ action }, context, NOW, ID)).toThrow(/Invalid audit action/);
+    expect(() => buildAuditRow({ action, institutionId: null }, context, NOW, ID)).toThrow(
+      /Invalid audit action/,
+    );
   });
 
   it('accepts the action names of API design 20.3', () => {
@@ -111,19 +125,50 @@ describe('buildAuditRow', () => {
       'identity.reveal',
       'file.download',
     ]) {
-      expect(buildAuditRow({ action }, context, NOW, ID).action).toBe(action);
+      expect(buildAuditRow({ action, institutionId: null }, context, NOW, ID).action).toBe(action);
     }
+  });
+
+  it('refuses a null Society inside a tenant request, except for person and platform actions (S2)', () => {
+    // The tenant would never see it in its own audit view.
+    expect(() =>
+      buildAuditRow(
+        { action: 'student.update', societyId: null, institutionId: null },
+        context,
+        NOW,
+        ID,
+      ),
+    ).toThrow(/needs a Society/);
+    for (const action of ['auth.logout', 'auth.login', 'platform.society.create']) {
+      const row = buildAuditRow({ action, societyId: null, institutionId: null }, context, NOW, ID);
+      expect(row.society_id).toBeNull();
+    }
+    // Outside a tenant request (a Super Admin, a job) a null Society is fine for any action.
+    const { societyId: _societyId, ...platformContext } = context;
+    expect(
+      buildAuditRow(
+        { action: 'society.create', societyId: null, institutionId: null },
+        platformContext,
+        NOW,
+        ID,
+      ).society_id,
+    ).toBeNull();
   });
 
   it('refuses a reason over 500 characters', () => {
     expect(() =>
-      buildAuditRow({ action: 'support.start', reason: 'x'.repeat(501) }, context, NOW, ID),
+      buildAuditRow(
+        { action: 'support.start', institutionId: null, reason: 'x'.repeat(501) },
+        context,
+        NOW,
+        ID,
+      ),
     ).toThrow(/reason/);
   });
 
   it('drops an address that is not an IP, and cleans and cuts the user agent and name', () => {
     const row = buildAuditRow(
-      { action: 'auth.logout' },
+      { action: 'auth.logout', institutionId: null },
       {
         ...context,
         ipAddress: 'not-an-ip',
@@ -142,7 +187,7 @@ describe('buildAuditRow', () => {
 
   it('accepts an IPv6 address', () => {
     const row = buildAuditRow(
-      { action: 'auth.logout' },
+      { action: 'auth.logout', institutionId: null },
       { ...context, ipAddress: '2001:db8::1' },
       NOW,
       ID,

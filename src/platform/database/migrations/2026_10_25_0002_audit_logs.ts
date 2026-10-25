@@ -6,8 +6,9 @@ import { sql, type Kysely } from 'kysely';
  * caller's transaction.
  *
  * Three locks keep it unchangeable by the application: the app role has only
- * SELECT and INSERT, a trigger rejects UPDATE and DELETE even for the owner,
- * and the monthly partitions are not reachable by name from the app role.
+ * SELECT and INSERT, triggers reject UPDATE, DELETE and TRUNCATE even for the
+ * owner, and the monthly partitions are not reachable by name from the app
+ * role.
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`create schema if not exists maintenance`.execute(db);
@@ -70,6 +71,15 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       for each row execute function audit_logs_reject_change()
   `.execute(db);
 
+  // TRUNCATE is not covered by the row triggers and is not DDL, so pgaudit
+  // would not log it. Statement triggers are not copied to partitions, so
+  // each partition gets its own (below and in ensure_audit_partitions).
+  await sql`
+    create trigger trg_audit_logs_no_truncate
+      before truncate on audit_logs
+      for each statement execute function audit_logs_reject_change()
+  `.execute(db);
+
   // Row-level security (DDD 15.3). Separate policies for writing and reading:
   // a login or a platform action has no Society and may still be written, but
   // only a caller's own Society's rows can be read back.
@@ -115,7 +125,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       returns integer
     language plpgsql
     security definer
-    set search_path = pg_catalog, public
+    set search_path = pg_catalog, pg_temp
     as $$
     declare
       month_start date;
@@ -134,6 +144,11 @@ export async function up(db: Kysely<unknown>): Promise<void> {
             part_name,
             to_char(month_start, 'YYYY-MM-DD') || ' 00:00:00+00',
             to_char((month_start + interval '1 month')::date, 'YYYY-MM-DD') || ' 00:00:00+00'
+          );
+          execute format(
+            'create trigger trg_audit_logs_no_truncate before truncate on public.%I '
+            'for each statement execute function public.audit_logs_reject_change()',
+            part_name
           );
           -- Policies on the parent do not apply to a partition addressed by
           -- name, so the app role gets no rights on it at all.
@@ -168,6 +183,11 @@ export async function up(db: Kysely<unknown>): Promise<void> {
 
   // Rows that fit no month land here; the upkeep job alarms if it holds any.
   await sql`create table audit_logs_default partition of audit_logs default`.execute(db);
+  await sql`
+    create trigger trg_audit_logs_no_truncate
+      before truncate on audit_logs_default
+      for each statement execute function audit_logs_reject_change()
+  `.execute(db);
   await sql`
     do $$
     begin
