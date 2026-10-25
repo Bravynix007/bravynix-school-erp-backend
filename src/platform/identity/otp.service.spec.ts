@@ -15,6 +15,9 @@ import type { PublicCallLimiter } from './public-call-limiter.js';
 const EMAIL = 'asha@two-worlds.test';
 const user = (patch: Partial<LoginUser> = {}): LoginUser => ({
   id: '0192b0e0-0000-7000-8000-000000000001',
+  email: EMAIL,
+  firstName: 'Asha',
+  lastName: 'Rao',
   accountStatus: AccountStatus.Active as number,
   preferredLanguage: 'en',
   lockedUntil: null,

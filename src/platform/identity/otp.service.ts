@@ -1,8 +1,6 @@
 import { HttpStatus, Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
-import { isIP } from 'node:net';
 import { AppException } from '../../common/http/app-exception.js';
 import { newId } from '../../common/ids/ids.js';
-import { RequestContext } from '../../common/request-context/request-context.js';
 import { Clock } from '../../common/time/clock.js';
 import { AppConfig } from '../../config/app-config.js';
 import { DatabaseService } from '../database/index.js';
@@ -13,6 +11,7 @@ import { otpEmail } from './otp-email.js';
 import { OtpHasher, generateOtpCode } from './otp-hasher.js';
 import { evaluateOtpRequest, OTP_LIMITS } from './otp-limits.js';
 import { PublicCallLimiter } from './public-call-limiter.js';
+import { requestIp } from './request-ip.js';
 import { withTimeout } from './with-timeout.js';
 
 const NIL_UUID = '00000000-0000-0000-0000-000000000000';
@@ -34,14 +33,6 @@ function later(date: Date | null | undefined, other: Date | null | undefined): D
   if (!date) return other ?? null;
   if (!other) return date;
   return date > other ? date : other;
-}
-
-/** Callers send the address Express resolved; drop an IPv6 zone, which `inet` refuses. */
-function requestIp(): string | null {
-  const raw = RequestContext.current()?.ipAddress?.split('%')[0];
-  // A dual-stack socket reports an IPv4 caller as ::ffff:a.b.c.d.
-  const ip = raw?.replace(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i, '$1');
-  return ip && isIP(ip) ? ip : null;
 }
 
 /**

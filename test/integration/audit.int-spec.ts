@@ -493,15 +493,28 @@ describe('rolling back', () => {
     process.env.NODE_ENV = 'production';
     try {
       const result = await runMigrations(migrationUrl, 'down');
-      expect(String(result.error)).toMatch(/Refusing to drop the identity tables in production/);
-      // Each migration after the audit log carries the same guard; the audit one is checked
-      // directly, since 'down' only steps back the latest.
-      const { down } =
-        await import('../../src/platform/database/migrations/2026_10_25_0002_audit_logs.js');
-      process.env.NODE_ENV = 'production';
-      await expect(down(null as never)).rejects.toThrow(
-        /Refusing to drop audit_logs in production/,
-      );
+      // 'down' steps back the latest migration, whichever it is.
+      expect(String(result.error)).toMatch(/Refusing to drop .* in production/);
+      // Every migration that holds accounts, logins or history carries the same guard.
+      const guarded = [
+        [
+          await import('../../src/platform/database/migrations/2026_10_25_0002_audit_logs.js'),
+          /audit_logs/,
+        ],
+        [
+          await import('../../src/platform/database/migrations/2026_10_25_0003_identity_users_otp.js'),
+          /identity tables/,
+        ],
+        [
+          await import('../../src/platform/database/migrations/2026_10_25_0004_identity_sessions.js'),
+          /session tables/,
+        ],
+      ] as const;
+      for (const [migration, name] of guarded) {
+        await expect(migration.down(null as never)).rejects.toThrow(
+          new RegExp(`Refusing to drop .*${name.source}.* in production`),
+        );
+      }
     } finally {
       process.env.NODE_ENV = previous;
     }
