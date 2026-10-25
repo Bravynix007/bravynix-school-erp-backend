@@ -25,7 +25,10 @@ function build(
   options: { user?: LoginUser; superAdmin?: boolean; devEcho?: boolean; lockBusy?: boolean } = {},
 ) {
   const stored: NewChallenge[] = [];
-  const times = { email: [] as Date[], lock: null as Date | null };
+  const times = {
+    email: [] as { at: Date; sameAddress: boolean }[],
+    lock: null as Date | null,
+  };
   const repository = {
     tryLockEmail: vi.fn<IdentityRepository['tryLockEmail']>(async () => !options.lockBusy),
     findUserByEmail: vi.fn<IdentityRepository['findUserByEmail']>(async () => options.user),
@@ -165,7 +168,7 @@ describe('OtpService.requestCode', () => {
   describe('refusals', () => {
     it('refuses inside the 60-second gap, with Retry-After, and stores nothing', async () => {
       const t = build({ user: user() });
-      t.times.email = [new Date(t.clock.now().getTime() - 20_000)];
+      t.times.email = [{ at: new Date(t.clock.now().getTime() - 20_000), sameAddress: false }];
       const error = await t.service.requestCode(request()).catch((e: unknown) => e);
       expect(error).toBeInstanceOf(AppException);
       expect((error as AppException).code).toBe('OTP_RESEND_TOO_SOON');
@@ -180,6 +183,28 @@ describe('OtpService.requestCode', () => {
       });
       await expect(t.service.requestCode(request())).rejects.toMatchObject({
         code: AuthCode.AUTH_LOCKED,
+      });
+    });
+
+    it('gives each address its own three, and supersedes only codes from the same address', async () => {
+      const t = build({ user: user() });
+      const old = (seconds: number) => new Date(t.clock.now().getTime() - seconds * 1000);
+      // Three from another address do not stop this one.
+      t.times.email = [120, 300, 600].map((s) => ({ at: old(s), sameAddress: false }));
+      await RequestContext.run({ requestId: 'r1', language: 'en', ipAddress: '203.0.113.9' }, () =>
+        t.service.requestCode(request()),
+      );
+      expect(t.stored).toHaveLength(1);
+      expect(t.repository.supersedeLive).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        '203.0.113.9',
+        expect.any(Date),
+      );
+      // Three from this address do.
+      t.times.email = [120, 300, 600].map((s) => ({ at: old(s), sameAddress: true }));
+      await expect(t.service.requestCode(request())).rejects.toMatchObject({
+        code: 'OTP_REQUEST_LIMIT',
       });
     });
 
@@ -229,6 +254,9 @@ describe('OtpService.requestCode', () => {
   describe('the caller address', () => {
     it('drops an IPv6 zone, which inet refuses', async () => {
       expect(await ipSeen('fe80::1%eth0')).toBe('fe80::1');
+    });
+    it('reads an IPv4-mapped caller as IPv4', async () => {
+      expect(await ipSeen('::ffff:203.0.113.9')).toBe('203.0.113.9');
     });
     it('stores nothing for text that is not an address', async () => {
       expect(await ipSeen('not-an-ip')).toBeNull();

@@ -46,7 +46,7 @@ describe('QA: AUTH-01', () => {
 
   beforeEach(async () => {
     await sql`delete from otp_challenges`.execute(owner);
-    await sql`delete from public_call_hits`.execute(owner);
+    await sql`delete from public_call_counters`.execute(owner);
     await sql`update users set locked_until = null`.execute(owner);
     t = await createTestApp();
   });

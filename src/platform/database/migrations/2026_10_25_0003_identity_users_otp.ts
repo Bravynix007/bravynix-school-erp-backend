@@ -133,31 +133,36 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   // The 24-hour sweep (DDD 14.5).
   await sql`create index ix_otp_challenges_created on otp_challenges (created_at)`.execute(db);
 
-  // One row per call to a public login endpoint, refused or not, so the
-  // per-IP limit (API design 18.1) counts the calls that cost work and not
-  // only the codes issued. Counters are rebuilt in a minute, so the table is
-  // not WAL-logged. A platform job sweeps it (DDD 14.5).
+  // One counter row per IP per minute for calls to the public login
+  // endpoints, refused or not, so the per-IP limit (API design 18.1) counts
+  // the calls that cost work and not only the codes issued. A single
+  // autocommitted upsert bumps it: no transaction and no lock held, and the
+  // table stays one row per IP per minute however large a flood is. Counters
+  // are rebuilt in a minute, so the table is not WAL-logged. A platform job
+  // sweeps it (DDD 14.5).
   await sql`
-    create unlogged table public_call_hits (
-      id uuid primary key default gen_random_uuid(),
+    create unlogged table public_call_counters (
+      ip inet not null,
+      window_start timestamptz not null,
+      calls integer not null default 0,
       created_at timestamptz not null default now(),
-      ip inet not null
+      constraint pk_public_call_counters primary key (ip, window_start),
+      constraint ck_public_call_counters_calls check (calls >= 0)
     )
   `.execute(db);
   await sql`
-    create index ix_public_call_hits_ip_created on public_call_hits (ip, created_at desc)
+    create index ix_public_call_counters_window on public_call_counters (window_start)
   `.execute(db);
-  await sql`create index ix_public_call_hits_created on public_call_hits (created_at)`.execute(db);
 
   // Least privilege (DDD 15.2). Accounts are deactivated and grants revoked,
-  // never deleted; challenges and hits are swept by a platform job, not by
+  // never deleted; challenges and counters are swept by a platform job, not by
   // the app role.
   await sql`
     do $$
     begin
       if exists (select 1 from pg_roles where rolname = 'erp_app') then
         revoke delete, truncate on table users, role_assignments, otp_challenges from erp_app;
-        revoke update, delete, truncate on table public_call_hits from erp_app;
+        revoke delete, truncate on table public_call_counters from erp_app;
       end if;
     end;
     $$
@@ -170,7 +175,7 @@ export async function down(db: Kysely<unknown>): Promise<void> {
   if (process.env.NODE_ENV === 'production') {
     throw new Error('Refusing to drop the identity tables in production: they hold every account');
   }
-  await sql`drop table if exists public_call_hits`.execute(db);
+  await sql`drop table if exists public_call_counters`.execute(db);
   await sql`drop table if exists otp_challenges`.execute(db);
   await sql`drop table if exists role_assignments`.execute(db);
   await sql`drop table if exists users`.execute(db);

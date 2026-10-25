@@ -38,7 +38,9 @@ function later(date: Date | null | undefined, other: Date | null | undefined): D
 
 /** Callers send the address Express resolved; drop an IPv6 zone, which `inet` refuses. */
 function requestIp(): string | null {
-  const ip = RequestContext.current()?.ipAddress?.split('%')[0];
+  const raw = RequestContext.current()?.ipAddress?.split('%')[0];
+  // A dual-stack socket reports an IPv4 caller as ::ffff:a.b.c.d.
+  const ip = raw?.replace(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i, '$1');
   return ip && isIP(ip) ? ip : null;
 }
 
@@ -87,12 +89,13 @@ export class OtpService implements OnModuleDestroy {
       const user = await this.repository.findUserByEmail(tx, email);
 
       const windowStart = new Date(now.getTime() - OTP_LIMITS.requestWindowSeconds * 1000);
-      const emailRequests = await this.repository.emailRequestTimes(tx, emailHmac, windowStart);
+      const requests = await this.repository.emailRequestTimes(tx, emailHmac, ip, windowStart);
       const challengeLock = await this.repository.activeChallengeLock(tx, emailHmac, now);
 
       const refusal = evaluateOtpRequest({
         now,
-        emailRequests,
+        emailRequests: requests.map((r) => r.at),
+        addressRequests: requests.filter((r) => r.sameAddress).map((r) => r.at),
         lockedUntil: later(user?.lockedUntil, challengeLock),
       });
       if (refusal) {
@@ -114,7 +117,7 @@ export class OtpService implements OnModuleDestroy {
         (request.clientType === ClientType.Mobile || superAdmin);
 
       const code = eligible ? generateOtpCode() : null;
-      await this.repository.supersedeLive(tx, emailHmac, now);
+      await this.repository.supersedeLive(tx, emailHmac, ip, now);
       await this.repository.insertChallenge(tx, {
         id: newId(),
         createdAt: now,

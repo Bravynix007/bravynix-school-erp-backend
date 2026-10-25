@@ -6,8 +6,10 @@ import { AuthCode } from './auth-codes.js';
 export const OTP_LIMITS = {
   /** Gap between two requests for one email. */
   resendGapSeconds: 60,
-  /** Requests per email in the window. */
-  requestsPerWindow: 3,
+  /** Requests per email from one address in the window. */
+  requestsPerAddressPerWindow: 3,
+  /** Requests per email from all addresses in the window, so a stranger cannot use up the person's turns. */
+  requestsPerEmailPerWindow: 10,
   requestWindowSeconds: 15 * 60,
   /** Code life. */
   codeLifeSeconds: 10 * 60,
@@ -23,8 +25,10 @@ export const OTP_LIMITS = {
 
 export interface OtpRequestFacts {
   now: Date;
-  /** Request times for this email in the last 15 minutes, newest first. */
+  /** Request times for this email in the last 15 minutes from any address, newest first. */
   emailRequests: readonly Date[];
+  /** The same, from the address making this request only. */
+  addressRequests: readonly Date[];
   /** The end of the longest active lock on this email, if any. */
   lockedUntil: Date | null;
 }
@@ -44,28 +48,26 @@ function plusSeconds(date: Date, seconds: number): Date {
 }
 
 /**
- * The per-IP limit on public calls (API design 18.1). `hits` are the calls
- * from one IP in the last minute, oldest first, including the current one and
- * calls that were refused for other reasons: a refused call still costs work.
- * The 21st is refused until enough earlier calls leave the window for the
- * count to be back at the limit.
+ * The per-IP limit on public calls (API design 18.1). `calls` is the count
+ * for this IP in the current one-minute window, including the current call
+ * and calls refused for other reasons: a refused call still costs work. The
+ * 21st is refused until the window ends. Fixed windows allow up to twice the
+ * limit across a boundary, which the "Proposed" value accepts.
  */
-export function evaluateIpLimit(now: Date, hits: readonly Date[]): OtpRefusal | null {
-  const over = hits.length - OTP_LIMITS.ipRequestsPerMinute;
-  if (over <= 0) return null;
-  const blocking = hits[over - 1]!;
+export function evaluateIpLimit(now: Date, windowStart: Date, calls: number): OtpRefusal | null {
+  if (calls <= OTP_LIMITS.ipRequestsPerMinute) return null;
   return {
     status: HttpStatus.TOO_MANY_REQUESTS,
     code: ErrorCode.RATE_LIMITED,
-    retryAfterSeconds: secondsUntil(plusSeconds(blocking, OTP_LIMITS.ipWindowSeconds), now),
+    retryAfterSeconds: secondsUntil(plusSeconds(windowStart, OTP_LIMITS.ipWindowSeconds), now),
   };
 }
 
 /**
  * Decides whether a request for a login code is refused. Pure, and the same
  * for registered and unregistered emails, so no answer differs between them
- * (I-07). The first rule that applies wins: lock, the 60-second gap, then the
- * 3-in-15-minutes limit. The per-IP limit runs earlier, on every public call
+ * (I-07). The first rule that applies wins: lock, the 60-second gap,
+ * 3 in 15 minutes from one address, then 10 in 15 minutes from all addresses. The per-IP limit runs earlier, on every public call
  * (`evaluateIpLimit`).
  */
 export function evaluateOtpRequest(facts: OtpRequestFacts): OtpRefusal | null {
@@ -88,9 +90,18 @@ export function evaluateOtpRequest(facts: OtpRequestFacts): OtpRefusal | null {
       };
     }
   }
-  if (facts.emailRequests.length >= OTP_LIMITS.requestsPerWindow) {
-    // The count drops below the limit when the third newest request leaves the window.
-    const blocking = facts.emailRequests[OTP_LIMITS.requestsPerWindow - 1]!;
+  // The count drops below a limit when its newest-but-N request leaves the window.
+  const own = facts.addressRequests;
+  if (own.length >= OTP_LIMITS.requestsPerAddressPerWindow) {
+    const blocking = own[OTP_LIMITS.requestsPerAddressPerWindow - 1]!;
+    return {
+      status: HttpStatus.TOO_MANY_REQUESTS,
+      code: AuthCode.OTP_REQUEST_LIMIT,
+      retryAfterSeconds: secondsUntil(plusSeconds(blocking, OTP_LIMITS.requestWindowSeconds), now),
+    };
+  }
+  if (facts.emailRequests.length >= OTP_LIMITS.requestsPerEmailPerWindow) {
+    const blocking = facts.emailRequests[OTP_LIMITS.requestsPerEmailPerWindow - 1]!;
     return {
       status: HttpStatus.TOO_MANY_REQUESTS,
       code: AuthCode.OTP_REQUEST_LIMIT,

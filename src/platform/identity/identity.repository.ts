@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { sql } from 'kysely';
-import { newId } from '../../common/ids/ids.js';
-import type { Tx } from '../database/index.js';
+import type { Db, Tx } from '../database/index.js';
 import { AccountStatus } from './auth-codes.js';
 
 export interface LoginUser {
@@ -68,45 +67,40 @@ export class IdentityRepository {
     return rows[0]?.locked === true;
   }
 
-  /** Request times for an email since `since`, newest first. */
-  async emailRequestTimes(tx: Tx, emailHmac: Buffer, since: Date): Promise<Date[]> {
-    const rows = await tx
-      .selectFrom('otp_challenges')
-      .select('created_at')
-      .where('email_hmac', '=', emailHmac)
-      .where('created_at', '>', since)
-      .orderBy('created_at', 'desc')
-      .execute();
-    return rows.map((row) => row.created_at);
+  /**
+   * Request times for an email since `since`, newest first, each marked with
+   * whether it came from the same address as this request.
+   */
+  async emailRequestTimes(
+    tx: Tx,
+    emailHmac: Buffer,
+    ip: string | null,
+    since: Date,
+  ): Promise<{ at: Date; sameAddress: boolean }[]> {
+    const { rows } = await sql<{ created_at: Date; same: boolean }>`
+      select created_at, (request_ip is not distinct from ${ip}::inet) as same
+      from otp_challenges
+      where email_hmac = ${emailHmac} and created_at > ${since}
+      order by created_at desc`.execute(tx);
+    return rows.map((row) => ({ at: row.created_at, sameAddress: row.same }));
   }
 
   /**
-   * One count at a time per IP, so parallel calls from one address cannot all
-   * read the count before any of them has added to it. Held only for the
-   * short transaction that records and counts.
+   * Counts a call to a public endpoint from this IP in the window and returns
+   * the count so far. One autocommitted statement, so a flood neither holds a
+   * transaction nor waits on a lock, and the row count stays at one per IP per
+   * window. An IPv6 caller is counted by its /64, because one device may use
+   * any address in it.
    */
-  async lockIp(tx: Tx, ip: string): Promise<void> {
-    await sql`select pg_advisory_xact_lock(hashtextextended(${`ip:${ip}`}, 0))`.execute(tx);
-  }
-
-  /** Notes a call to a public endpoint from this IP (API design 18.1). */
-  async recordPublicCall(tx: Tx, ip: string, at: Date): Promise<void> {
-    await tx
-      .insertInto('public_call_hits')
-      .values({ id: newId(), created_at: at, ip: sql<string>`${ip}::inet` })
-      .execute();
-  }
-
-  /** Calls from this IP since `since`, oldest first. */
-  async publicCallTimes(tx: Tx, ip: string, since: Date): Promise<Date[]> {
-    const rows = await tx
-      .selectFrom('public_call_hits')
-      .select('created_at')
-      .where('ip', '=', sql<string>`${ip}::inet`)
-      .where('created_at', '>', since)
-      .orderBy('created_at', 'asc')
-      .execute();
-    return rows.map((row) => row.created_at);
+  async countPublicCall(db: Db, ip: string, windowStart: Date): Promise<number> {
+    const { rows } = await sql<{ calls: number }>`
+      insert into public_call_counters (ip, window_start, calls)
+      select case when family(a) = 6 then network(set_masklen(a, 64))::inet else a end, ${windowStart}, 1
+      from (select ${ip}::inet as a) as caller
+      on conflict (ip, window_start)
+        do update set calls = public_call_counters.calls + 1
+      returning calls`.execute(db);
+    return rows[0]!.calls;
   }
 
   /** The latest end of a lock on this email: from a challenge (any email) or from the account. */
@@ -120,15 +114,17 @@ export class IdentityRepository {
     return row?.until ?? null;
   }
 
-  /** A new code replaces the old one (API design 10.1). */
-  async supersedeLive(tx: Tx, emailHmac: Buffer, now: Date): Promise<void> {
-    await tx
-      .updateTable('otp_challenges')
-      .set({ superseded_at: now })
-      .where('email_hmac', '=', emailHmac)
-      .where('consumed_at', 'is', null)
-      .where('superseded_at', 'is', null)
-      .execute();
+  /**
+   * A new code replaces the old one from the same address (API design 10.1).
+   * A request from another address leaves it alone, so a stranger cannot
+   * cancel the person's code.
+   */
+  async supersedeLive(tx: Tx, emailHmac: Buffer, ip: string | null, now: Date): Promise<void> {
+    await sql`
+      update otp_challenges set superseded_at = ${now}
+      where email_hmac = ${emailHmac}
+        and consumed_at is null and superseded_at is null
+        and request_ip is not distinct from ${ip}::inet`.execute(tx);
   }
 
   async insertChallenge(tx: Tx, challenge: NewChallenge): Promise<void> {

@@ -56,8 +56,9 @@ export interface OtpChallengesTable {
   locked_until: Date | null;
 }
 
-export interface PublicCallHitsTable {
-  id: string;
-  created_at: Date;
+export interface PublicCallCountersTable {
   ip: string;
+  window_start: Date;
+  calls: number;
+  created_at: Generated<Date>;
 }

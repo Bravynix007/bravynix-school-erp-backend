@@ -9,7 +9,8 @@ import { evaluateIpLimit, OTP_LIMITS } from './otp-limits.js';
  * The per-IP limit on public login calls (API design 6.2, 18.1): 20 a minute,
  * counted for every call, refused or not, because a refused call still takes a
  * connection and runs queries. Kept in the database so the limit holds across
- * API tasks. Every public auth endpoint calls `check` first, before any other
+ * API tasks, as one row per IP per minute bumped by a single statement, so
+ * a flood costs one round trip each and holds no lock. Every public auth endpoint calls `check` first, before any other
  * work.
  */
 @Injectable()
@@ -24,13 +25,10 @@ export class PublicCallLimiter {
   async check(ip: string | null): Promise<void> {
     if (ip === null) return;
     const now = this.clock.now();
-    const since = new Date(now.getTime() - OTP_LIMITS.ipWindowSeconds * 1000);
-    const hits = await this.database.transaction({}, async (tx) => {
-      await this.repository.lockIp(tx, ip);
-      await this.repository.recordPublicCall(tx, ip, now);
-      return this.repository.publicCallTimes(tx, ip, since);
-    });
-    const refusal = evaluateIpLimit(now, hits);
+    const windowMs = OTP_LIMITS.ipWindowSeconds * 1000;
+    const windowStart = new Date(Math.floor(now.getTime() / windowMs) * windowMs);
+    const calls = await this.repository.countPublicCall(this.database.db, ip, windowStart);
+    const refusal = evaluateIpLimit(now, windowStart, calls);
     if (refusal) {
       throw new AppException(refusal.status, refusal.code, {
         retryAfterSeconds: refusal.retryAfterSeconds,

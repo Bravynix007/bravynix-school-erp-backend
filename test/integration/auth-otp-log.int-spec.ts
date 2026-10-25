@@ -23,7 +23,7 @@ describe('AUTH-01 when the mail cannot be sent', () => {
     });
     await writeIdentitySeed(owner);
     await sql`delete from otp_challenges`.execute(owner);
-    await sql`delete from public_call_hits`.execute(owner);
+    await sql`delete from public_call_counters`.execute(owner);
     t = await createTestApp({ captureLogs: true });
   });
 

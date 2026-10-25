@@ -50,6 +50,9 @@ describe('AUTH-01 request a login code', () => {
   const post = (body: Record<string, unknown>) =>
     request(t.app.getHttpServer()).post('/v1/auth/otp').send(body);
   const mobile = (email: string) => post({ email, clientType: 1 });
+  /** A request that reached the API through one trusted proxy from this address. */
+  const from = (ip: string, email = registered) =>
+    post({ email, clientType: 1 }).set('X-Forwarded-For', ip);
   const sent = async (email: string) => {
     await otp.flush();
     return t.email.latest(email, 'otp');
@@ -68,7 +71,7 @@ describe('AUTH-01 request a login code', () => {
 
   beforeEach(async () => {
     await sql`delete from otp_challenges`.execute(owner);
-    await sql`delete from public_call_hits`.execute(owner);
+    await sql`delete from public_call_counters`.execute(owner);
     await sql`update users set locked_until = null`.execute(owner);
     t = await createTestApp();
     otp = t.app.get(OtpService);
@@ -282,6 +285,24 @@ describe('AUTH-01 request a login code', () => {
       expect(limited).toHaveLength(20);
     });
 
+    it('keeps one counter row per address per minute, however large the burst', async () => {
+      await Promise.all(Array.from({ length: 30 }, () => mobile(registered)));
+      const { rows } = await sql<{ calls: number }>`select calls from public_call_counters`.execute(
+        owner,
+      );
+      expect(rows).toEqual([{ calls: 30 }]);
+    });
+
+    it('tells the caller to wait until the end of the minute', async () => {
+      t.clock.set('2026-10-25T10:00:25.000Z');
+      for (let i = 0; i < 20; i += 1) await mobile(`person${i}@two-worlds.test`).expect(202);
+      const res = await mobile('person99@two-worlds.test').expect(429);
+      expect(res.body.code).toBe('RATE_LIMITED');
+      expect(res.headers['retry-after']).toBe('35');
+      t.clock.set('2026-10-25T10:01:00.000Z');
+      await mobile('person99@two-worlds.test').expect(202);
+    });
+
     it('counts refused calls too, so one address cannot hammer one email for free', async () => {
       await mobile(registered).expect(202);
       for (let i = 0; i < 19; i += 1) {
@@ -334,6 +355,73 @@ describe('AUTH-01 request a login code', () => {
       expect(res.headers['retry-after']).toBe('1500');
       t.clock.advance(25 * 60_000 + 1000);
       await mobile(email).expect(202);
+    });
+  });
+
+  describe('someone else asking for a person’s code (behind one proxy)', () => {
+    beforeEach(async () => {
+      await t.close();
+      process.env.TRUST_PROXY = '1';
+      t = await createTestApp();
+      otp = t.app.get(OtpService);
+    });
+
+    afterEach(() => {
+      delete process.env.TRUST_PROXY;
+    });
+
+    it('cannot use up the person’s three requests by asking from another address', async () => {
+      for (let i = 0; i < 3; i += 1) {
+        await from('198.51.100.9').expect(202);
+        t.clock.advance(61_000);
+      }
+      expect((await from('198.51.100.9').expect(429)).body.code).toBe('OTP_REQUEST_LIMIT');
+      await from('203.0.113.20').expect(202);
+    });
+
+    it('does not cancel the person’s live code when it asks from another address', async () => {
+      await from('203.0.113.20').expect(202);
+      t.clock.advance(61_000);
+      await from('198.51.100.9').expect(202);
+      const rows = await challenges(registered);
+      expect(rows).toHaveLength(2);
+      expect(rows.map((row) => row.superseded_at)).toEqual([null, null]);
+    });
+
+    it('still replaces the live code when the same address asks again', async () => {
+      await from('203.0.113.20').expect(202);
+      t.clock.advance(61_000);
+      await from('203.0.113.20').expect(202);
+      const rows = await challenges(registered);
+      expect(rows.map((row) => row.superseded_at === null)).toEqual([false, true]);
+    });
+
+    it('counts an IPv6 caller by its /64 and an IPv4-mapped caller as IPv4', async () => {
+      await from('2001:db8:1:2::1', 'a@two-worlds.test').expect(202);
+      await from('2001:db8:1:2:ffff::7', 'b@two-worlds.test').expect(202);
+      await from('::ffff:203.0.113.9', 'c@two-worlds.test').expect(202);
+      await from('203.0.113.9', 'd@two-worlds.test').expect(202);
+      const { rows } = await sql<{ ip: string; calls: number }>`
+        select host(ip) as ip, calls from public_call_counters order by ip`.execute(owner);
+      expect(rows).toEqual([
+        { ip: '2001:db8:1:2::', calls: 2 },
+        { ip: '203.0.113.9', calls: 2 },
+      ]);
+    });
+
+    it('caps all addresses together at ten in 15 minutes, for registered and unknown emails alike', async () => {
+      for (const email of [registered, 'nobody@two-worlds.test']) {
+        for (let i = 1; i <= 10; i += 1) {
+          await from(`198.51.100.${i}`, email).expect(202);
+          t.clock.advance(61_000);
+        }
+        const res = await from('198.51.100.99', email).expect(429);
+        expect(res.body.code).toBe('OTP_REQUEST_LIMIT');
+        expect(Number(res.headers['retry-after'])).toBeGreaterThan(0);
+        t.clock.advance(Number(res.headers['retry-after']) * 1000);
+        await from('198.51.100.99', email).expect(202);
+        t.clock.advance(15 * 60_000);
+      }
     });
   });
 
@@ -627,22 +715,24 @@ describe('identity tables', () => {
   });
 });
 
-describe('public_call_hits', () => {
-  it('lets the app role add and read hits but not change or remove them', async () => {
+describe('public_call_counters', () => {
+  it('lets the app role count and read but not remove', async () => {
     const t = await createTestApp();
     try {
       const { db } = t.app.get(DatabaseService);
-      await sql`insert into public_call_hits (ip) values ('203.0.113.50')`.execute(db);
+      await sql`insert into public_call_counters (ip, window_start, calls)
+        values ('203.0.113.50', now(), 1) on conflict (ip, window_start) do update set calls = public_call_counters.calls + 1`.execute(
+        db,
+      );
       const { rows } = await sql<{ n: number }>`
-        select count(*)::int as n from public_call_hits where ip = '203.0.113.50'`.execute(db);
+        select count(*)::int as n from public_call_counters where ip = '203.0.113.50'`.execute(db);
       expect(rows[0]?.n).toBeGreaterThan(0);
-      await expect(
-        sql`update public_call_hits set ip = '203.0.113.51'`.execute(db),
-      ).rejects.toThrow(/permission denied/);
-      await expect(sql`delete from public_call_hits`.execute(db)).rejects.toThrow(
+      await expect(sql`delete from public_call_counters`.execute(db)).rejects.toThrow(
         /permission denied/,
       );
-      await expect(sql`truncate public_call_hits`.execute(db)).rejects.toThrow(/permission denied/);
+      await expect(sql`truncate public_call_counters`.execute(db)).rejects.toThrow(
+        /permission denied/,
+      );
     } finally {
       await t.close();
     }
