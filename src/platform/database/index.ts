@@ -8,3 +8,4 @@ export {
   type Tx,
 } from './database.service.js';
 export type { Database } from './schema.js';
+export { insertStamp, updateStamp } from './stamps.js';

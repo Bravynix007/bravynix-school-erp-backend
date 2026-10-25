@@ -8,6 +8,11 @@ export interface RequestContextData {
   personId?: string;
   societyId?: string;
   roleCode?: number;
+  /** The caller's name as it should read in the audit log (frozen at the time). */
+  displayName?: string;
+  /** The caller's address, as Express resolves it behind the trusted proxies. */
+  ipAddress?: string;
+  userAgent?: string;
 }
 
 const storage = new AsyncLocalStorage<RequestContextData>();

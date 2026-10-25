@@ -7,6 +7,7 @@ import { LogDestination, LogDestinationModule } from './common/logging/log-desti
 import { requestLogProps, serializeRequest } from './common/logging/request-log.js';
 import { AppConfig, AppConfigModule } from './config/app-config.js';
 import { HealthModule } from './health/health.module.js';
+import { AuditModule } from './platform/audit/audit.module.js';
 import { DatabaseModule } from './platform/database/database.module.js';
 import { EmailModule } from './platform/email/email.module.js';
 
@@ -56,8 +57,9 @@ import { EmailModule } from './platform/email/email.module.js';
     JsonBodyModule,
     DatabaseModule,
     EmailModule,
+    AuditModule,
     HealthModule,
-    // Platform modules (Identity, Tenancy, Audit, Files, Notifications, Jobs)
+    // Platform modules (Identity, Tenancy, Files, Notifications, Jobs)
     // and business modules are registered here as they are built.
   ],
 })
