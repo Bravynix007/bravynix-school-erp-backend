@@ -21,6 +21,9 @@ const inactive = personaByKey('EDGE-inactive').email;
 const superAdmin = personaByKey('SA1').email;
 const teacher = personaByKey('T-A1-assigned').email;
 
+/** An address inside one IPv6 /64. */
+const inside = (n: number) => `2001:db8:7:7::${n.toString(16)}`;
+
 /** The body without the fields that differ per request. */
 function shape(body: Record<string, unknown>): Record<string, unknown> {
   const { requestId: _requestId, ...rest } = body;
@@ -407,6 +410,20 @@ describe('AUTH-01 request a login code', () => {
         { ip: '2001:db8:1:2::', calls: 2 },
         { ip: '203.0.113.9', calls: 2 },
       ]);
+    });
+
+    it('treats addresses in one IPv6 /64 as one caller for the three and for replacing a code', async () => {
+      for (let i = 1; i <= 3; i += 1) {
+        await from(inside(i)).expect(202);
+        t.clock.advance(61_000);
+      }
+      // A fourth address inside the same /64 is the same caller: refused at three.
+      expect((await from(inside(4)).expect(429)).body.code).toBe('OTP_REQUEST_LIMIT');
+      // Another network is not.
+      await from('2001:db8:8:8::1').expect(202);
+      // Each request from the /64 replaced the earlier code from it; the other network's stays.
+      const live = (await challenges(registered)).filter((row) => row.superseded_at === null);
+      expect(live).toHaveLength(2);
     });
 
     it('caps all addresses together at ten in 15 minutes, for registered and unknown emails alike', async () => {

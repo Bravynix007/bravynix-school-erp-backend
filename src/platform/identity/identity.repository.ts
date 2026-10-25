@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { sql } from 'kysely';
+import { sql, type RawBuilder } from 'kysely';
 import type { Db, Tx } from '../database/index.js';
 import { AccountStatus } from './auth-codes.js';
 
@@ -18,6 +18,16 @@ export interface NewChallenge {
   userId: string | null;
   codeHmac: Buffer | null;
   requestIp: string | null;
+}
+
+/**
+ * The caller key: the address a limit counts. An IPv6 caller is its /64
+ * network, because one device may use any address in it; an IPv4 caller is
+ * itself. The per-IP limit, the per-address request limit and the code
+ * replacement all use this one definition. `request_ip` keeps the full address.
+ */
+function callerKey(address: RawBuilder<unknown>): RawBuilder<string> {
+  return sql<string>`(case when family(${address}) = 6 then network(set_masklen(${address}, 64))::inet else ${address} end)`;
 }
 
 /**
@@ -78,7 +88,7 @@ export class IdentityRepository {
     since: Date,
   ): Promise<{ at: Date; sameAddress: boolean }[]> {
     const { rows } = await sql<{ created_at: Date; same: boolean }>`
-      select created_at, (request_ip is not distinct from ${ip}::inet) as same
+      select created_at, (${callerKey(sql.ref('request_ip'))} is not distinct from ${callerKey(sql`${ip}::inet`)}) as same
       from otp_challenges
       where email_hmac = ${emailHmac} and created_at > ${since}
       order by created_at desc`.execute(tx);
@@ -89,13 +99,12 @@ export class IdentityRepository {
    * Counts a call to a public endpoint from this IP in the window and returns
    * the count so far. One autocommitted statement, so a flood neither holds a
    * transaction nor waits on a lock, and the row count stays at one per IP per
-   * window. An IPv6 caller is counted by its /64, because one device may use
-   * any address in it.
+   * window, keyed by the caller key.
    */
   async countPublicCall(db: Db, ip: string, windowStart: Date): Promise<number> {
     const { rows } = await sql<{ calls: number }>`
       insert into public_call_counters (ip, window_start, calls)
-      select case when family(a) = 6 then network(set_masklen(a, 64))::inet else a end, ${windowStart}, 1
+      select ${callerKey(sql.ref('a'))}, ${windowStart}, 1
       from (select ${ip}::inet as a) as caller
       on conflict (ip, window_start)
         do update set calls = public_call_counters.calls + 1
@@ -124,7 +133,9 @@ export class IdentityRepository {
       update otp_challenges set superseded_at = ${now}
       where email_hmac = ${emailHmac}
         and consumed_at is null and superseded_at is null
-        and request_ip is not distinct from ${ip}::inet`.execute(tx);
+        and ${callerKey(sql.ref('request_ip'))} is not distinct from ${callerKey(sql`${ip}::inet`)}`.execute(
+      tx,
+    );
   }
 
   async insertChallenge(tx: Tx, challenge: NewChallenge): Promise<void> {
