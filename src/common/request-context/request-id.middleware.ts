@@ -26,6 +26,8 @@ export function requestIdMiddleware(req: Request, res: Response, next: NextFunct
   const context: RequestContextData = {
     requestId,
     language: resolveLanguage(req.header('accept-language')),
+    ipAddress: req.ip,
+    userAgent: req.header('user-agent'),
   };
   res.locals[CONTEXT_LOCAL] = context;
   RequestContext.run(context, () => next());
