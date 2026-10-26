@@ -8,11 +8,6 @@ export interface TenantRootRow {
   access_paused_at: Date | null;
 }
 
-/** A stale screen is told to reload before anything else (API design 14.3). */
-export function requireVersion(row: TenantRootRow, version: number): void {
-  if (row.version !== version) throw AppException.versionConflict(row.version);
-}
-
 /** A deactivated record keeps its data but takes no more changes. */
 export function requireActive(row: TenantRootRow): void {
   if (row.status !== 1) throw AppException.conflict(ErrorCode.INVALID_STATE);

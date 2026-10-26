@@ -5,6 +5,7 @@ import { createPool } from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { personaByKey } from '../../src/seeds/two-worlds.js';
+import { apiCaller, type Body } from '../support/api.js';
 import { superAdminToken } from '../support/admin-token.js';
 import { readAuditRows } from '../support/audit-rows.js';
 import { FixtureModule } from '../support/fixture.module.js';
@@ -18,13 +19,7 @@ const migrationUrl = process.env.TEST_DATABASE_MIGRATION_URL!;
 const superAdmin = personaByKey('SA1');
 const missing = '00000000-0000-7000-8000-00000000ffff';
 
-interface Body {
-  success: boolean;
-  code: string;
-  data: { id: string; version: number } & Record<string, unknown>;
-  meta: Record<string, unknown> | null;
-  errors?: { field: string; code: string }[];
-}
+type Method = 'get' | 'post' | 'patch' | 'delete';
 
 /** The IDs of the rows a list answered, in order. */
 const ids = (res: { body: Body }) =>
@@ -36,32 +31,18 @@ describe('PLT-02 to PLT-08 Societies', () => {
   let admin: string;
   const made: string[] = [];
   let fixtures: PlatformFixtures;
+  let api: ReturnType<typeof apiCaller>;
 
-  const call = (
-    method: 'get' | 'post' | 'patch' | 'delete',
-    path: string,
-    body: object = {},
-    token = admin,
-  ) => {
-    const http = request(t.app.getHttpServer());
-    return http[method](path)
-      .set('Authorization', `Bearer ${token}`)
-      .send(method === 'get' || method === 'delete' ? undefined : body);
-  };
-  const result = async (pending: ReturnType<typeof call>) => {
-    const res = await pending;
-    return { status: res.status, body: res.body as Body, headers: res.headers };
-  };
+  const call = (method: Method, path: string, body: object = {}, token = admin) =>
+    api(method, path, token, body);
 
   /** Creates a Society through the API; removed after the test. */
   const create = async (fields: Record<string, unknown> = {}) => {
-    const res = await result(
-      call('post', '/v1/platform/societies', {
-        name: 'Sunrise Education Trust',
-        code: `S${newId().slice(-12)}`,
-        ...fields,
-      }),
-    );
+    const res = await call('post', '/v1/platform/societies', {
+      name: 'Sunrise Education Trust',
+      code: `S${newId().slice(-12)}`,
+      ...fields,
+    });
     expect(res.status).toBe(201);
     made.push(res.body.data.id);
     return res.body.data;
@@ -69,7 +50,7 @@ describe('PLT-02 to PLT-08 Societies', () => {
 
   const ownerOf = (societyId: string) => fixtures.owner(societyId);
 
-  const list = (query: string) => result(call('get', `/v1/platform/societies?${query}`));
+  const list = (query: string) => call('get', `/v1/platform/societies?${query}`);
 
   const audit = (societyId: string) =>
     readAuditRows<{
@@ -92,6 +73,7 @@ describe('PLT-02 to PLT-08 Societies', () => {
     await writeIdentitySeed(ownerDb);
     t = await createTestApp({ imports: [FixtureModule] });
     fixtures = new PlatformFixtures(t, ownerDb);
+    api = apiCaller(t);
   });
 
   afterAll(async () => {
@@ -114,30 +96,26 @@ describe('PLT-02 to PLT-08 Societies', () => {
     it('refuses a Society Owner, a signed-out caller and a bad token', async () => {
       const society = await create();
       const owner = await ownerOf(society.id);
-      const asOwner = await result(call('get', '/v1/platform/societies', {}, owner.token));
+      const asOwner = await call('get', '/v1/platform/societies', {}, owner.token);
       expect(asOwner.status).toBe(403);
       expect(asOwner.body.code).toBe('FORBIDDEN');
-      expect((await result(call('post', '/v1/platform/societies', {}, owner.token))).status).toBe(
-        403,
-      );
+      expect((await call('post', '/v1/platform/societies', {}, owner.token)).status).toBe(403);
       expect((await request(t.app.getHttpServer()).get('/v1/platform/societies')).status).toBe(401);
     });
   });
 
   describe('PLT-03 create', () => {
     it('answers 201 with the whole Society, every field present, and stamps the author', async () => {
-      const res = await result(
-        call('post', '/v1/platform/societies', {
-          name: 'Sunrise Education Trust',
-          code: 'SUNRISE-1',
-          description: 'Schools since 1998',
-          email: 'Office@Sunrise.Example.org',
-          phone: { countryCode: '91', number: '9876543210' },
-          website: 'https://sunrise.example.org',
-          foundedDate: '1998-06-01',
-          address: { line1: '1 Temple Road', line2: null, pincode: '560001' },
-        }),
-      );
+      const res = await call('post', '/v1/platform/societies', {
+        name: 'Sunrise Education Trust',
+        code: 'SUNRISE-1',
+        description: 'Schools since 1998',
+        email: 'Office@Sunrise.Example.org',
+        phone: { countryCode: '91', number: '9876543210' },
+        website: 'https://sunrise.example.org',
+        foundedDate: '1998-06-01',
+        address: { line1: '1 Temple Road', line2: null, pincode: '560001' },
+      });
       made.push(res.body.data.id);
       expect(res.status).toBe(201);
       expect(res.body.data).toEqual({
@@ -153,6 +131,8 @@ describe('PLT-02 to PLT-08 Societies', () => {
         status: 1,
         accessPause: null,
         institutionCount: 0,
+        institutions: [],
+        owners: [],
         version: 1,
         createdBy: { id: superAdmin.id, displayName: expect.any(String), roleName: 'Super Admin' },
         createdAt: expect.stringMatching(/Z$/),
@@ -191,7 +171,7 @@ describe('PLT-02 to PLT-08 Societies', () => {
     it('answers 409 DUPLICATE on the code field, whatever the letter case', async () => {
       const society = await create({ code: 'Dup-Code' });
       for (const code of ['Dup-Code', 'DUP-CODE', 'dup-code']) {
-        const res = await result(call('post', '/v1/platform/societies', { name: 'Other', code }));
+        const res = await call('post', '/v1/platform/societies', { name: 'Other', code });
         expect(res.status).toBe(409);
         expect(res.body).toMatchObject({
           code: 'DUPLICATE',
@@ -253,7 +233,7 @@ describe('PLT-02 to PLT-08 Societies', () => {
         'FIELD_NOT_ALLOWED',
       ],
     ])('answers 400 for %s', async (_what, body, field, code) => {
-      const res = await result(call('post', '/v1/platform/societies', body));
+      const res = await call('post', '/v1/platform/societies', body);
       expect(res.status).toBe(400);
       expect(res.body.code).toBe('VALIDATION_FAILED');
       expect(res.body.errors).toContainEqual(expect.objectContaining({ field, code }));
@@ -302,7 +282,7 @@ describe('PLT-02 to PLT-08 Societies', () => {
 
     it('takes % and _ in a search as plain characters', async () => {
       await create({ name: 'Plain Trust' });
-      const res = await result(call('get', '/v1/platform/societies?q=%25%25'));
+      const res = await call('get', '/v1/platform/societies?q=%25%25');
       expect(res.body.meta).toMatchObject({ totalItems: 0 });
     });
 
@@ -331,7 +311,7 @@ describe('PLT-02 to PLT-08 Societies', () => {
           values (${first}, ${society.id}, 'Zed School', 'Z', '1 Road', 1),
                  (${newId()}, ${society.id}, 'Alpha School', 'A', '2 Road', 0)`.execute(tx);
       });
-      const res = await result(call('get', `/v1/platform/societies/${society.id}`));
+      const res = await call('get', `/v1/platform/societies/${society.id}`);
       expect(res.status).toBe(200);
       expect(res.body.data).toMatchObject({ id: society.id, institutionCount: 1 });
       expect(res.body.data.institutions).toEqual([
@@ -345,7 +325,7 @@ describe('PLT-02 to PLT-08 Societies', () => {
 
     it('answers 404 for an unknown or malformed ID', async () => {
       for (const id of [missing, 'not-a-uuid', '123']) {
-        const res = await result(call('get', `/v1/platform/societies/${id}`));
+        const res = await call('get', `/v1/platform/societies/${id}`);
         expect(res.status).toBe(404);
         expect(res.body.code).toBe('NOT_FOUND');
       }
@@ -355,14 +335,12 @@ describe('PLT-02 to PLT-08 Societies', () => {
   describe('PLT-05 update', () => {
     it('changes the named fields, moves the version and audits before and after', async () => {
       const society = await create({ description: 'Old', email: 'a@b.org' });
-      const res = await result(
-        call('patch', `/v1/platform/societies/${society.id}`, {
-          version: 1,
-          name: 'Sunrise Trust',
-          description: null,
-          phone: { countryCode: '91', number: '9876543210' },
-        }),
-      );
+      const res = await call('patch', `/v1/platform/societies/${society.id}`, {
+        version: 1,
+        name: 'Sunrise Trust',
+        description: null,
+        phone: { countryCode: '91', number: '9876543210' },
+      });
       expect(res.status).toBe(200);
       expect(res.body.data).toMatchObject({
         name: 'Sunrise Trust',
@@ -393,20 +371,16 @@ describe('PLT-02 to PLT-08 Societies', () => {
         phone: { countryCode: '91', number: '9876543210' },
         address: { line1: 'A', line2: 'B', pincode: '1' },
       });
-      const replaced = await result(
-        call('patch', `/v1/platform/societies/${society.id}`, {
-          version: 1,
-          address: { line1: 'C' },
-        }),
-      );
+      const replaced = await call('patch', `/v1/platform/societies/${society.id}`, {
+        version: 1,
+        address: { line1: 'C' },
+      });
       expect(replaced.body.data.address).toEqual({ line1: 'C', line2: null, pincode: null });
-      const cleared = await result(
-        call('patch', `/v1/platform/societies/${society.id}`, {
-          version: 2,
-          phone: null,
-          address: null,
-        }),
-      );
+      const cleared = await call('patch', `/v1/platform/societies/${society.id}`, {
+        version: 2,
+        phone: null,
+        address: null,
+      });
       expect(cleared.body.data).toMatchObject({
         phone: null,
         address: { line1: null, line2: null, pincode: null },
@@ -416,9 +390,10 @@ describe('PLT-02 to PLT-08 Societies', () => {
 
     it('writes nothing when nothing changes: same version, no audit entry', async () => {
       const society = await create();
-      const res = await result(
-        call('patch', `/v1/platform/societies/${society.id}`, { version: 1, name: society.name }),
-      );
+      const res = await call('patch', `/v1/platform/societies/${society.id}`, {
+        version: 1,
+        name: society.name,
+      });
       expect(res.status).toBe(200);
       expect(res.body.data.version).toBe(1);
       expect(await audit(society.id)).toHaveLength(1);
@@ -427,9 +402,10 @@ describe('PLT-02 to PLT-08 Societies', () => {
     it('answers 409 VERSION_CONFLICT with the current version for a stale screen', async () => {
       const society = await create();
       await call('patch', `/v1/platform/societies/${society.id}`, { version: 1, name: 'New' });
-      const res = await result(
-        call('patch', `/v1/platform/societies/${society.id}`, { version: 1, name: 'Late' }),
-      );
+      const res = await call('patch', `/v1/platform/societies/${society.id}`, {
+        version: 1,
+        name: 'Late',
+      });
       expect(res.status).toBe(409);
       expect(res.body).toMatchObject({ code: 'VERSION_CONFLICT', data: { currentVersion: 2 } });
     });
@@ -437,35 +413,36 @@ describe('PLT-02 to PLT-08 Societies', () => {
     it('refuses the code, status, pause and stamps as fields, and needs the version', async () => {
       const society = await create();
       for (const field of ['code', 'status', 'accessPause', 'accessPausedAt', 'updatedBy', 'id']) {
-        const res = await result(
-          call('patch', `/v1/platform/societies/${society.id}`, { version: 1, [field]: 'x' }),
-        );
+        const res = await call('patch', `/v1/platform/societies/${society.id}`, {
+          version: 1,
+          [field]: 'x',
+        });
         expect(res.status).toBe(400);
         expect(res.body.errors).toContainEqual(
           expect.objectContaining({ field, code: 'FIELD_NOT_ALLOWED' }),
         );
       }
-      const none = await result(
-        call('patch', `/v1/platform/societies/${society.id}`, { name: 'X' }),
-      );
+      const none = await call('patch', `/v1/platform/societies/${society.id}`, { name: 'X' });
       expect(none.body.errors).toContainEqual(
         expect.objectContaining({ field: 'version', code: 'INVALID_TYPE' }),
       );
-      const nulled = await result(
-        call('patch', `/v1/platform/societies/${society.id}`, { version: 1, name: null }),
-      );
+      const nulled = await call('patch', `/v1/platform/societies/${society.id}`, {
+        version: 1,
+        name: null,
+      });
       expect(nulled.status).toBe(400);
     });
 
     it('answers 404 for an unknown Society and 409 INVALID_STATE for a deactivated one', async () => {
       expect(
-        (await result(call('patch', `/v1/platform/societies/${missing}`, { version: 1 }))).status,
+        (await call('patch', `/v1/platform/societies/${missing}`, { version: 1 })).status,
       ).toBe(404);
       const society = await create();
       await call('delete', `/v1/platform/societies/${society.id}`);
-      const res = await result(
-        call('patch', `/v1/platform/societies/${society.id}`, { version: 2, name: 'Again' }),
-      );
+      const res = await call('patch', `/v1/platform/societies/${society.id}`, {
+        version: 2,
+        name: 'Again',
+      });
       expect(res.status).toBe(409);
       expect(res.body.code).toBe('INVALID_STATE');
     });
@@ -475,14 +452,12 @@ describe('PLT-02 to PLT-08 Societies', () => {
     it('stops the Society on its next call, keeps sign-in, and resumes', async () => {
       const society = await create();
       const owner = await ownerOf(society.id);
-      await call('post', '/v1/fixtures/owner-write', {}, owner.token).expect(200);
+      expect((await call('post', '/v1/fixtures/owner-write', {}, owner.token)).status).toBe(200);
 
-      const paused = await result(
-        call('post', `/v1/platform/societies/${society.id}/pause`, {
-          version: 1,
-          reason: 'Annual fee unpaid',
-        }),
-      );
+      const paused = await call('post', `/v1/platform/societies/${society.id}/pause`, {
+        version: 1,
+        reason: 'Annual fee unpaid',
+      });
       expect(paused.status).toBe(200);
       expect(paused.body.data).toMatchObject({
         version: 2,
@@ -492,16 +467,16 @@ describe('PLT-02 to PLT-08 Societies', () => {
           reason: 'Annual fee unpaid',
         },
       });
-      const refused = await result(call('post', '/v1/fixtures/owner-write', {}, owner.token));
+      const refused = await call('post', '/v1/fixtures/owner-write', {}, owner.token);
       expect([refused.status, refused.body.code]).toEqual([423, 'ACCESS_PAUSED']);
-      expect((await result(call('get', '/v1/me', {}, owner.token))).status).toBe(200);
+      expect((await call('get', '/v1/me', {}, owner.token)).status).toBe(200);
 
-      const resumed = await result(
-        call('post', `/v1/platform/societies/${society.id}/resume`, { version: 2 }),
-      );
+      const resumed = await call('post', `/v1/platform/societies/${society.id}/resume`, {
+        version: 2,
+      });
       expect(resumed.status).toBe(200);
       expect(resumed.body.data).toMatchObject({ accessPause: null, version: 3 });
-      await call('post', '/v1/fixtures/owner-write', {}, owner.token).expect(200);
+      expect((await call('post', '/v1/fixtures/owner-write', {}, owner.token)).status).toBe(200);
 
       const entries = await audit(society.id);
       const pause = entries.find((entry) => entry.action === 'access.pause')!;
@@ -512,13 +487,15 @@ describe('PLT-02 to PLT-08 Societies', () => {
     it('refuses a second pause, a resume of a Society that is not paused, and a stale version', async () => {
       const society = await create();
       const base = `/v1/platform/societies/${society.id}`;
-      const resumeFirst = await result(call('post', `${base}/resume`, { version: 1 }));
+      const resumeFirst = await call('post', `${base}/resume`, { version: 1 });
       expect([resumeFirst.status, resumeFirst.body.code]).toEqual([409, 'INVALID_STATE']);
 
-      await call('post', `${base}/pause`, { version: 1, reason: 'Dues' }).expect(200);
-      const again = await result(call('post', `${base}/pause`, { version: 2, reason: 'Again' }));
+      expect((await call('post', `${base}/pause`, { version: 1, reason: 'Dues' })).status).toBe(
+        200,
+      );
+      const again = await call('post', `${base}/pause`, { version: 2, reason: 'Again' });
       expect([again.status, again.body.code]).toEqual([409, 'INVALID_STATE']);
-      const stale = await result(call('post', `${base}/resume`, { version: 1 }));
+      const stale = await call('post', `${base}/resume`, { version: 1 });
       expect(stale.body).toMatchObject({ code: 'VERSION_CONFLICT', data: { currentVersion: 2 } });
     });
 
@@ -531,24 +508,22 @@ describe('PLT-02 to PLT-08 Societies', () => {
         { version: 1, reason: 'r'.repeat(501) },
         { reason: 'x' },
       ]) {
-        expect((await result(call('post', `${base}/pause`, body))).status).toBe(400);
+        expect((await call('post', `${base}/pause`, body)).status).toBe(400);
       }
-      expect((await result(call('post', `${base}/resume`, {}))).status).toBe(400);
+      expect((await call('post', `${base}/resume`, {})).status).toBe(400);
     });
 
     it('does not pause a deactivated Society, and answers 404 for an unknown one', async () => {
       const society = await create();
       await call('delete', `/v1/platform/societies/${society.id}`);
-      const res = await result(
-        call('post', `/v1/platform/societies/${society.id}/pause`, { version: 2, reason: 'x' }),
-      );
+      const res = await call('post', `/v1/platform/societies/${society.id}/pause`, {
+        version: 2,
+        reason: 'x',
+      });
       expect([res.status, res.body.code]).toEqual([409, 'INVALID_STATE']);
       expect(
-        (
-          await result(
-            call('post', `/v1/platform/societies/${missing}/pause`, { version: 1, reason: 'x' }),
-          )
-        ).status,
+        (await call('post', `/v1/platform/societies/${missing}/pause`, { version: 1, reason: 'x' }))
+          .status,
       ).toBe(404);
     });
   });
@@ -560,17 +535,17 @@ describe('PLT-02 to PLT-08 Societies', () => {
       const owner = await ownerOf(society.id);
       const other = await ownerOf(sibling.id);
 
-      const res = await result(call('delete', `/v1/platform/societies/${society.id}`));
+      const res = await call('delete', `/v1/platform/societies/${society.id}`);
       expect(res.status).toBe(200);
       expect(res.body.data).toEqual({ id: society.id, status: 0 });
 
-      const ended = await result(call('get', '/v1/me', {}, owner.token));
+      const ended = await call('get', '/v1/me', {}, owner.token);
       expect(ended.status).toBe(401);
       expect(ended.body).toMatchObject({
         code: 'SESSION_ENDED',
         data: { reason: 'admin_revoked' },
       });
-      expect((await result(call('get', '/v1/me', {}, other.token))).status).toBe(200);
+      expect((await call('get', '/v1/me', {}, other.token)).status).toBe(200);
 
       const grants = await sql<{ revoked_by: string; revoke_reason: string }>`
         select revoked_by, revoke_reason from role_assignments where society_id = ${society.id}`.execute(
@@ -583,7 +558,7 @@ describe('PLT-02 to PLT-08 Societies', () => {
       const again = await signInMobile(t, owner.email);
       expect(again.contexts).toEqual([]);
 
-      const detail = await result(call('get', `/v1/platform/societies/${society.id}`));
+      const detail = await call('get', `/v1/platform/societies/${society.id}`);
       expect(detail.body.data).toMatchObject({ status: 0, owners: [] });
       const entry = (await audit(society.id)).find((row) => row.action === 'society.deactivate')!;
       expect(entry.new_values!).toEqual({
@@ -595,11 +570,11 @@ describe('PLT-02 to PLT-08 Societies', () => {
 
     it('answers 409 INVALID_STATE for a Society that is already deactivated, 404 for an unknown one', async () => {
       const society = await create();
-      await call('delete', `/v1/platform/societies/${society.id}`).expect(200);
-      const again = await result(call('delete', `/v1/platform/societies/${society.id}`));
+      expect((await call('delete', `/v1/platform/societies/${society.id}`)).status).toBe(200);
+      const again = await call('delete', `/v1/platform/societies/${society.id}`);
       expect([again.status, again.body.code]).toEqual([409, 'INVALID_STATE']);
-      expect((await result(call('delete', `/v1/platform/societies/${missing}`))).status).toBe(404);
-      expect((await result(call('delete', '/v1/platform/societies/nope'))).status).toBe(404);
+      expect((await call('delete', `/v1/platform/societies/${missing}`)).status).toBe(404);
+      expect((await call('delete', '/v1/platform/societies/nope')).status).toBe(404);
     });
   });
 });

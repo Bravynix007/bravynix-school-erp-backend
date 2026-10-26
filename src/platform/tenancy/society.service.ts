@@ -1,31 +1,38 @@
 import { Injectable } from '@nestjs/common';
+import { requireVersion } from '../../common/http/require-version.js';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { ApiResult } from '../../common/http/api-result.js';
 import { AppException } from '../../common/http/app-exception.js';
+import { ErrorCode } from '../../common/http/error-codes.js';
 import { pageMeta, pageOffset, parseSort } from '../../common/pagination/pagination.js';
 import { newId } from '../../common/ids/ids.js';
 import { Clock } from '../../common/time/clock.js';
 import { AuditService, type AuditValues } from '../audit/index.js';
-import { DatabaseService, insertStamp, updateStamp, type Tx } from '../database/index.js';
+import {
+  DatabaseService,
+  platformTenant,
+  duplicateOn,
+  isDuplicateOn,
+  insertStamp,
+  updateStamp,
+  type Tx,
+} from '../database/index.js';
 import { GrantDirectory, PersonDirectory } from '../identity/index.js';
-import { duplicateOn, isDuplicateOn } from './duplicate.js';
-import { platformTenant } from './platform-tenant.js';
 import { addressColumns, contactColumns } from './profile-columns.js';
 import {
   pauseColumns,
   requireActive,
   requirePausable,
   requireResumable,
-  requireVersion,
   RESUME_COLUMNS,
 } from './record-rules.js';
 import {
   SOCIETY_SORT_FIELDS,
   type CreateSocietyDto,
   type ListSocietiesQueryDto,
-  type PauseDto,
   type UpdateSocietyDto,
 } from './society.dto.js';
+import { SocietyOwnerService } from './society-owner.service.js';
 import { SocietyRepository, type SocietyChanges, type SocietyRow } from './society.repository.js';
 import {
   institutionsOf,
@@ -36,6 +43,7 @@ import {
   type SocietyResource,
   type SocietySummary,
 } from './society.resource.js';
+import type { VersionedReasonDto } from '../../common/validation/reason.dto.js';
 import type { VersionDto } from '../../common/validation/version.dto.js';
 
 /** Why the grants of a deactivated Society were revoked; a reactivation can find them by it. */
@@ -51,6 +59,13 @@ function profileColumns(profile: Profile): SocietyChanges {
   if (profile.foundedDate !== undefined) columns.founded_date = profile.foundedDate;
   if (profile.address !== undefined) Object.assign(columns, addressColumns(profile.address));
   return columns;
+}
+
+/** A duplicate email among the new Owners names the one in the body that is taken (API design 8). */
+function atOwner(error: unknown, index: number): unknown {
+  return error instanceof AppException && error.code === ErrorCode.DUPLICATE
+    ? duplicateOn(`owners[${String(index)}].email`)
+    : error;
 }
 
 /** What the audit log keeps of a Society: its own fields, nothing derived. */
@@ -83,6 +98,7 @@ export class SocietyService {
     private readonly societies: SocietyRepository,
     private readonly people: PersonDirectory,
     private readonly grants: GrantDirectory,
+    private readonly owners: SocietyOwnerService,
     private readonly audit: AuditService,
     private readonly clock: Clock,
   ) {}
@@ -125,9 +141,9 @@ export class SocietyService {
     };
   }
 
-  async create(principal: Principal, body: CreateSocietyDto): Promise<SocietyResource> {
+  async create(principal: Principal, body: CreateSocietyDto): Promise<SocietyDetail> {
     const id = newId();
-    const row = await this.database
+    const { row, owners } = await this.database
       .transaction(platformTenant(principal, id), async (tx) => {
         await this.societies.insert(tx, {
           id,
@@ -138,12 +154,25 @@ export class SocietyService {
         });
         const created = await this.mustFind(tx, id);
         await this.record(tx, 'society.create', created, { after: auditView(created) });
-        return created;
+        const added = [];
+        for (const [index, person] of (body.owners ?? []).entries()) {
+          added.push(
+            await this.owners.addIn(tx, principal, created, person).catch((error: unknown) => {
+              throw atOwner(error, index);
+            }),
+          );
+        }
+        return { row: created, owners: added };
       })
       .catch((error: unknown) => {
         throw isDuplicateOn(error, 'uq_societies_code') ? duplicateOn('code') : error;
       });
-    return this.resource(row);
+    for (const owner of owners) this.owners.welcome(owner, row);
+    return {
+      ...(await this.resource(row)),
+      institutions: [],
+      owners: await this.grants.societyOwners(id),
+    };
   }
 
   async update(principal: Principal, id: string, body: UpdateSocietyDto): Promise<SocietyResource> {
@@ -194,7 +223,11 @@ export class SocietyService {
     return { id, status: 0 };
   }
 
-  async pause(principal: Principal, id: string, body: PauseDto): Promise<SocietyResource> {
+  async pause(
+    principal: Principal,
+    id: string,
+    body: VersionedReasonDto,
+  ): Promise<SocietyResource> {
     const row = await this.database.transaction(platformTenant(principal, id), async (tx) => {
       const current = await this.lockedAt(tx, id, body.version);
       requirePausable(current);

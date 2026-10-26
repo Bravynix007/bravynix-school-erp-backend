@@ -97,6 +97,20 @@ export class SocietyRepository {
     return (await query.executeTakeFirst()) as SocietyRow | undefined;
   }
 
+  /** The code and name of these Societies, by ID. */
+  async refs(
+    tx: Tx,
+    ids: readonly string[],
+  ): Promise<Map<string, { id: string; code: string; name: string }>> {
+    if (ids.length === 0) return new Map();
+    const rows = await tx
+      .selectFrom('societies')
+      .select(['id', 'code', 'name'])
+      .where('id', 'in', ids)
+      .execute();
+    return new Map(rows.map((row) => [row.id, row]));
+  }
+
   async insert(tx: Tx, values: NewSociety): Promise<void> {
     await tx.insertInto('societies').values(values).execute();
   }

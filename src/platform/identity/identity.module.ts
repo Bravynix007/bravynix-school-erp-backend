@@ -2,6 +2,10 @@ import { Global, Module } from '@nestjs/common';
 import { AccessTokenVerifier } from '../../common/auth/access-token-verifier.js';
 import { AppConfig } from '../../config/app-config.js';
 import { BackgroundMailer } from './background-mailer.js';
+import { AccountDirectory } from './account-directory.js';
+import { AccountRepository } from './account.repository.js';
+import { PlatformAccountController } from './platform-account.controller.js';
+import { PlatformAccountService } from './platform-account.service.js';
 import { GrantDirectory } from './grant-directory.js';
 import { ContextService } from './context.service.js';
 import { MeController } from './me.controller.js';
@@ -23,7 +27,7 @@ import { TokenService } from './token.service.js';
 /** Global so the policy guard in the common module finds the real access token check. */
 @Global()
 @Module({
-  controllers: [AuthController, MeController],
+  controllers: [AuthController, MeController, PlatformAccountController],
   providers: [
     IdentityRepository,
     SessionRepository,
@@ -37,6 +41,9 @@ import { TokenService } from './token.service.js';
     BackgroundMailer,
     GrantDirectory,
     PersonDirectory,
+    AccountRepository,
+    AccountDirectory,
+    PlatformAccountService,
     OtpService,
     PublicCallLimiter,
     {
@@ -64,6 +71,7 @@ import { TokenService } from './token.service.js';
     AccessTokenVerifier,
     GrantDirectory,
     PersonDirectory,
+    AccountDirectory,
   ],
 })
 export class IdentityModule {}

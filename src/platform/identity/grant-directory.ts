@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { DatabaseService, type Tx } from '../database/index.js';
+import { sql, type ExpressionBuilder } from 'kysely';
+import { containsPattern, type SortKey } from '../../common/pagination/pagination.js';
+import { DatabaseService, type Database, type Tx } from '../database/index.js';
 import { reportedStatus, SessionEndReason } from './auth-codes.js';
 import { personName } from './person-name.js';
 
@@ -39,8 +41,7 @@ export class GrantDirectory {
       .where('grant.role_code', '=', 2)
       .where('grant.society_id', '=', societyId)
       .where('grant.revoked_at', 'is', null)
-      .orderBy('grant.created_at')
-      .orderBy('grant.id')
+      .orderBy('grant.seat_no')
       .execute();
     return rows.map((row) => ({
       id: row.id,
@@ -48,6 +49,68 @@ export class GrantDirectory {
       displayName: personName(row.first_name, row.last_name) ?? row.email,
       accountStatus: reportedStatus(row.account_status),
     }));
+  }
+
+  /**
+   * Every active Society Owner grant, a page at a time (PLT-11). `q` matches the
+   * person's name or email, ignoring case.
+   */
+  async ownersPage(
+    filter: { q?: string; societyId?: string },
+    sort: readonly SortKey<OwnerSortField>[],
+    limit: number,
+    offset: number,
+  ): Promise<{ rows: OwnerGrant[]; total: number }> {
+    const matching = (eb: ExpressionBuilder<Database, 'role_assignments' | 'users'>) => {
+      const conditions = [
+        eb('role_assignments.role_code', '=', 2),
+        eb('role_assignments.revoked_at', 'is', null),
+      ];
+      if (filter.societyId)
+        conditions.push(eb('role_assignments.society_id', '=', filter.societyId));
+      if (filter.q) {
+        const pattern = containsPattern(filter.q);
+        conditions.push(
+          eb.or([
+            eb('users.email', 'ilike', pattern),
+            sql<boolean>`${DISPLAY_NAME} ilike ${pattern}`,
+          ]),
+        );
+      }
+      return eb.and(conditions);
+    };
+    const base = () =>
+      this.database.db
+        .selectFrom('role_assignments')
+        .innerJoin('users', 'users.id', 'role_assignments.user_id')
+        .where(matching);
+    let query = base().select([
+      'users.id',
+      'users.email',
+      'users.first_name',
+      'users.last_name',
+      'users.account_status',
+      'role_assignments.society_id',
+      'role_assignments.seat_no',
+      'role_assignments.created_at as granted_at',
+    ]);
+    for (const key of sort) query = query.orderBy(OWNER_SORT_COLUMN[key.field], key.direction);
+    const rows = await query.orderBy('role_assignments.id').limit(limit).offset(offset).execute();
+    const { total } = await base()
+      .select((eb) => eb.fn.countAll<number>().as('total'))
+      .executeTakeFirstOrThrow();
+    return {
+      rows: rows.map((row) => ({
+        id: row.id,
+        email: row.email,
+        displayName: personName(row.first_name, row.last_name) ?? row.email,
+        accountStatus: reportedStatus(row.account_status),
+        societyId: row.society_id!,
+        seatNo: row.seat_no!,
+        grantedAt: row.granted_at,
+      })),
+      total,
+    };
   }
 
   /**
@@ -104,6 +167,25 @@ export class GrantDirectory {
       sessionsEnded: Number(sessions.numUpdatedRows),
     };
   }
+}
+
+/** The person's name as lists show it: first and last name, else the email. */
+const DISPLAY_NAME = sql`coalesce(nullif(btrim(concat_ws(' ', users.first_name, users.last_name)), ''), users.email)`;
+
+export type OwnerSortField = 'name' | 'email' | 'createdAt';
+export const OWNER_SORT_FIELDS = ['name', 'email', 'createdAt'] as const;
+
+const OWNER_SORT_COLUMN = {
+  name: sql`lower(${DISPLAY_NAME})`,
+  email: sql`users.email`,
+  createdAt: sql`role_assignments.created_at`,
+} as const;
+
+/** One Owner seat, as PLT-11 lists it; the Society is named by its ID. */
+export interface OwnerGrant extends SocietyOwner {
+  societyId: string;
+  seatNo: number;
+  grantedAt: Date;
 }
 
 export interface SocietyOwner {

@@ -1,18 +1,21 @@
 import { ApiProperty, ApiPropertyOptional, IntersectionType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
   IsEmail,
   IsISO8601,
   IsNotEmpty,
   IsOptional,
   IsString,
-  Length,
   Matches,
   MaxLength,
   MinLength,
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
+import { NewPersonDto } from '../identity/index.js';
 import { AddressDto } from '../../common/validation/address.dto.js';
 import { PhoneDto } from '../../common/validation/phone.dto.js';
 import { VersionDto } from '../../common/validation/version.dto.js';
@@ -75,6 +78,18 @@ export class CreateSocietyDto extends SocietyProfileDto {
   @IsNotEmpty()
   @MaxLength(50)
   code!: string;
+
+  @ApiPropertyOptional({
+    type: [NewPersonDto],
+    description: 'The first one to three Owners, by email',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(3)
+  @ValidateNested({ each: true })
+  @Type(() => NewPersonDto)
+  owners?: NewPersonDto[];
 }
 
 /**
@@ -89,14 +104,6 @@ export class UpdateSocietyDto extends IntersectionType(VersionDto, SocietyProfil
   @IsNotEmpty()
   @MaxLength(255)
   name?: string;
-}
-
-/** PLT-07 body: why access is paused, shown to the Society's people. */
-export class PauseDto extends VersionDto {
-  @ApiProperty({ minLength: 1, maxLength: 500, example: 'Annual fee unpaid' })
-  @IsString()
-  @Length(1, 500)
-  reason!: string;
 }
 
 export const SOCIETY_SORT_FIELDS = ['name', 'code', 'createdAt'] as const;

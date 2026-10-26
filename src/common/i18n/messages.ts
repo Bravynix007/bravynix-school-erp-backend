@@ -63,6 +63,13 @@ const en: Catalogue = {
   LOGOUT_ALL_OK: 'You have been signed out of every device',
   CONTEXT_NOT_AVAILABLE: 'You do not have access to that role',
   CONTEXT_SWITCHED: 'Role changed',
+  // Accounts (API design 10.4d)
+  SEAT_LIMIT_REACHED: 'The limit of three has been reached',
+  LAST_OWNER: 'A Society must keep at least one Owner; add the new Owner first',
+  EMAIL_IN_USE: 'This email already belongs to another person',
+  CANNOT_ACT_ON_SELF: 'You cannot do this to your own account',
+  NOT_LOCKED: 'This account is not locked',
+  AUTHENTICATOR_LOCKED: 'The authenticator is locked; lift the lock first',
   // Field codes
   REQUIRED: 'This field is required',
   FIELD_NOT_ALLOWED: 'This field is not allowed',

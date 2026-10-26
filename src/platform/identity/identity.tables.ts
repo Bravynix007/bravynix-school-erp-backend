@@ -72,6 +72,14 @@ export interface LoginLockoutsTable {
   locked_until: Date;
 }
 
+/** A support unlock of an email: the lockouts of it up to this moment no longer count as locks. */
+export interface LoginUnlocksTable {
+  id: Generated<string>;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  email_hmac: Buffer;
+  unlocked_by: string;
+}
+
 export interface AuthSessionsTable {
   id: string;
   created_at: Generated<Date>;

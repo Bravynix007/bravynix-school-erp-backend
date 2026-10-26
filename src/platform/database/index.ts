@@ -1,7 +1,6 @@
 export { DatabaseModule } from './database.module.js';
 export {
   DatabaseService,
-  PgErrorCode,
   applyTenant,
   type Db,
   type TenantContext,
@@ -9,3 +8,5 @@ export {
 } from './database.service.js';
 export type { Database } from './schema.js';
 export { insertStamp, updateStamp } from './stamps.js';
+export { duplicateOn, isDuplicateOn } from './duplicate.js';
+export { platformTenant } from './platform-tenant.js';

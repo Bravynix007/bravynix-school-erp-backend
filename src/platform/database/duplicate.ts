@@ -2,7 +2,7 @@ import { HttpStatus } from '@nestjs/common';
 import { AppException } from '../../common/http/app-exception.js';
 import { ErrorCode } from '../../common/http/error-codes.js';
 import { fieldError } from '../../common/validation/field-error.js';
-import { PgErrorCode } from '../database/index.js';
+import { PgErrorCode } from './database.service.js';
 
 /** A unique-violation of the constraint or index whose name starts with `constraintPrefix`. */
 export function isDuplicateOn(error: unknown, constraintPrefix: string): boolean {

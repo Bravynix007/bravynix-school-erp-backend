@@ -1,7 +1,7 @@
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { RoleCode } from '../../common/auth/roles.js';
 import { AppException } from '../../common/http/app-exception.js';
-import type { TenantContext } from '../database/index.js';
+import type { TenantContext } from './database.service.js';
 
 /**
  * Super Admin reaches the tenant roots as a platform operator (DDD 15.3). A
