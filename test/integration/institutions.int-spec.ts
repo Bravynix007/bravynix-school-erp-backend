@@ -5,6 +5,7 @@ import { createPool } from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { personaByKey } from '../../src/seeds/two-worlds.js';
+import { apiCaller, type Body } from '../support/api.js';
 import { superAdminToken } from '../support/admin-token.js';
 import { readAuditRows } from '../support/audit-rows.js';
 import { FixtureModule } from '../support/fixture.module.js';
@@ -19,14 +20,6 @@ const missing = '00000000-0000-7000-8000-00000000ffff';
 
 type Method = 'get' | 'post' | 'patch' | 'delete';
 
-interface Body {
-  success: boolean;
-  code: string;
-  data: { id: string; version: number } & Record<string, unknown>;
-  meta: Record<string, unknown> | null;
-  errors?: { field: string; code: string }[];
-}
-
 /** The IDs of the rows a list answered, in order. */
 const ids = (res: { body: Body }) =>
   (res.body.data as unknown as { id: string }[]).map((r) => r.id);
@@ -36,22 +29,13 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
   let t: TestApp;
   let fixtures: PlatformFixtures;
   let admin: string;
+  let api: ReturnType<typeof apiCaller>;
   const societies: string[] = [];
 
-  const call = (method: Method, path: string, token: string, body: object = {}) => {
-    const http = request(t.app.getHttpServer());
-    return http[method](path)
-      .set('Authorization', `Bearer ${token}`)
-      .send(method === 'get' || method === 'delete' ? undefined : body);
-  };
-  const result = async (pending: ReturnType<typeof call>) => {
-    const res = await pending;
-    return { status: res.status, body: res.body as Body };
-  };
   const asAdmin = (method: Method, path: string, body: object = {}) =>
-    result(call(method, path, admin, body));
+    api(method, path, admin, body);
 
-  const read = (token: string, id: string) => result(call('get', `/v1/institutions/${id}`, token));
+  const read = (token: string, id: string) => api('get', `/v1/institutions/${id}`, token);
   const listAll = (query: string) => asAdmin('get', `/v1/platform/institutions?${query}`);
 
   const society = async () => {
@@ -77,7 +61,7 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
       address: { line1: '12 Lake Road' },
       ...fields,
     };
-    const res = await result(call('post', '/v1/institutions', token ?? admin, body));
+    const res = await api('post', '/v1/institutions', token ?? admin, body);
     expect(res.status).toBe(201);
     return res.body.data;
   };
@@ -101,6 +85,7 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
     await writeIdentitySeed(ownerDb);
     t = await createTestApp({ imports: [FixtureModule] });
     fixtures = new PlatformFixtures(t, ownerDb);
+    api = apiCaller(t);
   });
 
   afterAll(async () => {
@@ -128,20 +113,18 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
       const base = `/v1/platform/institutions/${inst.id}`;
 
       for (const token of [owner.token, adminOf.token]) {
-        expect((await result(call('get', '/v1/platform/institutions', token))).status).toBe(403);
+        expect((await api('get', '/v1/platform/institutions', token)).status).toBe(403);
         expect(
-          (await result(call('post', `${base}/pause`, token, { version: 1, reason: 'x' }))).status,
+          (await api('post', `${base}/pause`, token, { version: 1, reason: 'x' })).status,
         ).toBe(403);
-        expect((await result(call('post', `${base}/resume`, token, { version: 1 }))).status).toBe(
-          403,
-        );
+        expect((await api('post', `${base}/resume`, token, { version: 1 })).status).toBe(403);
       }
       for (const [method, path] of [
         ['post', '/v1/institutions'],
         ['patch', `/v1/institutions/${inst.id}`],
         ['delete', `/v1/institutions/${inst.id}`],
       ] as const) {
-        const res = await result(call(method, path, adminOf.token));
+        const res = await api(method, path, adminOf.token);
         expect([res.status, res.body.code]).toEqual([403, 'FORBIDDEN']);
       }
       expect((await request(t.app.getHttpServer()).get('/v1/institutions')).status).toBe(401);
@@ -152,21 +135,19 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
     it('lets an Owner add to their own Society: 201, whole resource, their stamps', async () => {
       const societyId = await society();
       const owner = await fixtures.owner(societyId);
-      const res = await result(
-        call('post', '/v1/institutions', owner.token, {
-          name: 'Green Valley School',
-          code: 'GVS',
-          place: 'Bengaluru',
-          boardCode: 1,
-          affiliationNumber: 'AFF-1',
-          gstin: '29ABCDE1234F1Z5',
-          email: 'Office@GVS.example.org',
-          phone: { countryCode: '91', number: '9876543210' },
-          telephone: '080-1234567',
-          address: { line1: '12 Lake Road', line2: null, pincode: '560001' },
-          location: { latitude: 12.971599, longitude: 77.594566 },
-        }),
-      );
+      const res = await api('post', '/v1/institutions', owner.token, {
+        name: 'Green Valley School',
+        code: 'GVS',
+        place: 'Bengaluru',
+        boardCode: 1,
+        affiliationNumber: 'AFF-1',
+        gstin: '29ABCDE1234F1Z5',
+        email: 'Office@GVS.example.org',
+        phone: { countryCode: '91', number: '9876543210' },
+        telephone: '080-1234567',
+        address: { line1: '12 Lake Road', line2: null, pincode: '560001' },
+        location: { latitude: 12.971599, longitude: 77.594566 },
+      });
       expect(res.status).toBe(201);
       const person = {
         id: owner.person,
@@ -241,14 +222,12 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
     it('does not let an Owner name a Society, even their own', async () => {
       const societyId = await society();
       const owner = await fixtures.owner(societyId);
-      const res = await result(
-        call('post', '/v1/institutions', owner.token, {
-          societyId,
-          name: 'X',
-          code: 'X',
-          address: { line1: 'a' },
-        }),
-      );
+      const res = await api('post', '/v1/institutions', owner.token, {
+        societyId,
+        name: 'X',
+        code: 'X',
+        address: { line1: 'a' },
+      });
       expect(res.status).toBe(400);
       expect(res.body.errors).toContainEqual(
         expect.objectContaining({ field: 'societyId', code: 'FIELD_NOT_ALLOWED' }),
@@ -393,7 +372,7 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
       });
       const owner = await fixtures.owner(societyId);
 
-      const res = await result(call('get', '/v1/institutions', owner.token));
+      const res = await api('get', '/v1/institutions', owner.token);
       expect(res.status).toBe(200);
       expect(res.body.meta).toBeNull();
       expect(ids(res)).toEqual([alpha.id, zed.id]);
@@ -416,7 +395,7 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
       const a = await institution(societyId, { name: 'A School' });
       await institution(societyId, { name: 'B School' });
       const adminOf = await fixtures.institutionAdmin(societyId, [a.id]);
-      expect(ids(await result(call('get', '/v1/institutions', adminOf.token)))).toEqual([a.id]);
+      expect(ids(await api('get', '/v1/institutions', adminOf.token))).toEqual([a.id]);
     });
   });
 
@@ -452,10 +431,8 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
         version: 1,
         reason: 'Dues',
       });
-      expect((await result(call('get', `/v1/institutions/${gone.id}`, owner.token))).status).toBe(
-        404,
-      );
-      const res = await result(call('get', `/v1/institutions/${paused.id}`, owner.token));
+      expect((await api('get', `/v1/institutions/${gone.id}`, owner.token)).status).toBe(404);
+      const res = await api('get', `/v1/institutions/${paused.id}`, owner.token);
       expect([res.status, res.body.code]).toEqual([423, 'ACCESS_PAUSED']);
     });
   });
@@ -465,15 +442,13 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
       const societyId = await society();
       const inst = await institution(societyId, { place: 'Old Town', telephone: '1' });
       const owner = await fixtures.owner(societyId);
-      const res = await result(
-        call('patch', `/v1/institutions/${inst.id}`, owner.token, {
-          version: 1,
-          name: 'Green Valley PU College',
-          place: null,
-          boardCode: 3,
-          location: { latitude: 1.5, longitude: -2.25 },
-        }),
-      );
+      const res = await api('patch', `/v1/institutions/${inst.id}`, owner.token, {
+        version: 1,
+        name: 'Green Valley PU College',
+        place: null,
+        boardCode: 3,
+        location: { latitude: 1.5, longitude: -2.25 },
+      });
       expect(res.status).toBe(200);
       expect(res.body.data).toMatchObject({
         name: 'Green Valley PU College',
@@ -571,11 +546,8 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
       const owner = await fixtures.owner(societyId);
       for (const id of [foreign.id, missing]) {
         expect(
-          (
-            await result(
-              call('patch', `/v1/institutions/${id}`, owner.token, { version: 1, name: 'x' }),
-            )
-          ).status,
+          (await api('patch', `/v1/institutions/${id}`, owner.token, { version: 1, name: 'x' }))
+            .status,
         ).toBe(404);
       }
       await asAdmin('delete', `/v1/institutions/${foreign.id}`);
@@ -599,19 +571,19 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
       const onlyFirst = await fixtures.institutionAdmin(societyId, [first.id]);
       const both = await fixtures.institutionAdmin(societyId, [first.id, second.id]);
 
-      const res = await result(call('delete', `/v1/institutions/${first.id}`, owner.token));
+      const res = await api('delete', `/v1/institutions/${first.id}`, owner.token);
       expect(res.status).toBe(200);
       expect(res.body.data).toEqual({ id: first.id, status: 0 });
 
-      const ended = await result(call('get', '/v1/me', onlyFirst.token));
+      const ended = await api('get', '/v1/me', onlyFirst.token);
       expect(ended.status).toBe(401);
       expect(ended.body).toMatchObject({
         code: 'SESSION_ENDED',
         data: { reason: 'admin_revoked' },
       });
-      expect((await result(call('get', '/v1/me', both.token))).status).toBe(200);
-      expect(ids(await result(call('get', '/v1/institutions', both.token)))).toEqual([second.id]);
-      expect((await result(call('get', '/v1/me', owner.token))).status).toBe(200);
+      expect((await api('get', '/v1/me', both.token)).status).toBe(200);
+      expect(ids(await api('get', '/v1/institutions', both.token))).toEqual([second.id]);
+      expect((await api('get', '/v1/me', owner.token)).status).toBe(200);
 
       const grants = await sql<{ n: number }>`
         select count(*)::int as n from role_assignments
@@ -631,9 +603,7 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
       expect((await asAdmin('delete', `/v1/institutions/${inst.id}`)).status).toBe(200);
       const again = await asAdmin('delete', `/v1/institutions/${inst.id}`);
       expect([again.status, again.body.code]).toEqual([409, 'INVALID_STATE']);
-      expect(
-        (await result(call('delete', `/v1/institutions/${inst.id}`, owner.token))).status,
-      ).toBe(404);
+      expect((await api('delete', `/v1/institutions/${inst.id}`, owner.token)).status).toBe(404);
       expect((await asAdmin('delete', `/v1/institutions/${missing}`)).status).toBe(404);
       expect((await asAdmin('delete', '/v1/institutions/nope')).status).toBe(404);
     });
@@ -641,9 +611,7 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
     it('does not let an Owner deactivate another Society’s Institution', async () => {
       const owner = await fixtures.owner(await society());
       const foreign = await institution(await society());
-      expect(
-        (await result(call('delete', `/v1/institutions/${foreign.id}`, owner.token))).status,
-      ).toBe(404);
+      expect((await api('delete', `/v1/institutions/${foreign.id}`, owner.token)).status).toBe(404);
       expect(
         (await asAdmin('get', '/v1/platform/institutions?q=' + foreign.code)).body.meta,
       ).toMatchObject({ totalItems: 1 });
@@ -657,7 +625,7 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
       const second = await institution(societyId);
       const owner = await fixtures.owner(societyId);
       const onlyFirst = await fixtures.institutionAdmin(societyId, [first.id]);
-      await call('post', '/v1/fixtures/owner-write', owner.token).expect(200);
+      expect((await api('post', '/v1/fixtures/owner-write', owner.token)).status).toBe(200);
 
       const paused = await asAdmin('post', `/v1/platform/institutions/${first.id}/pause`, {
         version: 1,
@@ -673,20 +641,16 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
         },
       });
       // Its only Admin is stopped; the Owner still works, in the other Institution.
-      const refused = await result(call('get', `/v1/institutions/${first.id}`, onlyFirst.token));
+      const refused = await api('get', `/v1/institutions/${first.id}`, onlyFirst.token);
       expect([refused.status, refused.body.code]).toEqual([423, 'ACCESS_PAUSED']);
-      expect((await result(call('get', `/v1/institutions/${second.id}`, owner.token))).status).toBe(
-        200,
-      );
-      await call('post', '/v1/fixtures/owner-write', owner.token).expect(200);
+      expect((await api('get', `/v1/institutions/${second.id}`, owner.token)).status).toBe(200);
+      expect((await api('post', '/v1/fixtures/owner-write', owner.token)).status).toBe(200);
 
       const resumed = await asAdmin('post', `/v1/platform/institutions/${first.id}/resume`, {
         version: 2,
       });
       expect(resumed.body.data).toMatchObject({ accessPause: null, version: 3 });
-      expect(
-        (await result(call('get', `/v1/institutions/${first.id}`, onlyFirst.token))).status,
-      ).toBe(200);
+      expect((await api('get', `/v1/institutions/${first.id}`, onlyFirst.token)).status).toBe(200);
 
       const entries = await audit(first.id);
       expect(entries.find((row) => row.action === 'access.pause')).toMatchObject({

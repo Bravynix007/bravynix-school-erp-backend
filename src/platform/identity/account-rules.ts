@@ -5,7 +5,7 @@ import { AccountStatus, AuthCode } from './auth-codes.js';
 import type { AccountRow } from './account.repository.js';
 
 /** At most three seats of a kind: Super Admins on the platform, Owners in a Society (PRD decision 19). */
-export const SEATS = [1, 2, 3] as const;
+const SEATS = [1, 2, 3] as const;
 
 /** The lowest free seat, or the refusal when all are taken. */
 export function nextSeat(taken: readonly number[]): number {

@@ -3,7 +3,7 @@ import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { AppException } from '../../common/http/app-exception.js';
 import { FixedClock } from '../../common/time/clock.js';
 import type { AuditService } from '../audit/index.js';
-import type { DatabaseService, Tx } from '../database/index.js';
+import { duplicateOn, type DatabaseService, type Tx } from '../database/index.js';
 import type { GrantDirectory, GrantedPerson, PersonDirectory } from '../identity/index.js';
 import type { ListSocietiesQueryDto, UpdateSocietyDto } from './society.dto.js';
 import type { SocietyOwnerService } from './society-owner.service.js';
@@ -275,6 +275,25 @@ describe('SocietyService', () => {
       expect(t.addIn).toHaveBeenNthCalledWith(2, t.tx, principal, expect.anything(), second);
       expect(t.welcome).toHaveBeenCalledTimes(2);
       expect(created).toMatchObject({ institutions: [], owners: [] });
+    });
+
+    it('names the Owner in the body whose email is taken', async () => {
+      const t = build();
+      t.addIn
+        .mockResolvedValueOnce(t.granted)
+        .mockRejectedValueOnce(duplicateOn('email'))
+        .mockRejectedValueOnce(new Error('boom'));
+      const owners = [{ email: 'a@example.com' }, { email: 'a@example.com' }];
+      const taken = await refusal(t.service.create(principal, { name: 'X', code: 'x', owners }));
+      expect(taken).toMatchObject({
+        status: 409,
+        code: 'DUPLICATE',
+        options: { errors: [expect.objectContaining({ field: 'owners[1].email' })] },
+      });
+      t.addIn.mockReset().mockRejectedValue(new Error('boom'));
+      await expect(
+        t.service.create(principal, { name: 'X', code: 'x', owners: [owners[0]!] }),
+      ).rejects.toThrow('boom');
     });
 
     it('adds no Owner when none are named', async () => {

@@ -25,7 +25,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     do $$
     begin
       if exists (select 1 from pg_roles where rolname = 'erp_app') then
-        grant select, insert on table login_unlocks to erp_app;
+        revoke update, delete, truncate on table login_unlocks from erp_app;
       end if;
     end;
     $$

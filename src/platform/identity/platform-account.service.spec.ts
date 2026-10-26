@@ -41,10 +41,16 @@ const factor = (lockedUntil: Date | null = null): TotpFactor => ({
   lockedUntil,
 });
 
-function build(current: AccountRow | null = user()) {
+function build(current: AccountRow | null = user(), caller: AccountRow = user({ id: 'admin-1' })) {
   const tx = {} as Tx;
   const transaction = vi.fn<DatabaseService['transaction']>((_tenant, work) => work(tx));
-  const findById = vi.fn<AccountRepository['findById']>().mockResolvedValue(current ?? undefined);
+  const findById = vi
+    .fn<AccountRepository['findById']>()
+    .mockImplementation((_db, id) =>
+      Promise.resolve(
+        current && id === current.id ? current : id === caller.id ? caller : undefined,
+      ),
+    );
   const update = vi
     .fn<AccountRepository['update']>()
     .mockImplementation((_tx, _id, columns) =>
@@ -198,6 +204,14 @@ describe('removeSuperAdmin (PLT-14)', () => {
     expect(t.revoke).not.toHaveBeenCalled();
   });
 
+  it('refuses a caller who was blocked meanwhile, so a blocked admin cannot still remove another', async () => {
+    const t = build(user(), user({ id: 'admin-1', account_status: 2 }));
+    expect(await refusal(t.service.removeSuperAdmin(principal, 'user-1'))).toMatchObject({
+      status: 403,
+    });
+    expect(t.revoke).not.toHaveBeenCalled();
+  });
+
   it('revokes the grant and audits how many sessions ended', async () => {
     const t = build();
     await expect(t.service.removeSuperAdmin(principal, 'user-1')).resolves.toEqual({
@@ -242,6 +256,19 @@ describe('block (PLT-15)', () => {
         }),
       ),
     ).toMatchObject({ code: 'CANNOT_ACT_ON_SELF' });
+  });
+
+  it('refuses a caller who lost the role or was blocked meanwhile, before touching the target', async () => {
+    const lost = build();
+    lost.activeGrant.mockResolvedValue(undefined);
+    expect(
+      await refusal(lost.service.block(principal, 'user-1', { version: 3, reason: 'x' })),
+    ).toMatchObject({ status: 403 });
+    const blocked = build(user(), user({ id: 'admin-1', account_status: 2 }));
+    expect(
+      await refusal(blocked.service.block(principal, 'user-1', { version: 3, reason: 'x' })),
+    ).toMatchObject({ status: 403 });
+    expect(blocked.update).not.toHaveBeenCalled();
   });
 
   it.each([0, 2])('refuses an account whose status is %i', async (status) => {

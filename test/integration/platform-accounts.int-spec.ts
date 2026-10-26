@@ -21,6 +21,7 @@ const migrationUrl = process.env.TEST_DATABASE_MIGRATION_URL!;
 const superAdmin = personaByKey('SA1');
 const otherAdmin = personaByKey('SA2');
 const candidate = personaByKey('SA4-candidate');
+const device = { platform: 1, label: 'Pixel 8', appVersion: '1.4.0' };
 const missing = '00000000-0000-7000-8000-00000000ffff';
 
 describe('PLT-12 to PLT-18 and PLT-41 accounts', () => {
@@ -97,6 +98,25 @@ describe('PLT-12 to PLT-18 and PLT-41 accounts', () => {
   };
   const askForCode = (address: string) =>
     request(t.app.getHttpServer()).post('/v1/auth/otp').send({ email: address, clientType: 1 });
+
+  /** Five wrong codes on a fresh code: the real lockout, not a row put there by the test. */
+  const lockOut = async (address: string) => {
+    expect((await askForCode(address)).status).toBe(202);
+    await t.app.get(OtpService).flush();
+    const code = t.email.latest(address, 'otp')!.variables!.code as string;
+    const wrong = code === '000000' ? '000001' : '000000';
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const res = await request(t.app.getHttpServer())
+        .post('/v1/auth/otp/verify')
+        .send({ email: address, code: wrong, clientType: 1, device });
+      expect(res.status).toBe(401);
+    }
+  };
+  const userState = async (userId: string) =>
+    (
+      await sql<{ failed_login_count: number; locked_until: Date | null }>`
+        select failed_login_count, locked_until from users where id = ${userId}`.execute(ownerDb)
+    ).rows[0]!;
 
   const versionOf = async (userId: string) =>
     (
@@ -565,6 +585,46 @@ describe('PLT-12 to PLT-18 and PLT-41 accounts', () => {
           ownerDb,
         );
       expect(kept.rows).toHaveLength(1);
+    });
+
+    it('lifts a real lockout: the person gets a code again and signs in, and the counters are clear', async () => {
+      const owner = await newOwner();
+      await lockOut(owner.email);
+      expect((await askForCode(owner.email)).status).toBe(423);
+
+      const res = await api('post', `/v1/platform/users/${owner.id}/unlock`, admin, {
+        reason: 'Rang the office',
+      });
+      expect(res.body.data).toMatchObject({ loginLockCleared: true });
+      t.clock.advance(61_000);
+      const login = await signInMobile(t, owner.email);
+      expect(login.contexts).toHaveLength(1);
+      expect(await userState(owner.id)).toEqual({ failed_login_count: 0, locked_until: null });
+    });
+
+    it('does not hide a later lockout: the unlock lifts only the locks before it', async () => {
+      const owner = await newOwner();
+      await lockOut(owner.email);
+      await api('post', `/v1/platform/users/${owner.id}/unlock`, admin, { reason: 'First' });
+      t.clock.advance(61_000);
+      await lockOut(owner.email);
+      expect((await askForCode(owner.email)).status).toBe(423);
+      const again = await api('post', `/v1/platform/users/${owner.id}/unlock`, admin, {
+        reason: 'Second',
+      });
+      expect(again.body.data).toMatchObject({ loginLockCleared: true });
+    });
+
+    it('keeps its own table insert and read only for the app role', async () => {
+      const { rows } = await sql<Record<string, boolean>>`
+        select has_table_privilege('erp_app', 'login_unlocks', 'SELECT') as sel,
+               has_table_privilege('erp_app', 'login_unlocks', 'INSERT') as ins,
+               has_table_privilege('erp_app', 'login_unlocks', 'UPDATE') as upd,
+               has_table_privilege('erp_app', 'login_unlocks', 'DELETE') as del,
+               has_table_privilege('erp_app', 'login_unlocks', 'TRUNCATE') as trunc`.execute(
+        ownerDb,
+      );
+      expect(rows[0]).toEqual({ sel: true, ins: true, upd: false, del: false, trunc: false });
     });
 
     it('lifts both locks at once, and refuses when nothing is locked or the reason is missing', async () => {

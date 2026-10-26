@@ -265,6 +265,9 @@ describe('PLT-03, PLT-09 to PLT-11 Society Owners', () => {
       const res = await createSociety({ code, owners: [{ email: same }, { email: same }] });
       expect(res.status).toBe(409);
       expect(res.body.code).toBe('DUPLICATE');
+      expect(res.body.errors).toEqual([
+        expect.objectContaining({ field: 'owners[1].email', code: 'DUPLICATE' }),
+      ]);
       const { rows } = await sql`select 1 from users where email = ${same}`.execute(ownerDb);
       expect(rows).toHaveLength(0);
       const list = await api('get', `/v1/platform/societies?q=${code}`, admin);

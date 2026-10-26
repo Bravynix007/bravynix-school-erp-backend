@@ -1,7 +1,6 @@
 export { DatabaseModule } from './database.module.js';
 export {
   DatabaseService,
-  PgErrorCode,
   applyTenant,
   type Db,
   type TenantContext,

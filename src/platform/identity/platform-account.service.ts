@@ -33,7 +33,7 @@ import type { VersionedReasonDto, ReasonDto } from '../../common/validation/reas
 import type { VersionDto } from '../../common/validation/version.dto.js';
 
 /** Why a Super Admin's grant was revoked. */
-export const SUPER_ADMIN_REMOVED = 'super_admin_removed';
+const SUPER_ADMIN_REMOVED = 'super_admin_removed';
 
 const SUPER_ADMIN_SEAT: SeatKind = { roleCode: RoleCode.SuperAdmin, societyId: null };
 
@@ -107,14 +107,7 @@ export class PlatformAccountService {
   async removeSuperAdmin(principal: Principal, userId: string): Promise<{ id: string; status: 0 }> {
     requireNotSelf(principal.personId, userId);
     await this.database.transaction(platformTenant(principal), async (tx) => {
-      await this.accounts.lockSeats(tx, RoleCode.SuperAdmin, null);
-      const stillAdmin = await this.accounts.activeGrant(
-        tx,
-        principal.personId,
-        RoleCode.SuperAdmin,
-        null,
-      );
-      if (!stillAdmin) throw AppException.forbidden();
+      await this.holdSuperAdminSeats(tx, principal);
       const sessionsEnded = await this.directory.revoke(
         tx,
         SUPER_ADMIN_SEAT,
@@ -138,6 +131,8 @@ export class PlatformAccountService {
   ): Promise<AccountResource> {
     const now = this.clock.now();
     const blocked = await this.database.transaction(platformTenant(principal), async (tx) => {
+      // Before the person's row: two admins blocking each other run one after the other.
+      await this.holdSuperAdminSeats(tx, principal);
       const current = await this.lockedAt(tx, userId, body.version);
       requireNotSelf(principal.personId, userId);
       if (
@@ -327,6 +322,25 @@ export class PlatformAccountService {
       return { loginLockCleared, authenticatorLockCleared };
     });
     return { id: userId, ...cleared };
+  }
+
+  /**
+   * Takes the Super Admin seats and checks the caller is still an active Super
+   * Admin. A block or a removal that raced theirs and won makes them stop here,
+   * so two admins acting on each other at once can never leave none.
+   */
+  private async holdSuperAdminSeats(tx: Tx, principal: Principal): Promise<void> {
+    await this.accounts.lockSeats(tx, RoleCode.SuperAdmin, null);
+    const caller = await this.accounts.findById(tx, principal.personId);
+    const stillAdmin = await this.accounts.activeGrant(
+      tx,
+      principal.personId,
+      RoleCode.SuperAdmin,
+      null,
+    );
+    if (!stillAdmin || caller?.account_status !== AccountStatus.Active) {
+      throw AppException.forbidden();
+    }
   }
 
   /** The person, locked, with the version the client read; 404 when there is no such person. */

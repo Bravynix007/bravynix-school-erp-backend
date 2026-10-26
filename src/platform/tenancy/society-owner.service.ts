@@ -26,7 +26,7 @@ import {
 import { SocietyRepository, type SocietyRow } from './society.repository.js';
 
 /** Why an Owner's grant was revoked by a Super Admin. */
-export const OWNER_REMOVED = 'owner_removed';
+const OWNER_REMOVED = 'owner_removed';
 
 const ownerSeat = (societyId: string): SeatKind => ({ roleCode: 2, societyId });
 

@@ -1,18 +1,11 @@
 import type { EmailMessage } from '../email/email-sender.js';
 
-/** What a person was added as, in words for the welcome email. */
-export type AccountRole = 'Super Admin' | 'Society Owner';
-
 /**
  * Welcome mail for a person who was added by email (PRD 5.2): they sign in with
  * their email and a code, so there is no password and no link. It names the
  * role and the Society, nothing else about the account.
  */
-export function welcomeEmail(
-  to: string,
-  role: AccountRole,
-  societyName: string | null,
-): EmailMessage {
+export function welcomeEmail(to: string, role: string, societyName: string | null): EmailMessage {
   const where = societyName === null ? '' : ` of ${societyName}`;
   return {
     to,

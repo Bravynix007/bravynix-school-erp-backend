@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
+import { RoleName } from '../../common/auth/roles.js';
 import { AppException } from '../../common/http/app-exception.js';
 import { duplicateOn, type Tx } from '../database/index.js';
-import { welcomeEmail, type AccountRole } from './account-email.js';
+import { welcomeEmail } from './account-email.js';
 import type { NewPersonDto } from './account.dto.js';
 import { AccountRepository } from './account.repository.js';
 import { emailInUse, nextSeat, requireCanHoldRole } from './account-rules.js';
@@ -23,11 +24,6 @@ export interface GrantedPerson {
   /** False when the email already belonged to a person, who now holds the role as well. */
   created: boolean;
 }
-
-const ROLE_NAMES: Record<SeatKind['roleCode'], AccountRole> = {
-  1: 'Super Admin',
-  2: 'Society Owner',
-};
 
 /**
  * Adds and removes Super Admins and Society Owners for the platform (API design
@@ -121,6 +117,6 @@ export class AccountDirectory {
 
   /** The welcome mail, after the commit; a failed send never undoes the grant. */
   welcome(person: GrantedPerson, kind: SeatKind, societyName: string | null): void {
-    this.mailer.send(welcomeEmail(person.email, ROLE_NAMES[kind.roleCode], societyName));
+    this.mailer.send(welcomeEmail(person.email, RoleName[kind.roleCode], societyName));
   }
 }

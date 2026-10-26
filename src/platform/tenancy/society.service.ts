@@ -3,6 +3,7 @@ import { requireVersion } from '../../common/http/require-version.js';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { ApiResult } from '../../common/http/api-result.js';
 import { AppException } from '../../common/http/app-exception.js';
+import { ErrorCode } from '../../common/http/error-codes.js';
 import { pageMeta, pageOffset, parseSort } from '../../common/pagination/pagination.js';
 import { newId } from '../../common/ids/ids.js';
 import { Clock } from '../../common/time/clock.js';
@@ -58,6 +59,13 @@ function profileColumns(profile: Profile): SocietyChanges {
   if (profile.foundedDate !== undefined) columns.founded_date = profile.foundedDate;
   if (profile.address !== undefined) Object.assign(columns, addressColumns(profile.address));
   return columns;
+}
+
+/** A duplicate email among the new Owners names the one in the body that is taken (API design 8). */
+function atOwner(error: unknown, index: number): unknown {
+  return error instanceof AppException && error.code === ErrorCode.DUPLICATE
+    ? duplicateOn(`owners[${String(index)}].email`)
+    : error;
 }
 
 /** What the audit log keeps of a Society: its own fields, nothing derived. */
@@ -147,8 +155,12 @@ export class SocietyService {
         const created = await this.mustFind(tx, id);
         await this.record(tx, 'society.create', created, { after: auditView(created) });
         const added = [];
-        for (const person of body.owners ?? []) {
-          added.push(await this.owners.addIn(tx, principal, created, person));
+        for (const [index, person] of (body.owners ?? []).entries()) {
+          added.push(
+            await this.owners.addIn(tx, principal, created, person).catch((error: unknown) => {
+              throw atOwner(error, index);
+            }),
+          );
         }
         return { row: created, owners: added };
       })
