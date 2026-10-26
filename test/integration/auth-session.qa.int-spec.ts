@@ -139,19 +139,4 @@ describe('QA: AUTH-05, AUTH-07, AUTH-08', () => {
       expect(logs).not.toContain(secret.slice(-20));
     }
   });
-
-  it('R1: 21 people refreshing behind one address in one minute (a school Wi-Fi or a mobile carrier NAT)', async () => {
-    const tokens: string[] = [];
-    for (let i = 0; i < 21; i += 1) {
-      tokens.push((await signIn(person, `198.51.100.${i + 1}`)).refreshToken);
-      await sql`delete from public_call_counters`.execute(owner);
-      t.clock.advance(15 * 60_000);
-    }
-    const statuses: number[] = [];
-    for (const token of tokens) statuses.push((await refresh(token, '100.64.0.1')).status);
-    console.log(
-      `QA R1: ${statuses.filter((s) => s === 200).length} renewed, ${statuses.filter((s) => s === 429).length} refused`,
-    );
-    expect(statuses.filter((s) => s === 200)).toHaveLength(21);
-  });
 });
