@@ -108,6 +108,7 @@ describe('remove (PLT-10)', () => {
       'admin-1',
       'owner_removed',
       expect.any(Date),
+      'LAST_OWNER',
     );
     expect(t.record).toHaveBeenCalledWith(
       tx,

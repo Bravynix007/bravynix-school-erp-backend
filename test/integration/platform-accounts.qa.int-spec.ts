@@ -251,9 +251,7 @@ describe('QA B9c: people and accounts', () => {
       ]);
       const usable = await sql<{ n: number }>`
         select count(*)::int as n from role_assignments ra join users u on u.id = ra.user_id
-        where ra.role_code = 1 and ra.revoked_at is null and u.account_status in (0, 1)`.execute(
-        db,
-      );
+        where ra.role_code = 1 and ra.revoked_at is null and u.account_status = 1`.execute(db);
       console.info(
         `QA B9c mutual block: ${a.status} ${a.body.code}, ${b.status} ${b.body.code}; usable Super Admins ${usable.rows[0]!.n}`,
       );
@@ -275,9 +273,7 @@ describe('QA B9c: people and accounts', () => {
       ]);
       const usable = await sql<{ n: number }>`
         select count(*)::int as n from role_assignments ra join users u on u.id = ra.user_id
-        where ra.role_code = 1 and ra.revoked_at is null and u.account_status in (0, 1)`.execute(
-        db,
-      );
+        where ra.role_code = 1 and ra.revoked_at is null and u.account_status = 1`.execute(db);
       console.info(
         `QA B9c remove vs block: ${a.status} ${a.body.code}, ${b.status} ${b.body.code}; usable Super Admins ${usable.rows[0]!.n}`,
       );
@@ -380,6 +376,7 @@ describe('QA B9c: people and accounts', () => {
     await api('post', `/v1/platform/users/${owner}/unblock`, admin, {
       version: await versionOf(owner),
     });
+    await api('post', `/v1/platform/societies/${s}/owners`, admin, { email: email() });
     await api('delete', `/v1/platform/societies/${s}/owners/${owner}`, admin);
     const rows = await readAuditRows<{ action: string; society_id: string | null }>(
       db,

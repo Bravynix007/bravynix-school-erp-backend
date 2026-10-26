@@ -288,6 +288,7 @@ describe('PLT-03, PLT-09 to PLT-11 Society Owners', () => {
       const society = (await createSociety()).body.data.id;
       const address = email();
       const added = await addOwner(society, { email: address });
+      await addOwner(society, { email: email() });
       const login = await signInMobile(t, address);
       expect((await api('get', '/v1/me', login.accessToken)).status).toBe(200);
 
@@ -312,6 +313,36 @@ describe('PLT-03, PLT-09 to PLT-11 Society Owners', () => {
       const audit = await auditOf(society, 'owner.remove');
       expect(audit).toHaveLength(1);
       expect(audit[0]!.new_values).toEqual({ sessions_ended: 1 });
+    });
+
+    it('refuses to remove the last Owner, and allows it once a replacement is added', async () => {
+      const society = (await createSociety()).body.data.id;
+      const only = (await addOwner(society, { email: email() })).body.data.id as string;
+      const path = (id: string) => `/v1/platform/societies/${society}/owners/${id}`;
+
+      const refused = await api('delete', path(only), admin);
+      expect(refused.status).toBe(409);
+      expect(refused.body.code).toBe('LAST_OWNER');
+      expect(await auditOf(society, 'owner.remove')).toHaveLength(0);
+
+      await addOwner(society, { email: email() });
+      expect((await api('delete', path(only), admin)).status).toBe(200);
+    });
+
+    it('lets only one of two parallel removals of the last two Owners win', async () => {
+      const society = (await createSociety()).body.data.id;
+      const first = (await addOwner(society, { email: email() })).body.data.id as string;
+      const second = (await addOwner(society, { email: email() })).body.data.id as string;
+      const results = await Promise.all(
+        [first, second].map((id) =>
+          api('delete', `/v1/platform/societies/${society}/owners/${id}`, admin),
+        ),
+      );
+      expect(results.map((res) => res.status).toSorted()).toEqual([200, 409]);
+      const { rows } = await sql<{ count: number }>`
+        select count(*) from role_assignments
+        where society_id = ${society} and role_code = 2 and revoked_at is null`.execute(ownerDb);
+      expect(rows[0]!.count).toBe(1);
     });
 
     it('answers 404 for a person who is not an Owner there, an unknown Society and bad IDs', async () => {
@@ -385,9 +416,11 @@ describe('PLT-03, PLT-09 to PLT-11 Society Owners', () => {
     it('leaves out an Owner who was removed, and refuses bad queries', async () => {
       const society = (await createSociety()).body.data.id;
       const added = await addOwner(society, { email: email() });
+      const kept = email();
+      await addOwner(society, { email: kept });
       await api('delete', `/v1/platform/societies/${society}/owners/${added.body.data.id}`, admin);
       const list = await api('get', `/v1/platform/society-owners?societyId=${society}`, admin);
-      expect(list.body.data).toEqual([]);
+      expect((list.body.data as unknown as OwnerRow[]).map((row) => row.email)).toEqual([kept]);
       expect((await api('get', '/v1/platform/society-owners?sort=seat', admin)).body.code).toBe(
         'INVALID_SORT',
       );

@@ -155,6 +155,28 @@ describe('AccountDirectory.revoke', () => {
     expect(t.endRoleSessions).toHaveBeenCalledWith(tx, 'user-1', 2, 'society-1', 4, now);
   });
 
+  it('refuses the only holder with the given code, and revokes when another holds a seat', async () => {
+    const only = build(undefined, [1]);
+    only.activeGrant.mockResolvedValue({ id: 'grant-1' } as never);
+    await expect(
+      only.directory.revoke(tx, owner, 'user-1', 'admin-1', 'x', now, 'LAST_OWNER'),
+    ).rejects.toMatchObject({ status: 409, code: 'LAST_OWNER' });
+    expect(only.revokeGrant).not.toHaveBeenCalled();
+
+    const two = build(undefined, [1, 2]);
+    two.activeGrant.mockResolvedValue({ id: 'grant-1' } as never);
+    await expect(
+      two.directory.revoke(tx, owner, 'user-1', 'admin-1', 'x', now, 'LAST_OWNER'),
+    ).resolves.toBe(2);
+  });
+
+  it('answers 404 for a person who is not the holder before it counts the seats', async () => {
+    const t = build(undefined, [1]);
+    await expect(
+      t.directory.revoke(tx, owner, 'user-1', 'admin-1', 'x', now, 'LAST_OWNER'),
+    ).rejects.toMatchObject({ status: 404 });
+  });
+
   it('answers 404 when the person does not hold the role', async () => {
     const t = build();
     await expect(

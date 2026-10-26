@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { ApiResult } from '../../common/http/api-result.js';
 import { AppException } from '../../common/http/app-exception.js';
+import { ErrorCode } from '../../common/http/error-codes.js';
 import { pageMeta, pageOffset, parseSort } from '../../common/pagination/pagination.js';
 import { Clock } from '../../common/time/clock.js';
 import { AuditService } from '../audit/index.js';
@@ -108,6 +109,7 @@ export class SocietyOwnerService {
         principal.personId,
         OWNER_REMOVED,
         this.clock.now(),
+        ErrorCode.LAST_OWNER,
       );
       await this.audit.record(tx, {
         action: 'owner.remove',

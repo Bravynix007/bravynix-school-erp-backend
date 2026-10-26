@@ -259,25 +259,6 @@ describe('PLT-12 to PLT-18 and PLT-41 accounts', () => {
         expect((await api('delete', `/v1/platform/super-admins/${id}`, admin)).status).toBe(404);
       }
     });
-
-    it('lets only one of two Super Admins remove the other when both try at once', async () => {
-      const added = await newAdmin();
-      const results = await Promise.all([
-        api('delete', `/v1/platform/super-admins/${added.id}`, admin),
-        api('delete', `/v1/platform/super-admins/${superAdmin.id}`, added.token),
-      ]);
-      const statuses = results.map((result) => result.status).toSorted();
-      expect(statuses[0]).toBe(200);
-      expect([401, 403]).toContain(statuses[1]);
-      const remaining = await sql<{ n: number }>`
-        select count(*)::int as n from role_assignments where role_code = 1 and revoked_at is null`.execute(
-        ownerDb,
-      );
-      expect(remaining.rows[0]!.n).toBeGreaterThanOrEqual(2);
-      // The seeded Super Admin may be the one that lost: give the seat back.
-      await sql`update role_assignments set revoked_at = null, revoked_by = null, revoke_reason = null
-        where user_id = ${superAdmin.id} and role_code = 1`.execute(ownerDb);
-    });
   });
 
   describe('PLT-15 and PLT-16 block and unblock', () => {

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { RoleName } from '../../common/auth/roles.js';
 import { AppException } from '../../common/http/app-exception.js';
+import type { ErrorCode } from '../../common/http/error-codes.js';
 import { duplicateOn, type Tx } from '../database/index.js';
 import { welcomeEmail } from './account-email.js';
 import type { NewPersonDto } from './account.dto.js';
@@ -90,7 +91,9 @@ export class AccountDirectory {
 
   /**
    * Takes the role from the person and ends their sessions acting in it, so
-   * they lose access on the next call. 404 when they do not hold it. Returns
+   * they lose access on the next call. 404 when they do not hold it. With
+   * `lastHolder` set, the only holder of the seat kind is refused with that
+   * code, decided under the seat lock so two removals cannot both win. Returns
    * how many sessions ended.
    */
   async revoke(
@@ -100,10 +103,12 @@ export class AccountDirectory {
     by: string,
     reason: string,
     now: Date,
+    lastHolder?: ErrorCode,
   ): Promise<number> {
     await this.accounts.lockSeats(tx, kind.roleCode, kind.societyId);
     const grant = await this.accounts.activeGrant(tx, userId, kind.roleCode, kind.societyId);
     if (!grant) throw AppException.notFound();
+    if (lastHolder) await this.requireAnotherHolder(tx, kind, lastHolder);
     await this.accounts.revokeGrant(tx, grant.id, by, reason, now);
     return this.accounts.endRoleSessions(
       tx,
@@ -113,6 +118,11 @@ export class AccountDirectory {
       SessionEndReason.AccessRevoked,
       now,
     );
+  }
+
+  private async requireAnotherHolder(tx: Tx, kind: SeatKind, code: ErrorCode): Promise<void> {
+    const taken = await this.accounts.takenSeats(tx, kind.roleCode, kind.societyId);
+    if (taken.length < 2) throw AppException.conflict(code);
   }
 
   /** The welcome mail, after the commit; a failed send never undoes the grant. */
