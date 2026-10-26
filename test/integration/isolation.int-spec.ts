@@ -7,6 +7,7 @@ import { runMigrations } from '../../src/platform/database/migrator.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { institutions, personaByKey, societies } from '../../src/seeds/two-worlds.js';
 import { FixtureModule } from '../support/fixture.module.js';
+import { clearLoginState } from '../support/login-state.js';
 import { signInAs } from '../support/sessions.js';
 import { createTestApp, type TestApp } from '../support/test-app.js';
 
@@ -47,18 +48,6 @@ const rename = (institutionId: string, key: CallerKey, name: string) =>
     .post(`/v1/fixtures/tenant/institutions/${institutionId}/rename`)
     .set('Authorization', `Bearer ${tokens[key]}`)
     .send({ name });
-
-const clearLogins = async () => {
-  for (const table of [
-    'refresh_tokens',
-    'auth_sessions',
-    'otp_challenges',
-    'public_call_counters',
-    'login_lockouts',
-  ]) {
-    await sql`delete from ${sql.table(table)}`.execute(ownerDb);
-  }
-};
 
 const setInstitution = (id: string, fields: 'paused' | 'inactive' | 'active') =>
   ownerDb.transaction().execute(async (tx) => {
@@ -110,7 +99,7 @@ describe('tenant isolation', () => {
       dialect: new PostgresDialect({ pool: createPool(migrationUrl, 2, 30_000) }),
     });
     await writeIdentitySeed(ownerDb);
-    await clearLogins();
+    await clearLoginState(ownerDb);
     // Role 3 grants need a staff record, which arrives with the People module.
     for (const caller of Object.values(callers)) {
       for (const institutionId of caller.grants) {
@@ -148,7 +137,7 @@ describe('tenant isolation', () => {
 
   afterAll(async () => {
     await t.close();
-    await clearLogins();
+    await clearLoginState(ownerDb);
     for (const caller of Object.values(callers)) {
       if (caller.grants.length === 0) continue;
       await sql`delete from role_assignments where user_id = ${personaByKey(caller.persona).id} and role_code = 3`.execute(
@@ -271,6 +260,19 @@ describe('tenant isolation', () => {
       expect((await get(`/v1/fixtures/tenant/institutions/${a2.id}`, 'ownerA')).status).toBe(423);
       expect((await get(`/v1/fixtures/tenant/institutions/${a2.id}`, 'adminA12')).status).toBe(423);
       expect((await get(`/v1/fixtures/tenant/institutions/${a1.id}`, 'ownerA')).status).toBe(200);
+    });
+
+    it('stops an Institution Admin whose only Institution is paused on every Society call too', async () => {
+      await setInstitution(a1.id, 'paused');
+      expect((await get(`/v1/fixtures/tenant/societies/${socA.id}`, 'adminA1')).status).toBe(423);
+      expect((await get(`/v1/fixtures/tenant/institutions/${a1.id}`, 'adminA1')).status).toBe(423);
+      // The Owner runs the whole Society and keeps working, and so does an admin with another Institution open.
+      expect((await get(`/v1/fixtures/tenant/societies/${socA.id}`, 'ownerA')).status).toBe(200);
+      expect((await get(`/v1/fixtures/tenant/societies/${socA.id}`, 'adminA12')).status).toBe(200);
+      expect((await get(`/v1/fixtures/tenant/institutions/${a2.id}`, 'adminA12')).status).toBe(200);
+      expect((await get(`/v1/fixtures/tenant/institutions/${a1.id}`, 'adminA12')).status).toBe(423);
+      // Sign-in related calls stay open for the stopped admin.
+      expect((await get('/v1/me', 'adminA1')).status).toBe(200);
     });
 
     it('answers 404 for a deactivated Institution', async () => {

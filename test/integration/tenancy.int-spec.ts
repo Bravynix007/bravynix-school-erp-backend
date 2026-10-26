@@ -10,6 +10,7 @@ import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { institutions, personaByKey, societies } from '../../src/seeds/two-worlds.js';
 import { FixtureModule } from '../support/fixture.module.js';
 import { signInAs, signInMobile } from '../support/sessions.js';
+import { clearLoginState } from '../support/login-state.js';
 import { createTestApp, type TestApp } from '../support/test-app.js';
 
 const migrationUrl = process.env.TEST_DATABASE_MIGRATION_URL!;
@@ -503,11 +504,7 @@ describe('Societies and Institutions (DDD 9.3, 15.3)', () => {
 
   describe('over HTTP, with a real session', () => {
     beforeEach(async () => {
-      await sql`delete from refresh_tokens`.execute(ownerDb);
-      await sql`delete from auth_sessions`.execute(ownerDb);
-      await sql`delete from otp_challenges`.execute(ownerDb);
-      await sql`delete from public_call_counters`.execute(ownerDb);
-      await sql`delete from login_lockouts`.execute(ownerDb);
+      await clearLoginState(ownerDb);
     });
 
     it('stops a paused Society on its next call, keeps sign-in, profile and sign-out, and resumes', async () => {

@@ -7,6 +7,8 @@ import { TokenService } from '../../src/platform/identity/token.service.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { personaByKey } from '../../src/seeds/two-worlds.js';
 import { FixtureModule } from '../support/fixture.module.js';
+import { clearLoginState } from '../support/login-state.js';
+import { signInMobile } from '../support/sessions.js';
 import { createTestApp, type TestApp } from '../support/test-app.js';
 
 const migrationUrl = process.env.TEST_DATABASE_MIGRATION_URL!;
@@ -14,13 +16,17 @@ const migrationUrl = process.env.TEST_DATABASE_MIGRATION_URL!;
 const owner = personaByKey('SO-A1');
 const other = personaByKey('SO-B1');
 const parent = personaByKey('P-A1-one');
-const device = { platform: 1, label: 'Pixel 8', appVersion: '1.4.0' };
 const DAY = 24 * 3600_000;
 const MINUTE = 60_000;
 
 describe('AUTH-05, AUTH-07, AUTH-08 and the per-request session check', () => {
   let ownerDb: Kysely<unknown>;
   let t: TestApp;
+  /** Signs a person in on a fresh device and returns the tokens. */
+  const signIn = async (email: string, ip = '203.0.113.7') => {
+    const { accessToken, refreshToken, session } = await signInMobile(t, email, ip);
+    return { accessToken, refreshToken, sessionId: session.id };
+  };
   let otp: OtpService;
 
   const rows = async <T = Record<string, unknown>>(query: RawBuilder<unknown>): Promise<T[]> =>
@@ -31,29 +37,6 @@ describe('AUTH-05, AUTH-07, AUTH-08 and the per-request session check', () => {
   const call = (method: 'get' | 'post', path: string, token: string) =>
     request(t.app.getHttpServer())[method](path).set('Authorization', `Bearer ${token}`).send({});
   const logout = (token: string) => call('post', '/v1/auth/logout', token);
-
-  /** Signs a person in on a fresh device and returns the tokens. */
-  async function signIn(email: string, ip = '203.0.113.7') {
-    await request(t.app.getHttpServer())
-      .post('/v1/auth/otp')
-      .set('X-Forwarded-For', ip)
-      .send({ email, clientType: 1 })
-      .expect(202);
-    await otp.flush();
-    const code = t.email.latest(email, 'otp')!.variables!.code as string;
-    const res = await request(t.app.getHttpServer())
-      .post('/v1/auth/otp/verify')
-      .set('X-Forwarded-For', ip)
-      .send({ email, code, clientType: 1, device })
-      .expect(200);
-    t.clock.advance(61_000);
-    const { accessToken, refreshToken, session } = res.body.data;
-    return {
-      accessToken: accessToken as string,
-      refreshToken: refreshToken as string,
-      sessionId: session.id as string,
-    };
-  }
 
   const sessionRow = async (id: string) =>
     (
@@ -97,11 +80,7 @@ describe('AUTH-05, AUTH-07, AUTH-08 and the per-request session check', () => {
   });
 
   beforeEach(async () => {
-    await sql`delete from refresh_tokens`.execute(ownerDb);
-    await sql`delete from auth_sessions`.execute(ownerDb);
-    await sql`delete from otp_challenges`.execute(ownerDb);
-    await sql`delete from public_call_counters`.execute(ownerDb);
-    await sql`delete from login_lockouts`.execute(ownerDb);
+    await clearLoginState(ownerDb);
     await sql`update users set locked_until = null, failed_login_count = 0`.execute(ownerDb);
     await sql`update users set account_status = 1, blocked_at = null, blocked_by = null, block_reason = null where id in (${owner.id}, ${other.id}, ${parent.id})`.execute(
       ownerDb,

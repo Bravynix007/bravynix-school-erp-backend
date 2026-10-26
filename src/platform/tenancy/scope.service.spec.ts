@@ -84,6 +84,15 @@ describe('ScopeService.forPrincipal', () => {
     });
   });
 
+  it("leaves paused Institutions out of an Institution Admin's Society-wide scope, not an Owner's", async () => {
+    const admin = await build([a1, a2], ['a1', 'a2']).service.forPrincipal(
+      principal({ roleCode: 3 }),
+    );
+    expect(admin.tenant.institutionIds).toEqual(['a1']);
+    const owner = await build([a1, a2]).service.forPrincipal(principal());
+    expect(owner.tenant.institutionIds).toEqual(['a1', 'a2']);
+  });
+
   it('resolves once per request and again for the next one', async () => {
     const t = build([a1]);
     const caller = principal();

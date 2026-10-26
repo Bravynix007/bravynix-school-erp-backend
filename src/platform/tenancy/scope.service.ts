@@ -15,7 +15,11 @@ export interface RequestScope {
   roleCode: RoleCode | null;
   societyId: string | null;
   institutions: readonly ScopedInstitution[];
-  /** For Society-wide work: the Society and every Institution in scope, paused or not. */
+  /**
+   * For Society-wide work: the Society and the Institutions in scope. A Society
+   * Owner keeps paused ones (audit and dues stay readable); an Institution
+   * Admin does not, so the database hides a paused Institution from them too.
+   */
   tenant: TenantContext;
 }
 
@@ -98,7 +102,9 @@ export class ScopeService {
         personId,
         roleCode,
         societyId,
-        institutionIds: institutions.map((institution) => institution.id),
+        institutionIds: institutions
+          .filter((institution) => roleCode !== RoleCode.InstitutionAdmin || !institution.paused)
+          .map((institution) => institution.id),
       },
     };
   }

@@ -8,6 +8,7 @@ import { OtpService } from '../../src/platform/identity/otp.service.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { personaByKey } from '../../src/seeds/two-worlds.js';
 import { createScratchSociety, removeScratchSocieties } from '../support/scratch-society.js';
+import { clearLoginState } from '../support/login-state.js';
 import { createTestApp, type TestApp } from '../support/test-app.js';
 
 const migrationUrl = process.env.TEST_DATABASE_MIGRATION_URL!;
@@ -74,8 +75,7 @@ describe('AUTH-01 request a login code', () => {
   });
 
   beforeEach(async () => {
-    await sql`delete from otp_challenges`.execute(owner);
-    await sql`delete from public_call_counters`.execute(owner);
+    await clearLoginState(owner);
     await sql`update users set locked_until = null`.execute(owner);
     t = await createTestApp();
     otp = t.app.get(OtpService);
