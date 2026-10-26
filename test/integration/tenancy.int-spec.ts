@@ -5,9 +5,9 @@ import { RoleCode } from '../../src/common/auth/roles.js';
 import { DatabaseService, type Tx, type TenantContext } from '../../src/platform/database/index.js';
 import { createPool } from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
-import { TokenService } from '../../src/platform/identity/token.service.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { institutions, personaByKey, societies } from '../../src/seeds/two-worlds.js';
+import { superAdminToken } from '../support/admin-token.js';
 import { FixtureModule } from '../support/fixture.module.js';
 import { signInAs, signInMobile } from '../support/sessions.js';
 import { clearLoginState } from '../support/login-state.js';
@@ -127,24 +127,7 @@ const grant = (society: string, institution: string | null) =>
     throw new Error('rollback');
   });
 
-/** A Super Admin console session; the console sign-in joins with the authenticator (B8). */
-const adminToken = async () => {
-  const { rows } = await sql<{ id: string }>`
-    insert into auth_sessions (user_id, client_type, active_role_code, idle_expires_at, absolute_expires_at)
-    values (${superAdmin.id}, 2, 1, now() + interval '1 hour', now() + interval '1 hour') returning id
-  `.execute(ownerDb);
-  const signed = await t.app.get(TokenService).signAccessToken(
-    {
-      personId: superAdmin.id,
-      sessionId: rows[0]!.id,
-      roleCode: 1,
-      societyId: null,
-      clientType: 'console',
-    },
-    t.clock.now(),
-  );
-  return signed.token;
-};
+const adminToken = () => superAdminToken(t, ownerDb, superAdmin.id);
 
 const call = (method: 'get' | 'post', path: string, bearer: string) =>
   request(t.app.getHttpServer())[method](path).set('Authorization', `Bearer ${bearer}`).send({});
