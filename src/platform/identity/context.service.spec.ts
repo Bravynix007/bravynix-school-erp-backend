@@ -190,6 +190,22 @@ describe('ContextService.switchContext', () => {
     expect(t.sessions.activeGrants).not.toHaveBeenCalled();
   });
 
+  it('treats a null societyId as absent: required for roles 2 to 4, fine for role 5', async () => {
+    const t = build([owner]);
+    const missing = await fail(
+      t.service.switchContext(principal(), { roleCode: 2, societyId: null }),
+    );
+    expect(missing).toMatchObject({
+      status: 400,
+      options: { errors: [{ field: 'societyId', code: 'REQUIRED' }] },
+    });
+    // Role 5 is never available yet, but a null Society is not what refuses it.
+    const parent = await fail(
+      t.service.switchContext(principal(), { roleCode: 5, societyId: null }),
+    );
+    expect(parent).toMatchObject({ status: 403, code: 'CONTEXT_NOT_AVAILABLE' });
+  });
+
   it('asks for a Society on roles 2 to 4 and forbids one on role 5', async () => {
     const t = build([owner]);
     const missing = await fail(t.service.switchContext(principal(), { roleCode: 2 }));

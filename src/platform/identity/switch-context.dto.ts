@@ -15,5 +15,5 @@ export class SwitchContextDto {
   @ApiPropertyOptional({ format: 'uuid', description: 'Required for roles 2 to 4, absent for 5' })
   @IsOptional()
   @IsUUID()
-  societyId?: string;
+  societyId?: string | null;
 }

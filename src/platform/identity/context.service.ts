@@ -137,7 +137,7 @@ export class ContextService {
   private checkPairing(request: SwitchContextDto): string | null {
     const language = RequestContext.current()?.language;
     if (request.roleCode === 5) {
-      if (request.societyId !== undefined) {
+      if (request.societyId != null) {
         throw AppException.validation([
           {
             field: 'societyId',
@@ -148,7 +148,7 @@ export class ContextService {
       }
       return null;
     }
-    if (request.societyId === undefined) {
+    if (request.societyId == null) {
       throw AppException.validation([
         {
           field: 'societyId',
