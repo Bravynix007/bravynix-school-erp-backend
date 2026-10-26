@@ -428,16 +428,27 @@ describe('PLT-03, PLT-09 to PLT-11 Society Owners', () => {
       });
       expect(inOne.body.meta).toMatchObject({ page: 1, totalItems: 1, totalPages: 1 });
 
-      // The block state and version are what PLT-15 and PLT-16 need to act on an Owner from this list.
-      await sql`update users set account_status = 2, blocked_at = now(), block_reason = 'Unpaid dues', version = version + 1 where email = ${asha}`.execute(
-        ownerDb,
-      );
-      const blocked = await api('get', `/v1/platform/society-owners?societyId=${one}`, admin);
-      expect((blocked.body.data as unknown as OwnerRow[])[0]).toMatchObject({
+      // The listed version is what PLT-15 and PLT-16 need: act on the Owner from this list alone.
+      const listed = (inOne.body.data as unknown as OwnerRow[])[0]!;
+      const block = await api('post', `/v1/platform/users/${listed.id}/block`, admin, {
+        reason: 'Unpaid dues',
+        version: listed.version,
+      });
+      expect(block.status).toBe(200);
+      const blocked = (
+        (await api('get', `/v1/platform/society-owners?societyId=${one}`, admin)).body
+          .data as unknown as OwnerRow[]
+      )[0]!;
+      expect(blocked).toMatchObject({
         accountStatus: 2,
         blockReason: 'Unpaid dues',
         blockedAt: expect.any(String),
       });
+      expect(blocked.version).toBeGreaterThan(listed.version);
+      const unblock = await api('post', `/v1/platform/users/${listed.id}/unblock`, admin, {
+        version: blocked.version,
+      });
+      expect(unblock.status).toBe(200);
 
       const byName = await api(
         'get',
