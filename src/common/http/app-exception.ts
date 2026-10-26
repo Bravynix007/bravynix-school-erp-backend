@@ -63,6 +63,13 @@ export class AppException extends Error {
     return new AppException(HttpStatus.CONFLICT, code, { message });
   }
 
+  /** The record changed since the client read it; `data.currentVersion` says to what (API design 14.3). */
+  static versionConflict(currentVersion: number): AppException {
+    return new AppException(HttpStatus.CONFLICT, ErrorCode.VERSION_CONFLICT, {
+      details: { currentVersion },
+    });
+  }
+
   static businessRule(code: string, message?: string): AppException {
     return new AppException(HttpStatus.UNPROCESSABLE_ENTITY, code, { message });
   }

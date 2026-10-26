@@ -22,3 +22,12 @@ export const RoleShortName: Record<RoleCode, 'SA' | 'SO' | 'IA' | 'TS' | 'SP'> =
 };
 
 export const ALL_ROLES: readonly RoleCode[] = [1, 2, 3, 4, 5];
+
+/** Names for the author stamps (API design 7.6). Roles 4 and 5 are named by the People module. */
+export const RoleName: Record<RoleCode, string> = {
+  1: 'Super Admin',
+  2: 'Society Owner',
+  3: 'Institution Admin',
+  4: 'Teacher',
+  5: 'Parent',
+};

@@ -197,3 +197,8 @@ export function cursorMeta<T extends { cursorAt: CursorAt; id: string }>(
     },
   };
 }
+
+/** `%text%` for ILIKE, with the characters LIKE treats as wildcards taken literally. */
+export function containsPattern(text: string): string {
+  return `%${text.replace(/[\\%_]/g, '\\$&')}%`;
+}

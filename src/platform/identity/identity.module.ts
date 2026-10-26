@@ -12,6 +12,7 @@ import { MfaRepository } from './mfa.repository.js';
 import { MfaService } from './mfa.service.js';
 import { OtpHasher } from './otp-hasher.js';
 import { OtpService } from './otp.service.js';
+import { PersonDirectory } from './person-directory.js';
 import { PublicCallLimiter } from './public-call-limiter.js';
 import { SecretBox } from './secret-box.js';
 import { SessionService } from './session.service.js';
@@ -35,6 +36,7 @@ import { TokenService } from './token.service.js';
     { provide: AccessTokenVerifier, useExisting: SessionTokenVerifier },
     BackgroundMailer,
     GrantDirectory,
+    PersonDirectory,
     OtpService,
     PublicCallLimiter,
     {
@@ -55,6 +57,13 @@ import { TokenService } from './token.service.js';
       useFactory: ({ env }: AppConfig) => new OtpHasher(env.OTP_HMAC_SECRET),
     },
   ],
-  exports: [OtpService, PublicCallLimiter, TokenService, AccessTokenVerifier, GrantDirectory],
+  exports: [
+    OtpService,
+    PublicCallLimiter,
+    TokenService,
+    AccessTokenVerifier,
+    GrantDirectory,
+    PersonDirectory,
+  ],
 })
 export class IdentityModule {}

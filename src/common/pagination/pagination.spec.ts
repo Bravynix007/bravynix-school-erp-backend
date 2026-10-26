@@ -1,5 +1,6 @@
 import { AppException } from '../http/app-exception.js';
 import {
+  containsPattern,
   cursorMeta,
   decodeCursor,
   encodeCursor,
@@ -16,6 +17,13 @@ describe('page mode', () => {
     expect(pageMeta(2, 20, 134)).toEqual({ page: 2, limit: 20, totalItems: 134, totalPages: 7 });
     expect(pageMeta(1, 20, 0)).toEqual({ page: 1, limit: 20, totalItems: 0, totalPages: 0 });
     expect(pageOffset(3, 20)).toBe(40);
+  });
+});
+
+describe('containsPattern', () => {
+  it('wraps the text and takes the LIKE wildcards literally', () => {
+    expect(containsPattern('sun')).toBe('%sun%');
+    expect(containsPattern('100%_a\\b')).toBe('%100\\%\\_a\\\\b%');
   });
 });
 
