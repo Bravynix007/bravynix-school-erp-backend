@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { RoleName, type RoleCode } from '../../common/auth/roles.js';
 import { DatabaseService, type Db } from '../database/index.js';
+import { personName } from './person-name.js';
 
 /** The person shape of an author stamp (API design 7.6). */
 export interface PersonRef {
@@ -46,7 +47,7 @@ export class PersonDirectory {
         : mine[0]?.role_code;
       people.set(user.id, {
         id: user.id,
-        displayName: [user.first_name, user.last_name].filter(Boolean).join(' ') || user.email,
+        displayName: personName(user.first_name, user.last_name) ?? user.email,
         roleName: role === undefined ? null : (RoleName[role as RoleCode] ?? null),
       });
     }

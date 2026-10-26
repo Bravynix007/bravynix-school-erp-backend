@@ -1,3 +1,4 @@
+import { personName } from './person-name.js';
 import { reportedStatus, userTypeFor } from './auth-codes.js';
 import type { Context } from './contexts.js';
 import type { LoginUser } from './identity.repository.js';
@@ -57,6 +58,5 @@ export function buildLoginResult(input: {
 
 /** The name the audit log shows for a person. */
 export function displayName(user: LoginUser): string | null {
-  const name = [user.firstName, user.lastName].filter(Boolean).join(' ');
-  return name || null;
+  return personName(user.firstName, user.lastName);
 }

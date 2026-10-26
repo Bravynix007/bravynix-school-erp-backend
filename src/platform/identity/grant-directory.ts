@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { DatabaseService, type Tx } from '../database/index.js';
 import { reportedStatus, SessionEndReason } from './auth-codes.js';
+import { personName } from './person-name.js';
 
 /**
  * What the Identity module tells other modules about a person's grants. The
@@ -44,7 +45,7 @@ export class GrantDirectory {
     return rows.map((row) => ({
       id: row.id,
       email: row.email,
-      displayName: [row.first_name, row.last_name].filter(Boolean).join(' ') || row.email,
+      displayName: personName(row.first_name, row.last_name) ?? row.email,
       accountStatus: reportedStatus(row.account_status),
     }));
   }

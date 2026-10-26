@@ -220,6 +220,18 @@ describe('PLT-02 to PLT-08 Societies', () => {
       ['a number as the code', { name: 'X', code: 5 }, 'code', 'INVALID_TYPE'],
       ['a status', { name: 'X', code: 'X', status: 0 }, 'status', 'FIELD_NOT_ALLOWED'],
       ['an author', { name: 'X', code: 'X', createdBy: 'me' }, 'createdBy', 'FIELD_NOT_ALLOWED'],
+      [
+        'an empty description',
+        { name: 'X', code: 'X', description: '' },
+        'description',
+        'TOO_SHORT',
+      ],
+      [
+        'an empty address line',
+        { name: 'X', code: 'X', address: { line1: '' } },
+        'address.line1',
+        'TOO_SHORT',
+      ],
       ['a bad email', { name: 'X', code: 'X', email: 'nope' }, 'email', 'INVALID_FORMAT'],
       [
         'a website without a scheme',

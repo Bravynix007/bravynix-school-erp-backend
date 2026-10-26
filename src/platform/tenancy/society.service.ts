@@ -88,6 +88,9 @@ function auditView(row: SocietyRow): AuditValues {
  * request is acting in.
  */
 function platformTenant(principal: Principal, societyId?: string): TenantContext {
+  // The policy guard already limits these routes to Super Admin; row-level
+  // security would otherwise trust this context, so the role is checked again here.
+  if (principal.roleCode !== RoleCode.SuperAdmin) throw AppException.forbidden();
   return { personId: principal.personId, roleCode: RoleCode.SuperAdmin, societyId };
 }
 

@@ -12,6 +12,7 @@ import {
   Length,
   Matches,
   MaxLength,
+  MinLength,
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
@@ -24,18 +25,21 @@ export class AddressDto {
   @ApiPropertyOptional({ maxLength: 255, nullable: true })
   @IsOptional()
   @IsString()
+  @MinLength(1)
   @MaxLength(255)
   line1?: string | null;
 
   @ApiPropertyOptional({ maxLength: 255, nullable: true })
   @IsOptional()
   @IsString()
+  @MinLength(1)
   @MaxLength(255)
   line2?: string | null;
 
   @ApiPropertyOptional({ maxLength: 10, nullable: true })
   @IsOptional()
   @IsString()
+  @MinLength(1)
   @MaxLength(10)
   pincode?: string | null;
 }
@@ -48,6 +52,7 @@ class SocietyProfileDto {
   @ApiPropertyOptional({ maxLength: 1000, nullable: true })
   @IsOptional()
   @IsString()
+  @MinLength(1)
   @MaxLength(1000)
   description?: string | null;
 

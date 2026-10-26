@@ -84,6 +84,18 @@ const query = (overrides: Partial<ListSocietiesQueryDto> = {}) =>
 const patch = (body: Partial<UpdateSocietyDto> & { version: number }) => body as UpdateSocietyDto;
 
 describe('SocietyService', () => {
+  describe('who may act', () => {
+    it.each([2, 3, null] as const)(
+      'refuses a caller whose role is %s, before any database work',
+      async (roleCode) => {
+        const t = build();
+        const error = await refusal(t.service.deactivate({ ...principal, roleCode }, 'society-1'));
+        expect(error.status).toBe(403);
+        expect(t.transaction).not.toHaveBeenCalled();
+      },
+    );
+  });
+
   describe('acting as Super Admin in the Society it changes', () => {
     it('opens every change in that Society, so the audit entry may carry its ID', async () => {
       const t = build();
