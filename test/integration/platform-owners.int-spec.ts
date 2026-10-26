@@ -1,6 +1,12 @@
 import { Kysely, PostgresDialect, sql } from 'kysely';
 import { newId } from '../../src/common/ids/ids.js';
-import { createPool } from '../../src/platform/database/database.service.js';
+import type { Principal } from '../../src/common/auth/access-token-verifier.js';
+import { RoleCode } from '../../src/common/auth/roles.js';
+import { ErrorCode } from '../../src/common/http/error-codes.js';
+import { createPool, DatabaseService } from '../../src/platform/database/database.service.js';
+import { platformTenant } from '../../src/platform/database/platform-tenant.js';
+import type { Tx } from '../../src/platform/database/index.js';
+import { AccountDirectory } from '../../src/platform/identity/index.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
 import { OtpService } from '../../src/platform/identity/otp.service.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
@@ -329,20 +335,55 @@ describe('PLT-03, PLT-09 to PLT-11 Society Owners', () => {
       expect((await api('delete', path(only), admin)).status).toBe(200);
     });
 
-    it('lets only one of two parallel removals of the last two Owners win', async () => {
-      const society = (await createSociety()).body.data.id;
+    it('makes the second of two removals of the last two Owners wait for the first, then refuses it', async () => {
+      const society = (await createSociety()).body.data.id as string;
       const first = (await addOwner(society, { email: email() })).body.data.id as string;
       const second = (await addOwner(society, { email: email() })).body.data.id as string;
-      const results = await Promise.all(
-        [first, second].map((id) =>
-          api('delete', `/v1/platform/societies/${society}/owners/${id}`, admin),
-        ),
+      const database = t.app.get(DatabaseService);
+      const directory = t.app.get(AccountDirectory);
+      const principal = { personId: superAdmin.id, roleCode: RoleCode.SuperAdmin } as Principal;
+      const seat = { roleCode: 2, societyId: society } as const;
+      const remove = (tx: Tx, userId: string) =>
+        directory.revoke(
+          tx,
+          seat,
+          userId,
+          superAdmin.id,
+          'owner_removed',
+          new Date(),
+          ErrorCode.LAST_OWNER,
+        );
+
+      let commitFirst!: () => void;
+      let firstHasRemoved!: () => void;
+      const removed = new Promise<void>((resolve) => {
+        firstHasRemoved = resolve;
+      });
+      const firstDone = database.transaction(platformTenant(principal, society), async (tx) => {
+        await remove(tx, first);
+        firstHasRemoved();
+        await new Promise<void>((resolve) => {
+          commitFirst = resolve;
+        });
+      });
+      await removed;
+
+      let secondSettled = false;
+      const secondDone = database
+        .transaction(platformTenant(principal, society), (tx) => remove(tx, second))
+        .finally(() => {
+          secondSettled = true;
+        });
+      const secondOutcome = secondDone.then(
+        () => 'removed',
+        (error: { code?: string }) => error.code,
       );
-      expect(results.map((res) => res.status).toSorted()).toEqual([200, 409]);
-      const { rows } = await sql<{ count: number }>`
-        select count(*) from role_assignments
-        where society_id = ${society} and role_code = 2 and revoked_at is null`.execute(ownerDb);
-      expect(rows[0]!.count).toBe(1);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(secondSettled).toBe(false);
+
+      commitFirst();
+      await firstDone;
+      expect(await secondOutcome).toBe('LAST_OWNER');
     });
 
     it('answers 404 for a person who is not an Owner there, an unknown Society and bad IDs', async () => {
