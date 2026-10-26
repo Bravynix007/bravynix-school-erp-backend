@@ -1,5 +1,5 @@
 import { HttpStatus } from '@nestjs/common';
-import { evaluateIpLimit, evaluateOtpRequest } from './otp-limits.js';
+import { evaluateIpLimit, evaluateOtpRequest, lockSecondsFor } from './otp-limits.js';
 
 const NOW = new Date('2026-10-25T10:00:00.000Z');
 const ago = (seconds: number): Date => new Date(NOW.getTime() - seconds * 1000);
@@ -100,5 +100,17 @@ describe('evaluateIpLimit', () => {
     expect(
       evaluateIpLimit(new Date(windowStart.getTime() + 59_999), windowStart, 99)?.retryAfterSeconds,
     ).toBe(1);
+  });
+});
+
+describe('lockSecondsFor', () => {
+  it('locks for 30 minutes at the first and second lockout in 24 hours', () => {
+    expect(lockSecondsFor(1)).toBe(30 * 60);
+    expect(lockSecondsFor(2)).toBe(30 * 60);
+  });
+
+  it('locks for 24 hours from the third', () => {
+    expect(lockSecondsFor(3)).toBe(24 * 3600);
+    expect(lockSecondsFor(7)).toBe(24 * 3600);
   });
 });

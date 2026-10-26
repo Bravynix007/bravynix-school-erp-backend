@@ -44,6 +44,12 @@ const en: Catalogue = {
   OTP_RESEND_TOO_SOON: 'Please wait a minute before asking for another code',
   OTP_REQUEST_LIMIT: 'Too many code requests, please try again later',
   AUTH_LOCKED: 'Too many failed attempts, please try again later',
+  LOGIN_OK: 'Welcome back',
+  OTP_INVALID: 'That code is not correct',
+  OTP_EXPIRED: 'That code has expired, please ask for a new one',
+  OTP_ATTEMPTS_EXCEEDED: 'Too many wrong codes, please try again later',
+  ACCOUNT_BLOCKED: "This account is blocked and can't access the app",
+  CONSOLE_NOT_ALLOWED: 'This account cannot sign in to the console',
   // Field codes
   REQUIRED: 'This field is required',
   FIELD_NOT_ALLOWED: 'This field is not allowed',
