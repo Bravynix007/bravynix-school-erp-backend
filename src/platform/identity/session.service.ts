@@ -6,14 +6,8 @@ import { newId } from '../../common/ids/ids.js';
 import { Clock } from '../../common/time/clock.js';
 import { AuditOutcome, AuditService } from '../audit/index.js';
 import { DatabaseService, type Tx } from '../database/index.js';
-import {
-  AccountStatus,
-  AuthCode,
-  ClientType,
-  SessionEndReason,
-  endReasonName,
-} from './auth-codes.js';
-import { MOBILE_SESSION_MS, roleNeedsGrant } from './session-rules.js';
+import { AuthCode, ClientType, SessionEndReason, endReasonName } from './auth-codes.js';
+import { endIfNoLongerAllowed, MOBILE_SESSION_MS } from './session-rules.js';
 import { PublicCallLimiter } from './public-call-limiter.js';
 import { requestIp } from './request-ip.js';
 import { SessionRepository, type SessionRow } from './session.repository.js';
@@ -119,8 +113,8 @@ export class SessionService {
       return refused(HttpStatus.UNAUTHORIZED, AuthCode.REFRESH_TOKEN_INVALID);
     }
 
-    const stopped = await this.stopIfNoLongerAllowed(tx, session, now);
-    if (stopped) return stopped;
+    const lost = await endIfNoLongerAllowed(this.sessions, tx, session, now);
+    if (lost !== null) return sessionEnded(lost);
 
     const expiresAt = new Date(now.getTime() + MOBILE_SESSION_MS);
     await this.sessions.markTokenUsed(tx, found.tokenId, now);
@@ -133,34 +127,6 @@ export class SessionService {
     });
     await this.sessions.touchSession(tx, session.id, now, expiresAt);
     return { kind: 'renewed', session };
-  }
-
-  /**
-   * The person was blocked or lost the access this session acts with: the
-   * session ends now, not when the access token runs out (API design 6.5).
-   */
-  async stopIfNoLongerAllowed(tx: Tx, session: SessionRow, now: Date): Promise<Refused | null> {
-    if (
-      session.accountStatus === AccountStatus.Blocked ||
-      session.accountStatus === AccountStatus.Inactive
-    ) {
-      await this.sessions.endUserSessions(tx, session.userId, SessionEndReason.AccountBlocked, now);
-      return sessionEnded(SessionEndReason.AccountBlocked);
-    }
-    if (
-      session.activeRoleCode !== null &&
-      roleNeedsGrant(session.activeRoleCode) &&
-      !(await this.sessions.hasGrant(
-        tx,
-        session.userId,
-        session.activeRoleCode,
-        session.activeSocietyId,
-      ))
-    ) {
-      await this.sessions.endSession(tx, session.id, SessionEndReason.AccessRevoked, now);
-      return sessionEnded(SessionEndReason.AccessRevoked);
-    }
-    return null;
   }
 
   /** AUTH-07: ends this device's session. */

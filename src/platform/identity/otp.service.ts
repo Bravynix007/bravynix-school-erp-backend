@@ -6,14 +6,13 @@ import { AppConfig } from '../../config/app-config.js';
 import { DatabaseService } from '../database/index.js';
 import { AuthCode, ClientType } from './auth-codes.js';
 import { BackgroundMailer } from './background-mailer.js';
-import { canReceiveCode, IdentityRepository } from './identity.repository.js';
+import { canReceiveCode, IdentityRepository, NIL_UUID } from './identity.repository.js';
 import { otpEmail } from './otp-email.js';
 import { OtpHasher, generateOtpCode } from './otp-hasher.js';
 import { evaluateOtpRequest, OTP_LIMITS } from './otp-limits.js';
 import { PublicCallLimiter } from './public-call-limiter.js';
 import { requestIp } from './request-ip.js';
-
-const NIL_UUID = '00000000-0000-0000-0000-000000000000';
+import { latest } from './time-rules.js';
 
 export interface OtpRequest {
   email: string;
@@ -23,12 +22,6 @@ export interface OtpRequest {
 export interface OtpRequestResult {
   /** Only when development echo is on and the account is registered. */
   devCode?: string;
-}
-
-function later(date: Date | null | undefined, other: Date | null | undefined): Date | null {
-  if (!date) return other ?? null;
-  if (!other) return date;
-  return date > other ? date : other;
 }
 
 /**
@@ -80,7 +73,7 @@ export class OtpService {
         now,
         emailRequests: requests.map((r) => r.at),
         addressRequests: requests.filter((r) => r.sameAddress).map((r) => r.at),
-        lockedUntil: later(user?.lockedUntil, challengeLock),
+        lockedUntil: latest(user?.lockedUntil, challengeLock),
       });
       if (refusal) {
         throw new AppException(refusal.status, refusal.code, {

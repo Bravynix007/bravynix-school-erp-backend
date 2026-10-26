@@ -38,20 +38,6 @@ export class PageQueryDto {
   q?: string;
 }
 
-/** Query parameters for cursor-mode lists (API design 13.2). */
-export class CursorQueryDto {
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  @Max(MAX_LIMIT)
-  limit: number = DEFAULT_LIMIT;
-
-  @IsOptional()
-  @IsString()
-  cursor?: string;
-}
-
 export function pageMeta(page: number, limit: number, totalItems: number): PageMeta {
   return { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) };
 }
