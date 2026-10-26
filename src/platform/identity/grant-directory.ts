@@ -90,6 +90,9 @@ export class GrantDirectory {
       'users.first_name',
       'users.last_name',
       'users.account_status',
+      'users.blocked_at',
+      'users.block_reason',
+      'users.version',
       'role_assignments.society_id',
       'role_assignments.seat_no',
       'role_assignments.created_at as granted_at',
@@ -105,6 +108,9 @@ export class GrantDirectory {
         email: row.email,
         displayName: personName(row.first_name, row.last_name) ?? row.email,
         accountStatus: reportedStatus(row.account_status),
+        blockedAt: row.blocked_at,
+        blockReason: row.block_reason,
+        version: row.version,
         societyId: row.society_id!,
         seatNo: row.seat_no!,
         grantedAt: row.granted_at,
@@ -183,6 +189,10 @@ const OWNER_SORT_COLUMN = {
 
 /** One Owner seat, as PLT-11 lists it; the Society is named by its ID. */
 export interface OwnerGrant extends SocietyOwner {
+  /** What PLT-15 to PLT-17 need to act on the person: their account's block state and version. */
+  blockedAt: Date | null;
+  blockReason: string | null;
+  version: number;
   societyId: string;
   seatNo: number;
   grantedAt: Date;

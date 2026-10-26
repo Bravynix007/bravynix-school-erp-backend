@@ -31,6 +31,9 @@ interface OwnerRow {
   email: string;
   displayName: string;
   accountStatus: number;
+  blockedAt: string | null;
+  blockReason: string | null;
+  version: number;
   seatNo: number;
   society: { id: string; code: string; name: string };
 }
@@ -418,9 +421,23 @@ describe('PLT-03, PLT-09 to PLT-11 Society Owners', () => {
         displayName: 'Asha Zed',
         accountStatus: 1,
         seatNo: 1,
+        blockedAt: null,
+        blockReason: null,
+        version: expect.any(Number),
         society: { id: one, name: 'Alpha Trust' },
       });
       expect(inOne.body.meta).toMatchObject({ page: 1, totalItems: 1, totalPages: 1 });
+
+      // The block state and version are what PLT-15 and PLT-16 need to act on an Owner from this list.
+      await sql`update users set account_status = 2, blocked_at = now(), block_reason = 'Unpaid dues', version = version + 1 where email = ${asha}`.execute(
+        ownerDb,
+      );
+      const blocked = await api('get', `/v1/platform/society-owners?societyId=${one}`, admin);
+      expect((blocked.body.data as unknown as OwnerRow[])[0]).toMatchObject({
+        accountStatus: 2,
+        blockReason: 'Unpaid dues',
+        blockedAt: expect.any(String),
+      });
 
       const byName = await api(
         'get',

@@ -135,6 +135,9 @@ describe('list (PLT-11)', () => {
     email: 'asha@example.com',
     displayName: 'Asha',
     accountStatus: 1,
+    blockedAt: null,
+    blockReason: null,
+    version: 4,
     societyId: 'society-1',
     seatNo: 1,
     grantedAt: new Date('2026-10-01T00:00:00.000Z'),
@@ -155,7 +158,31 @@ describe('list (PLT-11)', () => {
     expect(result.data[0]).toMatchObject({
       id: 'owner-1',
       grantedAt: '2026-10-01T00:00:00.000Z',
+      version: 4,
+      blockedAt: null,
+      blockReason: null,
       society: { id: 'society-1', code: 'SUN', name: 'Sunrise' },
+    });
+  });
+
+  it('carries the block state of a Blocked Owner, so the console can lift it', async () => {
+    const t = build();
+    t.ownersPage.mockResolvedValue({
+      rows: [
+        {
+          ...grant,
+          accountStatus: 2,
+          blockedAt: new Date('2026-10-20T00:00:00.000Z'),
+          blockReason: 'Unpaid dues',
+        },
+      ],
+      total: 1,
+    });
+    const result = await t.service.list(principal, { page: 1, limit: 20 });
+    expect(result.data[0]).toMatchObject({
+      accountStatus: 2,
+      blockedAt: '2026-10-20T00:00:00.000Z',
+      blockReason: 'Unpaid dues',
     });
   });
 
