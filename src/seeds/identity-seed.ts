@@ -1,4 +1,5 @@
 import { sql, type Kysely } from 'kysely';
+import { writeTenancySeed } from './tenancy-seed.js';
 import { personas, societies, type AccountStatus } from './two-worlds.js';
 
 const STATUS_CODE: Record<AccountStatus, number> = {
@@ -11,12 +12,14 @@ const STATUS_CODE: Record<AccountStatus, number> = {
 /**
  * Writes the two-worlds personas as `users`, and their Super Admin and
  * Society Owner grants as `role_assignments`. Role 3 grants need staff
- * records and Institutions, so they join when those tables exist.
+ * records, so they join when that table exists. The grants name Societies, so
+ * the tenants are written first.
  *
  * Safe to run twice: rows are keyed by their fixed IDs. Never holds a
  * password or a key: login is by email code only.
  */
 export async function writeIdentitySeed(db: Kysely<unknown>): Promise<void> {
+  await writeTenancySeed(db);
   for (const p of personas) {
     const [firstName, ...rest] = p.displayName.split(' ');
     const status = STATUS_CODE[p.status];

@@ -7,6 +7,7 @@ import { OtpHasher } from '../../src/platform/identity/otp-hasher.js';
 import { OtpService } from '../../src/platform/identity/otp.service.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { personaByKey } from '../../src/seeds/two-worlds.js';
+import { createScratchSociety, removeScratchSocieties } from '../support/scratch-society.js';
 import { createTestApp, type TestApp } from '../support/test-app.js';
 
 const migrationUrl = process.env.TEST_DATABASE_MIGRATION_URL!;
@@ -614,6 +615,15 @@ describe('identity tables', () => {
 
   describe('role_assignments', () => {
     let person: string;
+    const societies: string[] = [];
+    // A grant names a real Society (fk_role_assignments_society); the tenant
+    // roots force row-level security even on their owner, hence Super Admin.
+    const newSociety = async (): Promise<string> => {
+      const id = newId();
+      await createScratchSociety(ownerDb, id);
+      societies.push(id);
+      return id;
+    };
     beforeEach(async () => {
       person = newId();
       await sql`insert into users (id, email) values (${person}, ${`${person}@two-worlds.test`})`.execute(
@@ -622,6 +632,7 @@ describe('identity tables', () => {
     });
     afterEach(async () => {
       await sql`delete from role_assignments where user_id = ${person}`.execute(ownerDb);
+      await removeScratchSocieties(ownerDb, societies.splice(0));
     });
 
     it('lets a role carry only the scope it should', async () => {
@@ -668,7 +679,7 @@ describe('identity tables', () => {
     });
 
     it('allows at most 3 Society Owners per Society, and the same number in another Society', async () => {
-      const society = newId();
+      const society = await newSociety();
       const others = [newId(), newId(), newId()];
       for (const [i, other] of others.entries()) {
         await sql`insert into users (id, email) values (${other}, ${`${other}@two-worlds.test`})`.execute(
@@ -679,7 +690,7 @@ describe('identity tables', () => {
       await expect(
         grant('user_id, role_code, society_id, seat_no', [person, 2, society, 1]),
       ).rejects.toThrow(/uq_role_assignments_owner_seat/);
-      await grant('user_id, role_code, society_id, seat_no', [person, 2, newId(), 1]);
+      await grant('user_id, role_code, society_id, seat_no', [person, 2, await newSociety(), 1]);
       for (const other of others) {
         await sql`delete from role_assignments where user_id = ${other}`.execute(ownerDb);
         await sql`delete from users where id = ${other}`.execute(ownerDb);
@@ -687,7 +698,7 @@ describe('identity tables', () => {
     });
 
     it('refuses the same active grant twice', async () => {
-      const society = newId();
+      const society = await newSociety();
       await grant('user_id, role_code, society_id, seat_no', [person, 2, society, 2]);
       await expect(
         grant('user_id, role_code, society_id, seat_no', [person, 2, society, 3]),

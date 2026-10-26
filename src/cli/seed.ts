@@ -9,15 +9,15 @@ import { assertSeedable } from './seed-guard.js';
  * `npm run db:seed [scenario]` writes a named data set into a local or test
  * database. Refused in staging and production, and for any non-local host.
  *
- * Each module that owns tables registers a writer here as it is built; until
- * the Identity and Tenancy modules exist, the two-worlds scenario only checks
- * the schema is migrated and prints the personas it will create.
+ * Each module that owns tables registers a writer here as it is built. The
+ * two-worlds scenario writes the Societies, Institutions, people and grants.
  */
 type SeedWriter = (db: Kysely<unknown>) => Promise<void>;
 
 const writers: SeedWriter[] = [
+  // Writes the Societies and Institutions first, then the people and their grants.
   writeIdentitySeed,
-  // Tenancy writers (Societies, Institutions, staff and role 3 grants) join as they are built.
+  // Staff and role 3 grants join with the People module.
 ];
 
 async function main(): Promise<void> {

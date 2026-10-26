@@ -74,6 +74,7 @@ export class AuthController {
     ],
     scope: 'self',
     allowNoContext: true,
+    allowWhenPaused: true,
     operationId: 'AUTH-06',
     rule: 'Mobile sessions only; the person must hold the grant, staff record or guardian link for the role (API design 10.4)',
   })
@@ -93,6 +94,7 @@ export class AuthController {
     roles: ALL_ROLES,
     scope: 'self',
     allowNoContext: true,
+    allowWhenPaused: true,
     operationId: 'AUTH-07',
     rule: "Ends the caller's own session",
   })
@@ -107,6 +109,7 @@ export class AuthController {
     roles: ALL_ROLES,
     scope: 'self',
     allowNoContext: true,
+    allowWhenPaused: true,
     operationId: 'AUTH-08',
     rule: 'Ends every session of the caller',
   })

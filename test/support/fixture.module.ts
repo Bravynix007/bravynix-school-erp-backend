@@ -133,6 +133,16 @@ class FixtureController {
     return { ok: true };
   }
 
+  @Policy({
+    roles: [RoleCode.SuperAdmin, RoleCode.SocietyOwner],
+    scope: 'society',
+    allowWhenPaused: true,
+  })
+  @Get('owner-read-when-paused')
+  ownerReadWhenPaused(): { ok: true } {
+    return { ok: true };
+  }
+
   @Policy({ roles: [RoleCode.SuperAdmin, RoleCode.SocietyOwner], scope: 'society' })
   @Post('owner-write')
   ownerWrite(): { ok: true } {
