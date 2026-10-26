@@ -4,8 +4,11 @@ import type { SessionRepository, SessionRow } from './session.repository.js';
 
 const DAY_MS = 24 * 3600 * 1000;
 
-/** Mobile sessions last 30 days from last use (SDD NFR-14); console sessions arrive with slice B8. */
+/** Mobile sessions last 30 days from last use (SDD NFR-14). */
 export const MOBILE_SESSION_MS = 30 * DAY_MS;
+
+/** A console session lasts 12 hours from sign-in and is never extended (API design 6.1). */
+export const CONSOLE_SESSION_MS = 12 * 3600 * 1000;
 
 /**
  * A request moves the idle deadline only when the last move is older than

@@ -131,4 +131,14 @@ export class TokenService {
   refreshTokenHmac(token: string): Buffer {
     return createHmac('sha256', this.hmacKey).update(`refresh:${token}`).digest();
   }
+
+  /** The token that carries a Super Admin from the code step to the authenticator step (API design 6.2). */
+  newMfaToken(): { token: string; hmac: Buffer } {
+    const token = `mfa_${randomBytes(32).toString('base64url')}`;
+    return { token, hmac: this.mfaTokenHmac(token) };
+  }
+
+  mfaTokenHmac(token: string): Buffer {
+    return createHmac('sha256', this.hmacKey).update(`mfa:${token}`).digest();
+  }
 }

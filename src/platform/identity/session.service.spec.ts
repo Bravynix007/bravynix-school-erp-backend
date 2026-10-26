@@ -89,7 +89,7 @@ describe('SessionService.refresh', () => {
     const t = build();
     const result = await RequestContext.run(
       { requestId: 'r1', language: 'en', ipAddress: '203.0.113.9' },
-      () => t.service.refresh(PRESENTED),
+      () => t.service.refresh(PRESENTED, 'mobile'),
     );
     const now = t.clock.now();
     expect(t.check).toHaveBeenCalledWith('203.0.113.9', 'refresh');
@@ -116,7 +116,7 @@ describe('SessionService.refresh', () => {
 
   it('refuses an unknown token', async () => {
     const t = build({ none: true });
-    expect(await fail(t.service.refresh(PRESENTED))).toMatchObject({
+    expect(await fail(t.service.refresh(PRESENTED, 'mobile'))).toMatchObject({
       status: 401,
       code: 'REFRESH_TOKEN_INVALID',
     });
@@ -125,7 +125,7 @@ describe('SessionService.refresh', () => {
 
   it('ends the session and audits when a used token comes back', async () => {
     const t = build({ found: { usedAt: new Date() } });
-    expect(await fail(t.service.refresh(PRESENTED))).toMatchObject({
+    expect(await fail(t.service.refresh(PRESENTED, 'mobile'))).toMatchObject({
       status: 401,
       code: 'REFRESH_TOKEN_REUSED',
     });
@@ -144,7 +144,7 @@ describe('SessionService.refresh', () => {
 
   it('names the reason when the session had already ended', async () => {
     const ended = build({ found: { session: { endedAt: new Date(), endReason: 1 } } });
-    expect(await fail(ended.service.refresh(PRESENTED))).toMatchObject({
+    expect(await fail(ended.service.refresh(PRESENTED, 'mobile'))).toMatchObject({
       status: 401,
       code: 'SESSION_ENDED',
       options: { details: { reason: 'logout' } },
@@ -153,13 +153,15 @@ describe('SessionService.refresh', () => {
     const used = build({
       found: { usedAt: new Date(), session: { endedAt: new Date(), endReason: 2 } },
     });
-    expect((await fail(used.service.refresh(PRESENTED))).code).toBe('SESSION_ENDED');
+    expect((await fail(used.service.refresh(PRESENTED, 'mobile'))).code).toBe('SESSION_ENDED');
     expect(used.repository.endSession).not.toHaveBeenCalled();
   });
 
   it('ends a session whose token or idle deadline has passed', async () => {
     const lapsed = build({ found: { expiresAt: new Date('2026-01-01T00:00:00Z') } });
-    expect((await fail(lapsed.service.refresh(PRESENTED))).code).toBe('REFRESH_TOKEN_INVALID');
+    expect((await fail(lapsed.service.refresh(PRESENTED, 'mobile'))).code).toBe(
+      'REFRESH_TOKEN_INVALID',
+    );
     expect(lapsed.repository.endSession).toHaveBeenCalledWith(
       expect.anything(),
       'session-1',
@@ -168,19 +170,74 @@ describe('SessionService.refresh', () => {
     );
 
     const idle = build({ found: { session: { idleExpiresAt: new Date('2026-01-01T00:00:00Z') } } });
-    expect((await fail(idle.service.refresh(PRESENTED))).code).toBe('REFRESH_TOKEN_INVALID');
+    expect((await fail(idle.service.refresh(PRESENTED, 'mobile'))).code).toBe(
+      'REFRESH_TOKEN_INVALID',
+    );
   });
 
-  it('does not renew a console session from a body token', async () => {
-    const t = build({ found: { session: { clientType: 2 } } });
-    expect((await fail(t.service.refresh(PRESENTED))).code).toBe('REFRESH_TOKEN_INVALID');
-    expect(t.repository.markTokenUsed).not.toHaveBeenCalled();
+  it('does not renew a console session from a body token, nor a mobile one from a cookie', async () => {
+    const consoleSession = build({ found: { session: { clientType: 2 } } });
+    expect((await fail(consoleSession.service.refresh(PRESENTED, 'mobile'))).code).toBe(
+      'REFRESH_TOKEN_INVALID',
+    );
+    expect(consoleSession.repository.markTokenUsed).not.toHaveBeenCalled();
+    const mobile = build();
+    expect((await fail(mobile.service.refresh(PRESENTED, 'console'))).code).toBe(
+      'REFRESH_TOKEN_INVALID',
+    );
+    expect(mobile.repository.markTokenUsed).not.toHaveBeenCalled();
+  });
+
+  it('renews a console session from its cookie without moving the 12-hour end', async () => {
+    const endsAt = new Date(new FixedClock().now().getTime() + 5 * 3600 * 1000);
+    const t = build({
+      found: {
+        expiresAt: endsAt,
+        session: {
+          clientType: 2,
+          idleExpiresAt: endsAt,
+          absoluteExpiresAt: endsAt,
+          activeRoleCode: 1,
+          activeSocietyId: null,
+        },
+      },
+      granted: true,
+    });
+    const result = await t.service.refresh(PRESENTED, 'console');
+    expect(t.repository.insertRefreshToken).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ expiresAt: endsAt }),
+    );
+    expect(t.repository.touchSession).not.toHaveBeenCalled();
+    expect(result.refreshCookie).toEqual({ value: result.refreshToken, maxAgeSeconds: 5 * 3600 });
+  });
+
+  it('ends a console session at its absolute deadline', async () => {
+    const past = new Date('2026-01-01T00:00:00Z');
+    const t = build({
+      found: {
+        session: {
+          clientType: 2,
+          idleExpiresAt: new Date('2027-01-01T00:00:00Z'),
+          absoluteExpiresAt: past,
+        },
+      },
+    });
+    expect((await fail(t.service.refresh(PRESENTED, 'console'))).code).toBe(
+      'REFRESH_TOKEN_INVALID',
+    );
+    expect(t.repository.endSession).toHaveBeenCalledWith(
+      expect.anything(),
+      'session-1',
+      6,
+      t.clock.now(),
+    );
   });
 
   it('ends every session of a blocked or inactive person', async () => {
     for (const accountStatus of [AccountStatus.Blocked, AccountStatus.Inactive]) {
       const t = build({ found: { session: { accountStatus } } });
-      expect(await fail(t.service.refresh(PRESENTED))).toMatchObject({
+      expect(await fail(t.service.refresh(PRESENTED, 'mobile'))).toMatchObject({
         code: 'SESSION_ENDED',
         options: { details: { reason: 'blocked' } },
       });
@@ -195,7 +252,7 @@ describe('SessionService.refresh', () => {
 
   it('ends the session when the grant behind the active role is gone', async () => {
     const t = build({ granted: false });
-    expect(await fail(t.service.refresh(PRESENTED))).toMatchObject({
+    expect(await fail(t.service.refresh(PRESENTED, 'mobile'))).toMatchObject({
       code: 'SESSION_ENDED',
       options: { details: { reason: 'admin_revoked' } },
     });
@@ -205,7 +262,7 @@ describe('SessionService.refresh', () => {
   it('does not look for a grant when there is no context or the role is a staff or parent role', async () => {
     for (const activeRoleCode of [null, 4, 5]) {
       const t = build({ found: { session: { activeRoleCode, activeSocietyId: null } } });
-      await t.service.refresh(PRESENTED);
+      await t.service.refresh(PRESENTED, 'mobile');
       expect(t.repository.hasGrant).not.toHaveBeenCalled();
     }
   });

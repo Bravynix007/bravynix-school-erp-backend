@@ -62,6 +62,16 @@ export const envSchema = z
      * tokens do not survive a restart.
      */
     JWT_SIGNING_KEY: z.string().min(1).optional(),
+    /**
+     * 32 random bytes, base64: encrypts Super Admin authenticator secrets at
+     * rest (AES-256-GCM, DDD 15.6). Required in staging and production, from
+     * Secrets Manager; elsewhere a key is made at start, so enrolled
+     * authenticators do not survive a restart.
+     */
+    MFA_ENCRYPTION_KEY: z
+      .string()
+      .refine((key) => Buffer.from(key, 'base64').length === 32, '32 bytes, base64 encoded')
+      .optional(),
     /** Names the signing key in the token header, so a rotated key can be told apart. */
     JWT_KEY_ID: z.string().min(1).max(40).default('k1'),
     /**
@@ -122,6 +132,13 @@ export const envSchema = z
       ctx.addIssue({
         code: 'custom',
         path: ['JWT_SIGNING_KEY'],
+        message: 'is required in staging and production',
+      });
+    }
+    if (deployed && !env.MFA_ENCRYPTION_KEY) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['MFA_ENCRYPTION_KEY'],
         message: 'is required in staging and production',
       });
     }

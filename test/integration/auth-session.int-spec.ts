@@ -7,6 +7,7 @@ import { TokenService } from '../../src/platform/identity/token.service.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { personaByKey } from '../../src/seeds/two-worlds.js';
 import { FixtureModule } from '../support/fixture.module.js';
+import { readAuditRows } from '../support/audit-rows.js';
 import { clearLoginState } from '../support/login-state.js';
 import { signInMobile } from '../support/sessions.js';
 import { createTestApp, type TestApp } from '../support/test-app.js';
@@ -50,22 +51,7 @@ describe('AUTH-05, AUTH-07, AUTH-08 and the per-request session check', () => {
       )
     )[0]!;
 
-  const auditRows = async <T>(where: RawBuilder<unknown>): Promise<T[]> => {
-    let found: T[] = [];
-    await ownerDb
-      .transaction()
-      .execute(async (trx) => {
-        await sql`alter table audit_logs no force row level security`.execute(trx);
-        found = (
-          await sql`select * from audit_logs where ${where} order by created_at`.execute(trx)
-        ).rows as T[];
-        throw new Error('rollback');
-      })
-      .catch((error: unknown) => {
-        if (!(error instanceof Error) || error.message !== 'rollback') throw error;
-      });
-    return found;
-  };
+  const auditRows = <T>(where: RawBuilder<unknown>) => readAuditRows<T>(ownerDb, where);
 
   beforeAll(async () => {
     await runMigrations(migrationUrl, 'latest');
@@ -186,7 +172,9 @@ describe('AUTH-05, AUTH-07, AUTH-08 and the per-request session check', () => {
     });
 
     it('validates the body', async () => {
-      await post('/v1/auth/refresh', {}).expect(400);
+      // No token in the body is a console call, which needs its header and cookie (AUTH-05).
+      await post('/v1/auth/refresh', {}).expect(403);
+      await post('/v1/auth/refresh', { refreshToken: null }).expect(400);
       const typed = await post('/v1/auth/refresh', { refreshToken: 12345 }).expect(400);
       expect(typed.body.errors[0]).toMatchObject({ field: 'refreshToken', code: 'INVALID_TYPE' });
       await post('/v1/auth/refresh', { refreshToken: 'x'.repeat(201) }).expect(400);

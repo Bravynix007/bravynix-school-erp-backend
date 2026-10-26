@@ -7,6 +7,8 @@ import { AccountStatus, ClientType } from './auth-codes.js';
 import { BackgroundMailer } from './background-mailer.js';
 import type { IdentityRepository, LiveChallenge, LoginUser } from './identity.repository.js';
 import { LoginService, type VerifyRequest } from './login.service.js';
+import type { LoginResult } from './login-result.js';
+import type { MfaService } from './mfa.service.js';
 import { OtpHasher } from './otp-hasher.js';
 import type { PublicCallLimiter } from './public-call-limiter.js';
 import type { Grant, SessionRepository } from './session.repository.js';
@@ -66,6 +68,7 @@ function build(
   const mailer = new BackgroundMailer({ send } as unknown as EmailSender);
   const clock = new FixedClock();
   const tokens = new TokenService(undefined, 'k1', SECRET);
+  const begin = vi.fn<MfaService['begin']>(async () => ({ mfaToken: 'mfa_x', mfaEnrolled: false }));
   const service = new LoginService(
     {
       transaction: (_tenant: unknown, work: (tx: unknown) => unknown) => work({}),
@@ -78,9 +81,19 @@ function build(
     tokens,
     { check } as unknown as PublicCallLimiter,
     mailer,
+    { begin } as unknown as MfaService,
   );
-  return { service, identity, sessions, record, check, clock, tokens, send, mailer };
+  return { service, identity, sessions, record, check, clock, tokens, send, mailer, begin };
 }
+
+/** A verify that must end in a session, not in the authenticator step. */
+const signedIn = async (
+  promise: Promise<LoginResult | { mfaRequired: true }>,
+): Promise<LoginResult> => {
+  const result = await promise;
+  if ('mfaRequired' in result) throw new Error('expected a session');
+  return result;
+};
 
 const live = (attemptCount = 0, code: string | null = CODE, id = 'c1'): LiveChallenge => ({
   id,
@@ -114,9 +127,11 @@ const lockOut = (options: Parameters<typeof build>[0]) => {
 describe('LoginService.verify', () => {
   it('starts a session in the only context, signs a token for it and audits the login', async () => {
     const t = build({ user: user(), live: [live()], grants: [owner] });
-    const result = await RequestContext.run(
-      { requestId: 'r1', language: 'en', ipAddress: '203.0.113.9', userAgent: 'erp/1' },
-      () => t.service.verify(request()),
+    const result = await signedIn(
+      RequestContext.run(
+        { requestId: 'r1', language: 'en', ipAddress: '203.0.113.9', userAgent: 'erp/1' },
+        () => t.service.verify(request()),
+      ),
     );
     expect(result).toMatchObject({
       userType: 2,
@@ -149,10 +164,10 @@ describe('LoginService.verify', () => {
 
   it('stores only the hash of the refresh token it returns', async () => {
     const t = build({ user: user(), live: [live()], grants: [owner] });
-    const result = await t.service.verify(request());
+    const result = await signedIn(t.service.verify(request()));
     const stored = t.sessions.insertRefreshToken.mock.calls[0]![1];
-    expect(stored.hmac.equals(t.tokens.refreshTokenHmac(result.refreshToken))).toBe(true);
-    expect(JSON.stringify(stored)).not.toContain(result.refreshToken);
+    expect(stored.hmac.equals(t.tokens.refreshTokenHmac(result.refreshToken!))).toBe(true);
+    expect(JSON.stringify(stored)).not.toContain(result.refreshToken!);
   });
 
   it('leaves the context open when there are several, or none, and drops the Super Admin role', async () => {
@@ -161,7 +176,7 @@ describe('LoginService.verify', () => {
       live: [live()],
       grants: [owner, { roleCode: 3, societyId: 'soc-1', institutionId: 'ins-1' }],
     });
-    const several = await two.service.verify(request());
+    const several = await signedIn(two.service.verify(request()));
     expect(several.session.activeContext).toBeNull();
     expect(several.userType).toBeNull();
     expect(several.contexts).toHaveLength(2);
@@ -171,14 +186,14 @@ describe('LoginService.verify', () => {
       live: [live()],
       grants: [{ roleCode: 1, societyId: null, institutionId: null }],
     });
-    const onlyConsole = await sa.service.verify(request());
+    const onlyConsole = await signedIn(sa.service.verify(request()));
     expect(onlyConsole.contexts).toEqual([]);
     expect(onlyConsole.session.activeContext).toBeNull();
   });
 
   it('reports a Pending account as Active, since the login makes it so', async () => {
     const t = build({ user: user({ accountStatus: AccountStatus.Pending }), live: [live()] });
-    expect((await t.service.verify(request())).person.accountStatus).toBe(1);
+    expect((await signedIn(t.service.verify(request()))).person.accountStatus).toBe(1);
   });
 
   it('answers a wrong code with the tries left, counted on every live code', async () => {
@@ -363,7 +378,7 @@ describe('LoginService.verify', () => {
     expect(t.sessions.createSession).not.toHaveBeenCalled();
   });
 
-  it('refuses the console to anyone but a Super Admin, and keeps the code for a Super Admin', async () => {
+  it('refuses the console to anyone but a Super Admin, and gives a Super Admin the authenticator step', async () => {
     const consoleRequest = request({ clientType: ClientType.Console, device: undefined });
     const teacher = build({ user: user(), live: [live()], grants: [owner] });
     expect(await fail(teacher.service.verify(consoleRequest))).toMatchObject({
@@ -377,9 +392,16 @@ describe('LoginService.verify', () => {
       live: [live()],
       grants: [{ roleCode: 1, societyId: null, institutionId: null }],
     });
-    expect(await fail(admin.service.verify(consoleRequest))).toMatchObject({ status: 503 });
-    expect(admin.identity.consumeChallenge).not.toHaveBeenCalled();
+    expect(await admin.service.verify(consoleRequest)).toEqual({
+      mfaRequired: true,
+      mfaToken: 'mfa_x',
+      mfaEnrolled: false,
+    });
+    // The email code is spent, the token carries on, and no session or refresh token exists yet.
+    expect(admin.identity.consumeChallenge).toHaveBeenCalledOnce();
+    expect(admin.begin).toHaveBeenCalledOnce();
     expect(admin.sessions.createSession).not.toHaveBeenCalled();
+    expect(admin.sessions.insertRefreshToken).not.toHaveBeenCalled();
   });
 
   it('stops at the per-IP limit before touching the database', async () => {

@@ -8,6 +8,7 @@ import { OtpService } from '../../src/platform/identity/otp.service.js';
 import { TokenService } from '../../src/platform/identity/token.service.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { personaByKey, societies } from '../../src/seeds/two-worlds.js';
+import { readAuditRows } from '../support/audit-rows.js';
 import { clearLoginState } from '../support/login-state.js';
 import { createTestApp, type TestApp } from '../support/test-app.js';
 
@@ -88,26 +89,7 @@ describe('AUTH-02 verify the code', () => {
     return t.email.all().filter((m) => m.template === 'login-lockout');
   };
 
-  /**
-   * Audit rows with no Society (a login) are readable by no tenant session, by
-   * design, so the test lifts the forced policy for one rolled-back transaction.
-   */
-  const auditRows = async <T>(where: RawBuilder<unknown>): Promise<T[]> => {
-    let found: T[] = [];
-    await ownerDb
-      .transaction()
-      .execute(async (trx) => {
-        await sql`alter table audit_logs no force row level security`.execute(trx);
-        found = (
-          await sql`select * from audit_logs where ${where} order by created_at`.execute(trx)
-        ).rows as T[];
-        throw new Error('rollback');
-      })
-      .catch((error: unknown) => {
-        if (!(error instanceof Error) || error.message !== 'rollback') throw error;
-      });
-    return found;
-  };
+  const auditRows = <T>(where: RawBuilder<unknown>) => readAuditRows<T>(ownerDb, where);
 
   beforeAll(async () => {
     await runMigrations(migrationUrl, 'latest');
@@ -563,7 +545,7 @@ describe('AUTH-02 verify the code', () => {
       ).toHaveLength(0);
     });
 
-    it('gives a Super Admin on the console no session yet: the authenticator step comes later', async () => {
+    it('gives a Super Admin on the console a token for the authenticator step, not a session', async () => {
       await ask(superAdmin.email, 2);
       await otp.flush();
       const code = t.email.latest(superAdmin.email, 'otp')!.variables!.code as string;
@@ -571,16 +553,27 @@ describe('AUTH-02 verify the code', () => {
         email: superAdmin.email,
         code,
         clientType: 2,
-      }).expect(503);
-      expect(res.body.code).toBe('SERVICE_UNAVAILABLE');
+      }).expect(200);
+      expect(res.body).toMatchObject({
+        code: 'MFA_REQUIRED',
+        data: { mfaRequired: true, mfaToken: expect.stringMatching(/^mfa_/), mfaEnrolled: false },
+      });
+      expect(Object.keys(res.body.data).toSorted()).toEqual([
+        'mfaEnrolled',
+        'mfaRequired',
+        'mfaToken',
+      ]);
       expect(
         await rows(sql`select 1 from auth_sessions where user_id = ${superAdmin.id}`),
       ).toHaveLength(0);
-      // The code is kept for the authenticator step.
+      // The email code is spent: the next step needs the token, not the code.
       const [challenge] = await rows<{ consumed_at: Date | null }>(
         sql`select consumed_at from otp_challenges where user_id = ${superAdmin.id}`,
       );
-      expect(challenge!.consumed_at).toBeNull();
+      expect(challenge!.consumed_at).not.toBeNull();
+      await post('/v1/auth/otp/verify', { email: superAdmin.email, code, clientType: 2 }).expect(
+        401,
+      );
     });
   });
 

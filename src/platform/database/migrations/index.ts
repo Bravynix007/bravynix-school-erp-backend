@@ -5,6 +5,7 @@ import * as m0003 from './2026_10_25_0003_identity_users_otp.js';
 import * as m0004 from './2026_10_25_0004_identity_sessions.js';
 import * as m0005 from './2026_10_26_0005_identity_call_scope.js';
 import * as m0006 from './2026_10_26_0006_tenancy_core.js';
+import * as m0007 from './2026_10_26_0007_identity_mfa.js';
 
 /**
  * Every migration, in order. Listed explicitly (not read from disk) so the
@@ -21,6 +22,7 @@ const migrations: Record<string, Migration> = {
   '2026_10_25_0004_identity_sessions': m0004,
   '2026_10_26_0005_identity_call_scope': m0005,
   '2026_10_26_0006_tenancy_core': m0006,
+  '2026_10_26_0007_identity_mfa': m0007,
 };
 
 export const migrationProvider: MigrationProvider = {

@@ -97,3 +97,24 @@ export interface RefreshTokensTable {
   expires_at: Date;
   used_at: Date | null;
 }
+
+export interface UserTotpFactorsTable {
+  user_id: string;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  updated_at: ColumnType<Date, never, Date>;
+  secret_ciphertext: Buffer;
+  secret_key_version: number;
+  confirmed_at: Date | null;
+  /** bigint, read as a JS number (the 30-second step is far below 2^53). */
+  last_used_step: number | null;
+}
+
+export interface MfaChallengesTable {
+  id: Generated<string>;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  user_id: string;
+  token_hmac: Buffer;
+  expires_at: Date;
+  used_at: Date | null;
+  failed_tries: Generated<number>;
+}
