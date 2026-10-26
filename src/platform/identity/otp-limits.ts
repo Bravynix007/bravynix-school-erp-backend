@@ -30,6 +30,14 @@ export const OTP_LIMITS = {
   refreshRequestsPerMinute: 300,
 } as const;
 
+/** The cap on wrong authenticator codes per person, over all their sign-in tokens (API design 10.2b). */
+export const MFA_LOCK = {
+  /** Wrong codes, counted from the first, that lock the console for the person. */
+  wrongCodes: 10,
+  windowSeconds: 24 * 3600,
+  lockSeconds: 24 * 3600,
+} as const;
+
 /**
  * How long a lockout lasts, given how many lockouts the email has had in the
  * last 24 hours including this one: 30 minutes, and 24 hours from the third.

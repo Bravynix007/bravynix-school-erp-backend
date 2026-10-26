@@ -276,22 +276,31 @@ describe('QA B8: console second factor', () => {
     expect(statuses[20]).toBe(429);
   });
 
-  it('R1 (documents the design): wrong authenticator codes are counted per token, never per person', async () => {
+  it('R1 (decided by BravyNix, 26 Oct 2026): the tenth wrong code over several tokens locks the person for 24 hours', async () => {
     const { authenticator } = await signInConsole(t, superAdmin.email);
-    let wrongCodes = 0;
-    for (let round = 0; round < 3; round += 1) {
+    const answers: number[] = [];
+    for (let round = 0; round < 2; round += 1) {
       t.clock.advance(61_000);
       const token = await mfaTokenFrom(`198.51.100.${70 + round}`);
       for (let i = 0; i < 5; i += 1) {
-        await verify(token, wrongFor(authenticator), `198.51.100.${80 + round}`).expect(401);
-        wrongCodes += 1;
+        const res = await verify(token, wrongFor(authenticator), `198.51.100.${80 + round}`);
+        answers.push(res.status);
       }
     }
+    expect(answers).toEqual([401, 401, 401, 401, 401, 401, 401, 401, 401, 423]);
+    // Nothing gets through while locked, not even a new token.
     t.clock.advance(61_000);
-    const token = await mfaTokenFrom('198.51.100.90');
-    await verify(token, authenticator.code(t.clock.now()), '198.51.100.91').expect(200);
-    console.info(
-      `QA B8 R1: ${wrongCodes} wrong authenticator codes in about 4 minutes, then a sign-in`,
-    );
+    await request(t.app.getHttpServer())
+      .post('/v1/auth/otp')
+      .set('X-Forwarded-For', '198.51.100.92')
+      .send({ email: superAdmin.email, clientType: 2 })
+      .expect(202);
+    await t.app.get(OtpService).flush();
+    const code = t.email.latest(superAdmin.email, 'otp')!.variables!.code as string;
+    await request(t.app.getHttpServer())
+      .post('/v1/auth/otp/verify')
+      .set('X-Forwarded-For', '198.51.100.92')
+      .send({ email: superAdmin.email, code, clientType: 2 })
+      .expect(423);
   });
 });

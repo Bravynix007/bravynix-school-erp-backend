@@ -39,6 +39,7 @@ function build(
     grants?: Grant[];
     lock?: Date | null;
     busy?: boolean;
+    mfaLock?: Date;
   } = {},
 ) {
   const identity = {
@@ -68,6 +69,7 @@ function build(
   const mailer = new BackgroundMailer({ send } as unknown as EmailSender);
   const clock = new FixedClock();
   const tokens = new TokenService(undefined, 'k1', SECRET);
+  const activeLock = vi.fn<MfaService['activeLock']>(async () => options.mfaLock ?? null);
   const begin = vi.fn<MfaService['begin']>(async () => ({ mfaToken: 'mfa_x', mfaEnrolled: false }));
   const service = new LoginService(
     {
@@ -81,7 +83,7 @@ function build(
     tokens,
     { check } as unknown as PublicCallLimiter,
     mailer,
-    { begin } as unknown as MfaService,
+    { begin, activeLock } as unknown as MfaService,
   );
   return { service, identity, sessions, record, check, clock, tokens, send, mailer, begin };
 }
@@ -400,6 +402,21 @@ describe('LoginService.verify', () => {
     // The email code is spent, the token carries on, and no session or refresh token exists yet.
     expect(admin.identity.consumeChallenge).toHaveBeenCalledOnce();
     expect(admin.begin).toHaveBeenCalledOnce();
+
+    // A Super Admin whose console is locked gets no token; the email code is still spent.
+    const locked = build({
+      user: user(),
+      live: [live()],
+      grants: [{ roleCode: 1, societyId: null, institutionId: null }],
+      mfaLock: new Date(admin.clock.now().getTime() + 7200_000),
+    });
+    expect(await fail(locked.service.verify(consoleRequest))).toMatchObject({
+      status: 423,
+      code: 'AUTH_LOCKED',
+      options: { retryAfterSeconds: 7200 },
+    });
+    expect(locked.begin).not.toHaveBeenCalled();
+    expect(locked.identity.consumeChallenge).toHaveBeenCalledOnce();
     expect(admin.sessions.createSession).not.toHaveBeenCalled();
     expect(admin.sessions.insertRefreshToken).not.toHaveBeenCalled();
   });

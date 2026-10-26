@@ -7,7 +7,9 @@ import { sql, type Kysely } from 'kysely';
  * `mfa_challenges` is the step between the email code and the session: the
  * email code is spent, and a 5-minute token (stored only as a keyed hash)
  * stands for "this person passed the first step" until the authenticator code
- * is given. Both tables are global like the other identity tables (DDD 15.3).
+ * is given. `wrong_codes`, `wrong_since` and `locked_until` count a person's
+ * wrong authenticator codes over all their tokens and hold the 24-hour console
+ * lock. Both tables are global like the other identity tables (DDD 15.3).
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`
@@ -19,7 +21,11 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       secret_key_version smallint not null,
       confirmed_at timestamptz,
       last_used_step bigint,
-      constraint ck_user_totp_factors_step check (last_used_step is null or confirmed_at is not null)
+      wrong_codes smallint not null default 0,
+      wrong_since timestamptz,
+      locked_until timestamptz,
+      constraint ck_user_totp_factors_step check (last_used_step is null or confirmed_at is not null),
+      constraint ck_user_totp_factors_wrong check (wrong_codes >= 0 and (wrong_codes = 0) = (wrong_since is null))
     )
   `.execute(db);
   await sql`

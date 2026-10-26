@@ -37,6 +37,21 @@ describe('AUTH-03 and AUTH-04: the Super Admin authenticator', () => {
       .set(headers)
       .set('Cookie', cookieHeader(setCookie))
       .send({});
+  /** Five wrong codes on a new token, whichever way the answers go. */
+  async function wrongCodes(app: Authenticator, tries: number) {
+    const started = await startConsoleSignIn(t, superAdmin.email);
+    const answers = [];
+    for (let i = 0; i < tries; i += 1) answers.push(await verify(started.mfaToken, wrongFor(app)));
+    // Past the per-email limit on code requests (3 in 15 minutes), so the next sign-in is not refused.
+    t.clock.advanceMinutes(16);
+    return answers;
+  }
+  const factorRow = async () =>
+    (
+      await rows<{ wrong_codes: number; wrong_since: Date | null; locked_until: Date | null }>(
+        sql`select wrong_codes, wrong_since, locked_until from user_totp_factors`,
+      )
+    )[0]!;
   const rows = async <T = Record<string, unknown>>(query: RawBuilder<unknown>): Promise<T[]> =>
     (await query.execute(ownerDb)).rows as T[];
   /** Audit rows written during this test only: the log is append-only, and IDs are time-ordered. */
@@ -417,6 +432,70 @@ describe('AUTH-03 and AUTH-04: the Super Admin authenticator', () => {
       for (let i = 0; i < 20; i += 1) await verify('mfa_unknown', '123456').expect(401);
       const res = await verify('mfa_unknown', '123456').expect(429);
       expect(res.body.code).toBe('RATE_LIMITED');
+    });
+  });
+
+  describe('the per-person cap on wrong codes', () => {
+    it('locks the console for 24 hours at the tenth wrong code over two tokens, with a mail and an audit entry', async () => {
+      const { authenticator } = await signInConsole(t, superAdmin.email);
+      await wrongCodes(authenticator, 5);
+      const second = await wrongCodes(authenticator, 5);
+      // The tenth wrong code answers with the lock, not with MFA_INVALID.
+      expect(second.slice(0, 4).map((res) => res.body.code)).toEqual(Array(4).fill('MFA_INVALID'));
+      expect(second[4]!.status).toBe(423);
+      expect(second[4]!.body.code).toBe('AUTH_LOCKED');
+      expect(second[4]!.headers['retry-after']).toBe('86400');
+
+      const locked = await factorRow();
+      expect(locked.locked_until).not.toBeNull();
+      expect(locked.wrong_codes).toBe(0);
+      await otp.flush();
+      expect(t.email.latest(superAdmin.email, 'authenticator-lockout')?.text).toContain('24 hours');
+      const entries = await auditRows<{ new_values: unknown; outcome: number }>(
+        sql`action = 'auth.mfa_account_locked'`,
+      );
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toMatchObject({
+        outcome: 2,
+        new_values: { wrongCodes: 10, lockSeconds: 86_400 },
+      });
+    });
+
+    it('stops the sign-in at the email step while locked, even with the right code, and then lets it through', async () => {
+      const { authenticator } = await signInConsole(t, superAdmin.email);
+      await wrongCodes(authenticator, 5);
+      await wrongCodes(authenticator, 5);
+
+      const http2 = request(http());
+      await http2.post('/v1/auth/otp').send({ email: superAdmin.email, clientType: 2 }).expect(202);
+      await otp.flush();
+      const code = t.email.latest(superAdmin.email, 'otp')!.variables!.code as string;
+      const res = await post('/v1/auth/otp/verify', {
+        email: superAdmin.email,
+        code,
+        clientType: 2,
+      }).expect(423);
+      expect(res.body.code).toBe('AUTH_LOCKED');
+      expect(Number(res.headers['retry-after'])).toBeGreaterThan(80_000);
+      expect(await rows(sql`select 1 from mfa_challenges where used_at is null`)).toHaveLength(0);
+
+      t.clock.advance(86_400_000 + 61_000);
+      const again = await signInConsole(t, superAdmin.email, authenticator);
+      expect(again.login.userType).toBe(1);
+    });
+
+    it('counts across tokens only within a day, and a right code clears the count', async () => {
+      const { authenticator } = await signInConsole(t, superAdmin.email);
+      await wrongCodes(authenticator, 5);
+      expect((await factorRow()).wrong_codes).toBe(5);
+      t.clock.advance(86_400_000 + 1000);
+      await wrongCodes(authenticator, 5);
+      // The first five were more than a day old, so the count started again at one.
+      expect((await factorRow()).wrong_codes).toBe(5);
+      expect((await factorRow()).locked_until).toBeNull();
+
+      await signInConsole(t, superAdmin.email, authenticator);
+      expect(await factorRow()).toMatchObject({ wrong_codes: 0, wrong_since: null });
     });
   });
 

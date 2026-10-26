@@ -7,6 +7,8 @@ export interface TotpFactor {
   secretCiphertext: Buffer;
   confirmedAt: Date | null;
   lastUsedStep: number | null;
+  /** The console is closed to this person until then, after too many wrong codes. */
+  lockedUntil: Date | null;
 }
 
 /** A sign-in token read with its row locked. */
@@ -24,7 +26,7 @@ export class MfaRepository {
   async findFactor(db: Db, userId: string): Promise<TotpFactor | undefined> {
     const row = await db
       .selectFrom('user_totp_factors')
-      .select(['secret_ciphertext', 'confirmed_at', 'last_used_step'])
+      .select(['secret_ciphertext', 'confirmed_at', 'last_used_step', 'locked_until'])
       .where('user_id', '=', userId)
       .executeTakeFirst();
     return (
@@ -32,6 +34,7 @@ export class MfaRepository {
         secretCiphertext: row.secret_ciphertext,
         confirmedAt: row.confirmed_at,
         lastUsedStep: row.last_used_step,
+        lockedUntil: row.locked_until,
       }
     );
   }
@@ -71,11 +74,39 @@ export class MfaRepository {
     const result = await sql`
       update user_totp_factors set
         last_used_step = ${step},
-        confirmed_at = coalesce(confirmed_at, ${now})
+        confirmed_at = coalesce(confirmed_at, ${now}),
+        wrong_codes = 0,
+        wrong_since = null
       where user_id = ${userId} and (last_used_step is null or last_used_step < ${step})`.execute(
       tx,
     );
     return Number(result.numAffectedRows) > 0;
+  }
+
+  /**
+   * Counts a wrong code against the person, over all their tokens: the count
+   * starts again when the first of them is more than `windowStart` old. At
+   * `cap` the console is locked until `lockedUntil` and the count is cleared.
+   * Returns the lock when one was set. Both statements hold the factor's row,
+   * so wrong codes arriving together are counted one after the other.
+   */
+  async countWrongCode(
+    tx: Tx,
+    userId: string,
+    now: Date,
+    window: { start: Date; cap: number; lockedUntil: Date },
+  ): Promise<Date | null> {
+    const { rows } = await sql<{ wrong_codes: number }>`
+      update user_totp_factors set
+        wrong_codes = case when wrong_since is null or wrong_since <= ${window.start} then 1 else wrong_codes + 1 end,
+        wrong_since = case when wrong_since is null or wrong_since <= ${window.start} then ${now} else wrong_since end
+      where user_id = ${userId}
+      returning wrong_codes`.execute(tx);
+    if ((rows[0]?.wrong_codes ?? 0) < window.cap) return null;
+    await sql`
+      update user_totp_factors set locked_until = ${window.lockedUntil}, wrong_codes = 0, wrong_since = null
+      where user_id = ${userId}`.execute(tx);
+    return window.lockedUntil;
   }
 
   async insertChallenge(

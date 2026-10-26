@@ -179,6 +179,10 @@ export class LoginService {
       // The email code is spent; the authenticator step finishes the sign-in.
       await this.identity.consumeChallenge(tx, emailHmac, matched.id, now);
       await this.identity.clearFailures(tx, user.id);
+      // Too many wrong authenticator codes closed the console to this person for a while.
+      const locked = await this.mfa.activeLock(tx, user.id, now);
+      if (locked)
+        return refused(HttpStatus.LOCKED, AuthCode.AUTH_LOCKED, secondsUntil(locked, now));
       return { kind: 'mfaRequired', mfa: await this.mfa.begin(tx, user.id, now) };
     }
 

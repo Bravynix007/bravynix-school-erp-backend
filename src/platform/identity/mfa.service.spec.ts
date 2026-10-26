@@ -1,7 +1,9 @@
 import { FixedClock } from '../../common/time/clock.js';
+import type { EmailSender } from '../email/email-sender.js';
 import type { AuditService } from '../audit/index.js';
 import type { DatabaseService } from '../database/index.js';
 import { AccountStatus } from './auth-codes.js';
+import { BackgroundMailer } from './background-mailer.js';
 import type { IdentityRepository, LoginUser } from './identity.repository.js';
 import type { LockedMfaChallenge, MfaRepository, TotpFactor } from './mfa.repository.js';
 import { MFA_LIMITS, MfaService } from './mfa.service.js';
@@ -38,6 +40,7 @@ function build(
     stepFree?: boolean;
     saved?: boolean;
     failedTries?: number;
+    capReached?: boolean;
   } = {},
 ) {
   const clock = new FixedClock();
@@ -60,6 +63,7 @@ function build(
           secretCiphertext: box.seal(authenticator, USER_ID),
           confirmedAt: new Date('2026-05-01T00:00:00Z'),
           lastUsedStep: null,
+          lockedUntil: null,
           ...options.factor,
         };
   const factors = {
@@ -70,6 +74,9 @@ function build(
     spendOpenChallenges: vi.fn<MfaRepository['spendOpenChallenges']>(async () => undefined),
     lockChallenge: vi.fn<MfaRepository['lockChallenge']>(async () => challenge),
     addFailedTry: vi.fn<MfaRepository['addFailedTry']>(async () => options.failedTries ?? 1),
+    countWrongCode: vi.fn<MfaRepository['countWrongCode']>(async (_tx, _user, _now, window) =>
+      options.capReached ? window.lockedUntil : null,
+    ),
     spendChallenge: vi.fn<MfaRepository['spendChallenge']>(async () => undefined),
   };
   const identity = {
@@ -87,6 +94,7 @@ function build(
   };
   const record = vi.fn<AuditService['record']>(async () => 'audit-id');
   const check = vi.fn<PublicCallLimiter['check']>(async () => undefined);
+  const send = vi.fn<EmailSender['send']>(async () => undefined);
   const service = new MfaService(
     {
       transaction: (_tenant: unknown, work: (tx: unknown) => unknown) => work({}),
@@ -99,8 +107,9 @@ function build(
     tokens,
     box,
     { check } as unknown as PublicCallLimiter,
+    new BackgroundMailer({ send } as unknown as EmailSender),
   );
-  return { service, factors, identity, sessions, record, check, clock, now };
+  return { service, factors, identity, sessions, record, check, send, clock, now };
 }
 
 const fail = async (promise: Promise<unknown>) =>
@@ -133,6 +142,18 @@ describe('MfaService.begin', () => {
     );
     const none = build({ factor: null });
     expect((await none.service.begin({} as never, USER_ID, none.now)).mfaEnrolled).toBe(false);
+  });
+});
+
+describe('MfaService.activeLock', () => {
+  it('is the end of the lock while it lasts, and null otherwise', async () => {
+    const until = new Date(new FixedClock().now().getTime() + 1000);
+    const locked = build({ factor: { lockedUntil: until } });
+    expect(await locked.service.activeLock({} as never, USER_ID, locked.now)).toEqual(until);
+    const passed = build({ factor: { lockedUntil: new Date('2026-01-01T00:00:00Z') } });
+    expect(await passed.service.activeLock({} as never, USER_ID, passed.now)).toBeNull();
+    const none = build({ factor: null });
+    expect(await none.service.activeLock({} as never, USER_ID, none.now)).toBeNull();
   });
 });
 
@@ -215,6 +236,61 @@ describe('MfaService.verify', () => {
     });
     expect(actions(t)).toEqual(['auth.mfa_locked']);
     expect(t.record.mock.calls[0]![1]).toMatchObject({ outcome: 2 });
+  });
+
+  it('locks the console for 24 hours at the tenth wrong code, mails the person and audits it', async () => {
+    const t = build({ capReached: true });
+    const error = await fail(t.service.verify('mfa_x', '000000'));
+    expect(error).toMatchObject({
+      status: 423,
+      code: 'AUTH_LOCKED',
+      options: { retryAfterSeconds: 86_400 },
+    });
+    expect(t.factors.spendChallenge).toHaveBeenCalledOnce();
+    expect(actions(t)).toEqual(['auth.mfa_account_locked']);
+    expect(t.record.mock.calls[0]![1]).toMatchObject({
+      outcome: 2,
+      after: { wrongCodes: 10, lockSeconds: 86_400 },
+    });
+    await vi.waitFor(() => expect(t.send).toHaveBeenCalledOnce());
+    expect(t.send.mock.calls[0]![0]).toMatchObject({
+      to: 'root@two-worlds.test',
+      template: 'authenticator-lockout',
+    });
+    // The count starts at the first wrong code and covers a day.
+    const window = t.factors.countWrongCode.mock.calls[0]![3];
+    expect(window.cap).toBe(10);
+    expect(t.now.getTime() - window.start.getTime()).toBe(86_400_000);
+  });
+
+  it('sends no mail for an ordinary wrong code', async () => {
+    const t = build();
+    await fail(t.service.verify('mfa_x', '000000'));
+    expect(t.send).not.toHaveBeenCalled();
+    expect(t.factors.countWrongCode).toHaveBeenCalledOnce();
+  });
+
+  it('turns away a locked person at once, spending the token, for verify and enrol alike', async () => {
+    const lockedUntil = new Date(new FixedClock().now().getTime() + 3600_000);
+    for (const call of ['verify', 'enrol'] as const) {
+      const t = build({ factor: { lockedUntil } });
+      const attempt =
+        call === 'verify' ? t.service.verify('mfa_x', goodCode(t.now)) : t.service.enrol('mfa_x');
+      expect(await fail(attempt)).toMatchObject({
+        status: 423,
+        code: 'AUTH_LOCKED',
+        options: { retryAfterSeconds: 3600 },
+      });
+      expect(t.factors.spendChallenge).toHaveBeenCalledOnce();
+      expect(t.factors.useStep).not.toHaveBeenCalled();
+      expect(t.factors.countWrongCode).not.toHaveBeenCalled();
+    }
+  });
+
+  it('lets a person whose lock has passed sign in', async () => {
+    const t = build({ factor: { lockedUntil: new Date('2026-01-01T00:00:00Z') } });
+    await t.service.verify('mfa_x', goodCode(t.now));
+    expect(t.sessions.createSession).toHaveBeenCalledOnce();
   });
 
   it('refuses a code that was already used, or one a parallel sign-in used first', async () => {

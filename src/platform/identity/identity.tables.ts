@@ -107,6 +107,11 @@ export interface UserTotpFactorsTable {
   confirmed_at: Date | null;
   /** bigint, read as a JS number (the 30-second step is far below 2^53). */
   last_used_step: number | null;
+  /** Wrong codes since `wrong_since`, over every token of the person. */
+  wrong_codes: Generated<number>;
+  wrong_since: Date | null;
+  /** The 24-hour console lock after too many wrong codes. */
+  locked_until: Date | null;
 }
 
 export interface MfaChallengesTable {

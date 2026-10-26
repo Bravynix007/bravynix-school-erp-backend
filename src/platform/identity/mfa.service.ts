@@ -4,13 +4,17 @@ import { newId } from '../../common/ids/ids.js';
 import { RequestContext } from '../../common/request-context/request-context.js';
 import { Clock } from '../../common/time/clock.js';
 import { AuditOutcome, AuditService } from '../audit/index.js';
+import type { EmailMessage } from '../email/email-sender.js';
 import { DatabaseService, type Tx } from '../database/index.js';
 import { AccountStatus, AuthCode, ClientType } from './auth-codes.js';
+import { BackgroundMailer } from './background-mailer.js';
 import type { RefreshCookie } from './console-cookie.js';
 import type { Context } from './contexts.js';
+import { authenticatorLockoutEmail } from './lockout-email.js';
 import { IdentityRepository, type LoginUser } from './identity.repository.js';
 import { buildLoginResult, displayName, type LoginResult } from './login-result.js';
-import { MfaRepository } from './mfa.repository.js';
+import { MfaRepository, type TotpFactor } from './mfa.repository.js';
+import { MFA_LOCK } from './otp-limits.js';
 import { PublicCallLimiter } from './public-call-limiter.js';
 import { requestIp } from './request-ip.js';
 import { SecretBox } from './secret-box.js';
@@ -47,12 +51,22 @@ export interface ConsoleLogin {
   refreshCookie: RefreshCookie;
 }
 
-type Refused = { kind: 'refused'; error: AppException };
-type Admitted = { kind: 'admitted'; challengeId: string; user: LoginUser };
+type Refused = { kind: 'refused'; error: AppException; mail?: EmailMessage };
+type Admitted = {
+  kind: 'admitted';
+  challengeId: string;
+  user: LoginUser;
+  factor: TotpFactor | undefined;
+};
 
-const refused = (status: HttpStatus, code: string, details?: Record<string, unknown>): Refused => ({
+const refused = (
+  status: HttpStatus,
+  code: string,
+  details?: Record<string, unknown>,
+  retryAfterSeconds?: number,
+): Refused => ({
   kind: 'refused',
-  error: new AppException(status, code, { details }),
+  error: new AppException(status, code, { details, retryAfterSeconds }),
 });
 
 const tokenExpired = (): Refused => refused(HttpStatus.UNAUTHORIZED, AuthCode.MFA_TOKEN_EXPIRED);
@@ -81,7 +95,14 @@ export class MfaService {
     private readonly tokens: TokenService,
     private readonly secrets: SecretBox,
     private readonly limiter: PublicCallLimiter,
+    private readonly mailer: BackgroundMailer,
   ) {}
+
+  /** When the console is closed to this person after too many wrong authenticator codes, or null. */
+  async activeLock(tx: Tx, userId: string, now: Date): Promise<Date | null> {
+    const factor = await this.factors.findFactor(tx, userId);
+    return factor?.lockedUntil && factor.lockedUntil > now ? factor.lockedUntil : null;
+  }
 
   /** Called inside the email-code transaction: opens the step and returns what AUTH-02 answers. */
   async begin(tx: Tx, userId: string, now: Date): Promise<MfaStart> {
@@ -147,16 +168,14 @@ export class MfaService {
     const outcome = await this.database.transaction({}, async (tx) => {
       const admitted = await this.admit(tx, mfaToken, now);
       if (admitted.kind === 'refused') return admitted;
-      const { challengeId, user } = admitted;
-
-      const factor = await this.factors.findFactor(tx, user.id);
+      const { challengeId, user, factor } = admitted;
       if (!factor) return refused(HttpStatus.CONFLICT, AuthCode.MFA_NOT_ENROLLED);
 
       const secret = this.secrets.open(factor.secretCiphertext, user.id);
       const step = matchTotp(secret, code, now, factor.lastUsedStep);
       // A second sign-in using the same code at the same moment loses here.
       if (step === null || !(await this.factors.useStep(tx, user.id, step, now))) {
-        return this.recordWrongCode(tx, challengeId, user);
+        return this.recordWrongCode(tx, challengeId, user, now);
       }
 
       await this.factors.spendChallenge(tx, challengeId, now);
@@ -209,7 +228,10 @@ export class MfaService {
       return { kind: 'signedIn' as const, user };
     });
     // A wrong code and a spent token are saved above, so the refusal is raised after the commit.
-    if (outcome.kind === 'refused') throw outcome.error;
+    if (outcome.kind === 'refused') {
+      if (outcome.mail) this.mailer.send(outcome.mail);
+      throw outcome.error;
+    }
 
     const accessToken = await this.tokens.signAccessToken(
       {
@@ -259,11 +281,49 @@ export class MfaService {
       await this.factors.spendChallenge(tx, challenge.id, now);
       return refused(HttpStatus.FORBIDDEN, AuthCode.CONSOLE_NOT_ALLOWED);
     }
-    return { kind: 'admitted', challengeId: challenge.id, user };
+    const factor = await this.factors.findFactor(tx, user.id);
+    if (factor?.lockedUntil && factor.lockedUntil > now) {
+      await this.factors.spendChallenge(tx, challenge.id, now);
+      return refused(
+        HttpStatus.LOCKED,
+        AuthCode.AUTH_LOCKED,
+        undefined,
+        secondsUntil(factor.lockedUntil, now),
+      );
+    }
+    return { kind: 'admitted', challengeId: challenge.id, user, factor };
   }
 
-  private async recordWrongCode(tx: Tx, challengeId: string, user: LoginUser): Promise<Refused> {
+  private async recordWrongCode(
+    tx: Tx,
+    challengeId: string,
+    user: LoginUser,
+    now: Date,
+  ): Promise<Refused> {
     const tries = await this.factors.addFailedTry(tx, challengeId);
+    const lockedUntil = await this.factors.countWrongCode(tx, user.id, now, {
+      start: new Date(now.getTime() - MFA_LOCK.windowSeconds * 1000),
+      cap: MFA_LOCK.wrongCodes,
+      lockedUntil: new Date(now.getTime() + MFA_LOCK.lockSeconds * 1000),
+    });
+    const actor = { userId: user.id, roleCode: null, displayName: displayName(user) };
+    if (lockedUntil) {
+      await this.factors.spendChallenge(tx, challengeId, now);
+      await this.audit.record(tx, {
+        action: 'auth.mfa_account_locked',
+        institutionId: null,
+        societyId: null,
+        outcome: AuditOutcome.Denied,
+        entityType: 'user',
+        entityId: user.id,
+        actor,
+        after: { wrongCodes: MFA_LOCK.wrongCodes, lockSeconds: MFA_LOCK.lockSeconds },
+      });
+      return {
+        ...refused(HttpStatus.LOCKED, AuthCode.AUTH_LOCKED, undefined, MFA_LOCK.lockSeconds),
+        mail: authenticatorLockoutEmail(user.email, MFA_LOCK.lockSeconds),
+      };
+    }
     const attemptsLeft = Math.max(0, MFA_LIMITS.triesPerToken - tries);
     if (attemptsLeft === 0) {
       await this.audit.record(tx, {
@@ -273,7 +333,7 @@ export class MfaService {
         outcome: AuditOutcome.Denied,
         entityType: 'user',
         entityId: user.id,
-        actor: { userId: user.id, roleCode: null, displayName: displayName(user) },
+        actor,
         after: { wrongCodes: tries },
       });
     }
