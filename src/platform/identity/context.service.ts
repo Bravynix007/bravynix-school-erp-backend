@@ -2,8 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { AppException } from '../../common/http/app-exception.js';
 import { ErrorCode, FieldErrorCode } from '../../common/http/error-codes.js';
-import { message } from '../../common/i18n/messages.js';
-import { RequestContext } from '../../common/request-context/request-context.js';
+import { fieldError } from '../../common/validation/field-error.js';
 import { Clock } from '../../common/time/clock.js';
 import { AuditService } from '../audit/index.js';
 import { DatabaseService } from '../database/index.js';
@@ -135,27 +134,14 @@ export class ContextService {
 
   /** Roles 2 to 4 name a Society; role 5 is the person, across Societies, and names none. */
   private checkPairing(request: SwitchContextDto): string | null {
-    const language = RequestContext.current()?.language;
     if (request.roleCode === 5) {
       if (request.societyId != null) {
-        throw AppException.validation([
-          {
-            field: 'societyId',
-            code: FieldErrorCode.FIELD_NOT_ALLOWED,
-            message: message(FieldErrorCode.FIELD_NOT_ALLOWED, language),
-          },
-        ]);
+        throw AppException.validation([fieldError('societyId', FieldErrorCode.FIELD_NOT_ALLOWED)]);
       }
       return null;
     }
     if (request.societyId == null) {
-      throw AppException.validation([
-        {
-          field: 'societyId',
-          code: FieldErrorCode.REQUIRED,
-          message: message(FieldErrorCode.REQUIRED, language),
-        },
-      ]);
+      throw AppException.validation([fieldError('societyId', FieldErrorCode.REQUIRED)]);
     }
     return request.societyId;
   }

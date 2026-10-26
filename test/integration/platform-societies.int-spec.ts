@@ -9,6 +9,7 @@ import { superAdminToken } from '../support/admin-token.js';
 import { readAuditRows } from '../support/audit-rows.js';
 import { FixtureModule } from '../support/fixture.module.js';
 import { clearLoginState } from '../support/login-state.js';
+import { PlatformFixtures } from '../support/platform-fixtures.js';
 import { removeScratchSocieties } from '../support/scratch-society.js';
 import { signInMobile } from '../support/sessions.js';
 import { createTestApp, type TestApp } from '../support/test-app.js';
@@ -34,7 +35,7 @@ describe('PLT-02 to PLT-08 Societies', () => {
   let t: TestApp;
   let admin: string;
   const made: string[] = [];
-  const people: string[] = [];
+  let fixtures: PlatformFixtures;
 
   const call = (
     method: 'get' | 'post' | 'patch' | 'delete',
@@ -66,18 +67,7 @@ describe('PLT-02 to PLT-08 Societies', () => {
     return res.body.data;
   };
 
-  /** A Society Owner of that Society, signed in on a phone. Returns the access token. */
-  const ownerOf = async (societyId: string) => {
-    const person = newId();
-    const email = `${person}@two-worlds.test`;
-    people.push(person);
-    await sql`insert into users (id, email) values (${person}, ${email})`.execute(ownerDb);
-    await sql`insert into role_assignments (user_id, role_code, society_id, seat_no) values (${person}, 2, ${societyId}, 1)`.execute(
-      ownerDb,
-    );
-    const login = await signInMobile(t, email);
-    return { person, email, token: login.accessToken };
-  };
+  const ownerOf = (societyId: string) => fixtures.owner(societyId);
 
   const list = (query: string) => result(call('get', `/v1/platform/societies?${query}`));
 
@@ -101,6 +91,7 @@ describe('PLT-02 to PLT-08 Societies', () => {
     });
     await writeIdentitySeed(ownerDb);
     t = await createTestApp({ imports: [FixtureModule] });
+    fixtures = new PlatformFixtures(t, ownerDb);
   });
 
   afterAll(async () => {
@@ -116,9 +107,7 @@ describe('PLT-02 to PLT-08 Societies', () => {
   afterEach(async () => {
     await clearLoginState(ownerDb);
     await removeScratchSocieties(ownerDb, made.splice(0));
-    for (const person of people.splice(0)) {
-      await sql`delete from users where id = ${person}`.execute(ownerDb);
-    }
+    await fixtures.cleanup();
   });
 
   describe('who may call', () => {

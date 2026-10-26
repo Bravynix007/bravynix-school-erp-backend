@@ -21,7 +21,7 @@ import { VersionDto } from '../../common/validation/version.dto.js';
 import {
   CreateSocietyDto,
   ListSocietiesQueryDto,
-  PauseSocietyDto,
+  PauseDto,
   UpdateSocietyDto,
 } from './society.dto.js';
 import type { SocietyDetail, SocietyResource, SocietySummary } from './society.resource.js';
@@ -88,7 +88,7 @@ export class SocietyController {
   pause(
     @CurrentPrincipal() principal: Principal,
     @Param('societyId', UuidParamPipe) societyId: string,
-    @Body() body: PauseSocietyDto,
+    @Body() body: PauseDto,
   ): Promise<SocietyResource> {
     return this.societies.pause(principal, societyId, body);
   }
