@@ -5,6 +5,7 @@ import { FixedClock } from '../../common/time/clock.js';
 import type { AppConfig } from '../../config/app-config.js';
 import type { DatabaseService } from '../database/index.js';
 import type { EmailSender } from '../email/email-sender.js';
+import { BackgroundMailer } from './background-mailer.js';
 import { AccountStatus, AuthCode, ClientType } from './auth-codes.js';
 import type { IdentityRepository, LoginUser, NewChallenge } from './identity.repository.js';
 import { OtpHasher } from './otp-hasher.js';
@@ -49,6 +50,7 @@ function build(
   };
   const check = vi.fn<PublicCallLimiter['check']>(async () => undefined);
   const send = vi.fn<EmailSender['send']>(async () => undefined);
+  const mailer = new BackgroundMailer({ send } as unknown as EmailSender);
   const clock = new FixedClock();
   const service = new OtpService(
     {
@@ -57,11 +59,11 @@ function build(
     repository as unknown as IdentityRepository,
     clock,
     { env: { OTP_DEV_ECHO: options.devEcho ?? false } } as AppConfig,
-    { send } as unknown as EmailSender,
+    mailer,
     new OtpHasher('a'.repeat(32)),
     { check } as unknown as PublicCallLimiter,
   );
-  return { service, repository, stored, times, send, clock, check };
+  return { service, repository, stored, times, send, clock, check, mailer };
 }
 
 const request = (clientType: ClientType = ClientType.Mobile, email = EMAIL) => ({
@@ -275,7 +277,7 @@ describe('OtpService.requestCode', () => {
       await expect(t.service.requestCode(request())).resolves.toEqual({});
       await expect(t.service.flush()).resolves.toBeUndefined();
       const logged = JSON.stringify(warn.mock.calls);
-      expect(logged).toContain('Login code email was not sent');
+      expect(logged).toContain('Email was not sent');
       expect(logged).not.toContain(EMAIL);
     });
 
@@ -298,7 +300,7 @@ describe('OtpService.requestCode', () => {
     it('finishes pending mail on shutdown', async () => {
       const t = build({ user: user() });
       await t.service.requestCode(request());
-      await expect(t.service.onModuleDestroy()).resolves.toBeUndefined();
+      await expect(t.mailer.onModuleDestroy()).resolves.toBeUndefined();
       expect(t.send).toHaveBeenCalledOnce();
     });
   });

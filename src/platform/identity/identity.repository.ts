@@ -137,15 +137,17 @@ export class IdentityRepository {
     return rows[0]!.calls;
   }
 
-  /** The latest end of a lock on this email: from a challenge (any email) or from the account. */
+  /** The latest end of a lock on this email, from its challenges or its lockout record (any email, registered or not). */
   async activeChallengeLock(tx: Tx, emailHmac: Buffer, now: Date): Promise<Date | null> {
-    const row = await tx
-      .selectFrom('otp_challenges')
-      .select((eb) => eb.fn.max('locked_until').as('until'))
-      .where('email_hmac', '=', emailHmac)
-      .where('locked_until', '>', now)
-      .executeTakeFirst();
-    return row?.until ?? null;
+    // The lockout record outlives the challenges, so a sweep of old codes never lifts a lock.
+    const { rows } = await sql<{ until: Date | null }>`
+      select greatest(
+        (select max(locked_until) from otp_challenges
+          where email_hmac = ${emailHmac} and locked_until > ${now}),
+        (select max(locked_until) from login_lockouts
+          where email_hmac = ${emailHmac} and locked_until > ${now})
+      ) as until`.execute(tx);
+    return rows[0]?.until ?? null;
   }
 
   /**
@@ -216,6 +218,24 @@ export class IdentityRepository {
       .updateTable('otp_challenges')
       .set({ attempt_count: count })
       .where('id', 'in', ids)
+      .execute();
+  }
+
+  /** Lockouts of this email since `since`, so the next one knows how long to lock. */
+  async lockoutsSince(tx: Tx, emailHmac: Buffer, since: Date): Promise<number> {
+    const row = await tx
+      .selectFrom('login_lockouts')
+      .select((eb) => eb.fn.countAll<string>().as('count'))
+      .where('email_hmac', '=', emailHmac)
+      .where('created_at', '>', since)
+      .executeTakeFirstOrThrow();
+    return Number(row.count);
+  }
+
+  async recordLockout(tx: Tx, emailHmac: Buffer, until: Date, now: Date): Promise<void> {
+    await tx
+      .insertInto('login_lockouts')
+      .values({ email_hmac: emailHmac, locked_until: until, created_at: now })
       .execute();
   }
 

@@ -1,7 +1,9 @@
 import { sql, type Kysely } from 'kysely';
 
 /**
- * Identity, part 2 (DDD 9.1): `auth_sessions` and `refresh_tokens`. Global
+ * Identity, part 2 (DDD 9.1): `auth_sessions` and `refresh_tokens`, and
+ * `login_lockouts`, the record of lockouts per email that makes a third
+ * lockout within 24 hours a 24-hour lock (PRD 5.1). Global
  * like the other identity tables (DDD 15.3 "None"). A refresh token belongs to
  * a session, so presenting a used one can end exactly that session.
  *
@@ -56,12 +58,30 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   `.execute(db);
   await sql`create index ix_refresh_tokens_session on refresh_tokens (session_id)`.execute(db);
 
+  // One row per lockout, for an unknown email too, so both look the same. The
+  // email is kept as a keyed hash only, like the challenges.
+  await sql`
+    create table login_lockouts (
+      id uuid primary key default gen_random_uuid(),
+      created_at timestamptz not null default now(),
+      email_hmac bytea not null,
+      locked_until timestamptz not null,
+      constraint ck_login_lockouts_hmac check (octet_length(email_hmac) = 32)
+    )
+  `.execute(db);
+  await sql`
+    create index ix_login_lockouts_email on login_lockouts (email_hmac, created_at desc)
+  `.execute(db);
+  // The sweep removes rows older than 24 hours whose lock has ended.
+  await sql`create index ix_login_lockouts_created on login_lockouts (created_at)`.execute(db);
+
   // Sessions end, they are not deleted by the app; a platform job sweeps them.
   await sql`
     do $$
     begin
       if exists (select 1 from pg_roles where rolname = 'erp_app') then
         revoke delete, truncate on table auth_sessions, refresh_tokens from erp_app;
+        revoke update, delete, truncate on table login_lockouts from erp_app;
       end if;
     end;
     $$
@@ -72,6 +92,7 @@ export async function down(db: Kysely<unknown>): Promise<void> {
   if (process.env.NODE_ENV === 'production') {
     throw new Error('Refusing to drop the session tables in production: they hold every login');
   }
+  await sql`drop table if exists login_lockouts`.execute(db);
   await sql`drop table if exists refresh_tokens`.execute(db);
   await sql`drop table if exists auth_sessions`.execute(db);
 }

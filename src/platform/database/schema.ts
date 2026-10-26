@@ -1,6 +1,7 @@
 import type { AuditLogsTable } from '../audit/audit.tables.js';
 import type {
   AuthSessionsTable,
+  LoginLockoutsTable,
   OtpChallengesTable,
   PublicCallCountersTable,
   RefreshTokensTable,
@@ -21,4 +22,5 @@ export interface Database {
   public_call_counters: PublicCallCountersTable;
   auth_sessions: AuthSessionsTable;
   refresh_tokens: RefreshTokensTable;
+  login_lockouts: LoginLockoutsTable;
 }

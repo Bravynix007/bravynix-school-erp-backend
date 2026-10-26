@@ -1,8 +1,10 @@
 import { RequestContext } from '../../common/request-context/request-context.js';
 import { FixedClock } from '../../common/time/clock.js';
+import type { EmailSender } from '../email/email-sender.js';
 import type { AuditService } from '../audit/index.js';
 import type { DatabaseService } from '../database/index.js';
 import { AccountStatus, ClientType } from './auth-codes.js';
+import { BackgroundMailer } from './background-mailer.js';
 import type { IdentityRepository, LiveChallenge, LoginUser } from './identity.repository.js';
 import { LoginService, type VerifyRequest } from './login.service.js';
 import { OtpHasher } from './otp-hasher.js';
@@ -31,6 +33,7 @@ function build(
   options: {
     user?: LoginUser;
     live?: LiveChallenge[];
+    lockouts?: number;
     grants?: Grant[];
     lock?: Date | null;
     busy?: boolean;
@@ -45,6 +48,8 @@ function build(
     liveChallenges: vi.fn<IdentityRepository['liveChallenges']>(async () => options.live ?? []),
     setAttemptCount: vi.fn<IdentityRepository['setAttemptCount']>(async () => undefined),
     lockChallenges: vi.fn<IdentityRepository['lockChallenges']>(async () => undefined),
+    lockoutsSince: vi.fn<IdentityRepository['lockoutsSince']>(async () => options.lockouts ?? 0),
+    recordLockout: vi.fn<IdentityRepository['recordLockout']>(async () => undefined),
     consumeChallenge: vi.fn<IdentityRepository['consumeChallenge']>(async () => undefined),
     setUserFailures: vi.fn<IdentityRepository['setUserFailures']>(async () => undefined),
     recordLogin: vi.fn<IdentityRepository['recordLogin']>(async () => undefined),
@@ -57,6 +62,8 @@ function build(
   };
   const record = vi.fn<AuditService['record']>(async () => 'audit-id');
   const check = vi.fn<PublicCallLimiter['check']>(async () => undefined);
+  const send = vi.fn<EmailSender['send']>(async () => undefined);
+  const mailer = new BackgroundMailer({ send } as unknown as EmailSender);
   const clock = new FixedClock();
   const tokens = new TokenService(undefined, 'k1', SECRET);
   const service = new LoginService(
@@ -70,8 +77,9 @@ function build(
     hasher,
     tokens,
     { check } as unknown as PublicCallLimiter,
+    mailer,
   );
-  return { service, identity, sessions, record, check, clock, tokens };
+  return { service, identity, sessions, record, check, clock, tokens, send, mailer };
 }
 
 const live = (attemptCount = 0, code: string | null = CODE, id = 'c1'): LiveChallenge => ({
@@ -97,6 +105,11 @@ const fail = async (promise: Promise<unknown>) =>
     code: string;
     options: { retryAfterSeconds?: number; details?: Record<string, unknown> };
   };
+
+const lockOut = (options: Parameters<typeof build>[0]) => {
+  const t = build(options);
+  return { t, error: fail(t.service.verify(request({ code: '000000' }))) };
+};
 
 describe('LoginService.verify', () => {
   it('starts a session in the only context, signs a token for it and audits the login', async () => {
@@ -218,6 +231,79 @@ describe('LoginService.verify', () => {
       expect.anything(),
       expect.objectContaining({ entityType: 'user', entityId: user().id }),
     );
+  });
+
+  describe('the third lockout in 24 hours', () => {
+    it('locks for 30 minutes the first and second time, counting the earlier ones', async () => {
+      for (const lockouts of [0, 1]) {
+        const { t, error } = lockOut({ user: user(), live: [live(4)], lockouts });
+        expect(await error).toMatchObject({ options: { retryAfterSeconds: 1800 } });
+        expect(t.identity.recordLockout).toHaveBeenCalledWith(
+          expect.anything(),
+          hasher.email(EMAIL),
+          new Date(t.clock.now().getTime() + 1800 * 1000),
+          t.clock.now(),
+        );
+      }
+    });
+
+    it('locks for 24 hours the third time, on the challenges and the account', async () => {
+      const { t, error } = lockOut({ user: user(), live: [live(4)], lockouts: 2 });
+      expect(await error).toMatchObject({
+        status: 401,
+        code: 'OTP_ATTEMPTS_EXCEEDED',
+        options: { retryAfterSeconds: 86400 },
+      });
+      const until = new Date(t.clock.now().getTime() + 86400 * 1000);
+      expect(t.identity.lockChallenges).toHaveBeenCalledWith(
+        expect.anything(),
+        hasher.email(EMAIL),
+        until,
+        new Date(t.clock.now().getTime() - 86400 * 1000),
+      );
+      expect(t.identity.setUserFailures).toHaveBeenCalledWith(
+        expect.anything(),
+        user().id,
+        0,
+        until,
+      );
+      expect(t.record).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          action: 'auth.lockout',
+          after: { lockoutsIn24Hours: 3, lockSeconds: 86400 },
+        }),
+      );
+    });
+
+    it('counts lockouts of an unknown email in the same way', async () => {
+      const { error } = lockOut({ live: [live(4, null)], lockouts: 2 });
+      expect(await error).toMatchObject({ options: { retryAfterSeconds: 86400 } });
+    });
+
+    it('mails a registered person, with the length of the lock, after the answer is decided', async () => {
+      const { t, error } = lockOut({ user: user(), live: [live(4)], lockouts: 2 });
+      await error;
+      await t.mailer.flush();
+      expect(t.send).toHaveBeenCalledOnce();
+      const mail = t.send.mock.calls[0]![0];
+      expect(mail).toMatchObject({ to: EMAIL, template: 'login-lockout' });
+      expect(mail.text).toContain('24 hours');
+    });
+
+    it('sends no mail for an unknown email, an inactive account or a wrong code that is not a lockout', async () => {
+      const unknown = lockOut({ live: [live(4, null)] });
+      const inactive = lockOut({
+        user: user({ accountStatus: AccountStatus.Inactive }),
+        live: [live(4)],
+      });
+      const notYet = lockOut({ user: user(), live: [live(2)] });
+      await Promise.all([unknown.error, inactive.error, notYet.error]);
+      for (const { t } of [unknown, inactive, notYet]) {
+        await t.mailer.flush();
+        expect(t.send).not.toHaveBeenCalled();
+      }
+    });
   });
 
   it('never matches a code stored for no account', async () => {

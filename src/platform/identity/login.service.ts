@@ -8,12 +8,20 @@ import { Clock } from '../../common/time/clock.js';
 import { AuditOutcome, AuditService } from '../audit/index.js';
 import { DatabaseService, type Tx } from '../database/index.js';
 import { AccountStatus, AuthCode, ClientType, userTypeFor } from './auth-codes.js';
-import { IdentityRepository, type LiveChallenge, type LoginUser } from './identity.repository.js';
+import { BackgroundMailer } from './background-mailer.js';
+import {
+  canReceiveCode,
+  IdentityRepository,
+  type LiveChallenge,
+  type LoginUser,
+} from './identity.repository.js';
+import { lockoutEmail } from './lockout-email.js';
 import { OtpHasher } from './otp-hasher.js';
-import { OTP_LIMITS } from './otp-limits.js';
+import { lockSecondsFor, OTP_LIMITS } from './otp-limits.js';
 import { PublicCallLimiter } from './public-call-limiter.js';
 import { requestIp } from './request-ip.js';
 import { SessionRepository, type Grant } from './session.repository.js';
+import type { EmailMessage } from '../email/email-sender.js';
 import { TokenService } from './token.service.js';
 import type { DeviceDto } from './verify-otp.dto.js';
 
@@ -55,14 +63,15 @@ const MOBILE_SESSION_MS = 30 * DAY_MS;
 const NO_CODE = Buffer.alloc(32);
 const NIL_UUID = '00000000-0000-0000-0000-000000000000';
 
+type Refused = { kind: 'refused'; error: AppException; mail?: EmailMessage };
 type Outcome =
-  | { kind: 'refused'; error: AppException }
+  | Refused
   | { kind: 'signedIn'; user: LoginUser; sessionId: string; grants: Grant[]; active: Grant | null };
 
 /**
  * AUTH-02: verify a login code and start a session (API design 10.2, DDD
- * 13.1). The wrong-try count and the 30-minute lock are kept per email, over
- * all live codes, and the answers for an unknown email are the same as for a
+ * 13.1). The wrong-try count and the lock are kept per email, over all live
+ * codes (30 minutes, and 24 hours from the third lockout within 24 hours), and the answers for an unknown email are the same as for a
  * registered one, so no answer tells them apart (I-07).
  *
  * Mobile sessions only for now: a Super Admin on the console also needs the
@@ -79,6 +88,7 @@ export class LoginService {
     private readonly hasher: OtpHasher,
     private readonly tokens: TokenService,
     private readonly limiter: PublicCallLimiter,
+    private readonly mailer: BackgroundMailer,
   ) {}
 
   async verify(request: VerifyRequest): Promise<LoginResult> {
@@ -92,7 +102,11 @@ export class LoginService {
       this.verifyInTransaction(tx, email, request, ip, refresh.hmac),
     );
     // Wrong codes are saved above, so the refusal is raised only after the commit.
-    if (outcome.kind === 'refused') throw outcome.error;
+    if (outcome.kind === 'refused') {
+      // After the commit, off the request: the answer is the same with or without an account.
+      if (outcome.mail) this.mailer.send(outcome.mail);
+      throw outcome.error;
+    }
 
     const { user, sessionId, grants, active } = outcome;
     const signed = await this.tokens.signAccessToken(
@@ -263,8 +277,12 @@ export class LoginService {
       tries,
     );
     if (locked) {
-      const until = new Date(now.getTime() + OTP_LIMITS.lockSeconds * 1000);
-      const since = new Date(now.getTime() - 24 * 3600 * 1000);
+      const since = new Date(now.getTime() - OTP_LIMITS.lockoutWindowSeconds * 1000);
+      // This lockout counts too; the email is held by the lock taken at the start, so the count is exact.
+      const lockouts = (await this.identity.lockoutsSince(tx, emailHmac, since)) + 1;
+      const lockSeconds = lockSecondsFor(lockouts);
+      const until = new Date(now.getTime() + lockSeconds * 1000);
+      await this.identity.recordLockout(tx, emailHmac, until, now);
       await this.identity.lockChallenges(tx, emailHmac, until, since);
       // The update runs for an unknown email too (a nil id matches no row), so the work is the same.
       await this.identity.setUserFailures(tx, user?.id ?? NIL_UUID, 0, until);
@@ -276,12 +294,13 @@ export class LoginService {
         outcome: AuditOutcome.Denied,
         ...(user ? { entityType: 'user', entityId: user.id } : {}),
         actor: { userId: null, roleCode: null, displayName: null },
+        after: { lockoutsIn24Hours: lockouts, lockSeconds },
       });
-      return refused(
-        HttpStatus.UNAUTHORIZED,
-        AuthCode.OTP_ATTEMPTS_EXCEEDED,
-        OTP_LIMITS.lockSeconds,
-      );
+      const outcome = refused(HttpStatus.UNAUTHORIZED, AuthCode.OTP_ATTEMPTS_EXCEEDED, lockSeconds);
+      // Only a registered person is told; an unknown email gets no mail.
+      return user && canReceiveCode(user.accountStatus)
+        ? { ...outcome, mail: lockoutEmail(user.email, lockSeconds) }
+        : outcome;
     }
     await this.identity.setUserFailures(tx, user?.id ?? NIL_UUID, tries, null);
     return {
@@ -293,7 +312,7 @@ export class LoginService {
   }
 }
 
-function refused(status: HttpStatus, code: string, retryAfterSeconds?: number): Outcome {
+function refused(status: HttpStatus, code: string, retryAfterSeconds?: number): Refused {
   return { kind: 'refused', error: new AppException(status, code, { retryAfterSeconds }) };
 }
 

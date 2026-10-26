@@ -66,6 +66,7 @@ describe('QA: AUTH-02', () => {
     await sql`delete from auth_sessions`.execute(owner);
     await sql`delete from otp_challenges`.execute(owner);
     await sql`delete from public_call_counters`.execute(owner);
+    await sql`delete from login_lockouts`.execute(owner);
     await sql`update users set locked_until = null, failed_login_count = 0`.execute(owner);
     process.env.TRUST_PROXY = '1';
     t = await createTestApp({ captureLogs: true });
@@ -133,6 +134,7 @@ describe('QA: AUTH-02', () => {
       for (const email of [parent, unknown, inactive, blocked]) {
         await sql`delete from otp_challenges`.execute(owner);
         await sql`delete from public_call_counters`.execute(owner);
+        await sql`delete from login_lockouts`.execute(owner);
         const steps: unknown[] = [];
         const code = await codeFor(email);
         for (let i = 0; i < 6; i += 1) steps.push(visible(await verify(email, wrongFor(code))));

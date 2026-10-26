@@ -2,6 +2,7 @@ import { Kysely, PostgresDialect, sql, type RawBuilder } from 'kysely';
 import request from 'supertest';
 import { createPool, DatabaseService } from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
+import { BackgroundMailer } from '../../src/platform/identity/background-mailer.js';
 import { OtpHasher } from '../../src/platform/identity/otp-hasher.js';
 import { OtpService } from '../../src/platform/identity/otp.service.js';
 import { TokenService } from '../../src/platform/identity/token.service.js';
@@ -69,6 +70,23 @@ describe('AUTH-02 verify the code', () => {
   const rows = async <T = Record<string, unknown>>(query: RawBuilder<unknown>): Promise<T[]> =>
     (await query.execute(ownerDb)).rows as T[];
 
+  /** Five wrong codes on a fresh code, for a registered email. */
+  async function lockOut(email: string) {
+    const code = await codeFor(email);
+    for (let i = 0; i < 4; i += 1) await verify(email, wrongFor(code)).expect(401);
+    return verify(email, wrongFor(code)).expect(401);
+  }
+  /** The same for an email with no account: its code was never mailed. */
+  async function lockOutStranger(email: string) {
+    await ask(email);
+    for (let i = 0; i < 4; i += 1) await verify(email, '000000').expect(401);
+    return verify(email, '000000').expect(401);
+  }
+  const lockoutMails = async () => {
+    await t.app.get(BackgroundMailer).flush();
+    return t.email.all().filter((m) => m.template === 'login-lockout');
+  };
+
   /**
    * Audit rows with no Society (a login) are readable by no tenant session, by
    * design, so the test lifts the forced policy for one rolled-back transaction.
@@ -107,6 +125,7 @@ describe('AUTH-02 verify the code', () => {
     await sql`delete from auth_sessions`.execute(ownerDb);
     await sql`delete from otp_challenges`.execute(ownerDb);
     await sql`delete from public_call_counters`.execute(ownerDb);
+    await sql`delete from login_lockouts`.execute(ownerDb);
     await sql`update users set locked_until = null, failed_login_count = 0, first_login_at = null, last_login_at = null`.execute(
       ownerDb,
     );
@@ -408,6 +427,117 @@ describe('AUTH-02 verify the code', () => {
       }).expect(400);
       const res = await verify(owner1.email, wrongFor(code)).expect(401);
       expect(res.body.data.attemptsLeft).toBe(4);
+    });
+  });
+
+  describe('repeated lockouts', () => {
+    const THIRTY_MINUTES = 30 * 60_000 + 1000;
+    const DAY = 24 * 3600_000;
+
+    it('locks for 30 minutes twice, then for 24 hours, and tells the person each time', async () => {
+      const first = await lockOut(owner1.email);
+      expect(first.headers['retry-after']).toBe('1800');
+      t.clock.advance(THIRTY_MINUTES);
+      const second = await lockOut(owner1.email);
+      expect(second.headers['retry-after']).toBe('1800');
+      t.clock.advance(THIRTY_MINUTES);
+      const third = await lockOut(owner1.email);
+      expect(third.body.code).toBe('OTP_ATTEMPTS_EXCEEDED');
+      expect(third.headers['retry-after']).toBe('86400');
+
+      const [user] = await rows<{ locked_until: Date }>(
+        sql`select locked_until from users where id = ${owner1.id}`,
+      );
+      expect(user!.locked_until.getTime()).toBe(t.clock.now().getTime() + DAY);
+      expect(await rows(sql`select 1 from login_lockouts`)).toHaveLength(3);
+
+      const mails = await lockoutMails();
+      expect(mails.map((m) => m.to)).toEqual([owner1.email, owner1.email, owner1.email]);
+      expect(mails[0]!.text).toContain('30 minutes');
+      expect(mails[2]!.text).toContain('24 hours');
+      expect(JSON.stringify(mails)).not.toMatch(/\b\d{6}\b/);
+    });
+
+    it('keeps the email locked for the full 24 hours, then gives five fresh tries', async () => {
+      await lockOut(owner1.email);
+      t.clock.advance(THIRTY_MINUTES);
+      await lockOut(owner1.email);
+      t.clock.advance(THIRTY_MINUTES);
+      await lockOut(owner1.email);
+
+      t.clock.advance(23 * 3600_000);
+      const stillLocked = await verify(owner1.email, '123456').expect(423);
+      expect(stillLocked.body.code).toBe('AUTH_LOCKED');
+      await post('/v1/auth/otp', { email: owner1.email, clientType: 1 }).expect(423);
+
+      t.clock.advance(3600_000 + 1000);
+      const fresh = await codeFor(owner1.email);
+      const retry = await verify(owner1.email, wrongFor(fresh)).expect(401);
+      expect(retry.body.data.attemptsLeft).toBe(4);
+      await verify(owner1.email, fresh).expect(200);
+    });
+
+    it('does not count a lockout older than 24 hours', async () => {
+      await lockOut(owner1.email);
+      t.clock.advance(25 * 3600_000);
+      const second = await lockOut(owner1.email);
+      expect(second.headers['retry-after']).toBe('1800');
+      t.clock.advance(THIRTY_MINUTES);
+      const third = await lockOut(owner1.email);
+      expect(third.headers['retry-after']).toBe('1800');
+    });
+
+    it('holds the lock even when the old codes have been swept away', async () => {
+      await lockOut(owner1.email);
+      t.clock.advance(THIRTY_MINUTES);
+      await lockOut(owner1.email);
+      t.clock.advance(THIRTY_MINUTES);
+      await lockOut(owner1.email);
+      await sql`delete from otp_challenges`.execute(ownerDb);
+      await sql`update users set locked_until = null`.execute(ownerDb);
+      await post('/v1/auth/otp', { email: owner1.email, clientType: 1 }).expect(423);
+    });
+
+    it('treats an unknown email the same way and sends it no mail', async () => {
+      const answers = [];
+      for (let round = 0; round < 3; round += 1) {
+        answers.push(await lockOutStranger(unknown));
+        t.clock.advance(THIRTY_MINUTES);
+      }
+      expect(answers.map((a) => a.headers['retry-after'])).toEqual(['1800', '1800', '86400']);
+      expect(await rows(sql`select 1 from login_lockouts`)).toHaveLength(3);
+      expect(await lockoutMails()).toHaveLength(0);
+      expect(t.email.count(unknown)).toBe(0);
+    });
+
+    it('sends no lockout mail to an Inactive account, and writes the count in the audit entry', async () => {
+      const answer = await lockOutStranger(inactive.email);
+      expect(answer.headers['retry-after']).toBe('1800');
+      expect(await lockoutMails()).toHaveLength(0);
+
+      const locked = await lockOut(owner1.email);
+      const entries = await auditRows<{ new_values: unknown }>(
+        sql`action = 'auth.lockout' and request_id = ${locked.body.requestId}`,
+      );
+      expect(entries).toHaveLength(1);
+      expect(entries[0]!.new_values).toEqual({ lockoutsIn24Hours: 1, lockSeconds: 1800 });
+    });
+
+    it('lets the app role record and read lockouts but not change or delete them', async () => {
+      const { db } = t.app.get(DatabaseService);
+      await lockOut(owner1.email);
+      await expect(sql`update login_lockouts set locked_until = now()`.execute(db)).rejects.toThrow(
+        /permission denied/,
+      );
+      await expect(sql`delete from login_lockouts`.execute(db)).rejects.toThrow(
+        /permission denied/,
+      );
+      await expect(sql`truncate login_lockouts`.execute(db)).rejects.toThrow(/permission denied/);
+      await expect(
+        sql`insert into login_lockouts (email_hmac, locked_until) values (${Buffer.alloc(5)}, now())`.execute(
+          ownerDb,
+        ),
+      ).rejects.toThrow(/ck_login_lockouts_hmac/);
     });
   });
 

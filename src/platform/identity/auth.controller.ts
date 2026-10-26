@@ -38,7 +38,7 @@ export class AuthController {
 
   @Public({
     operationId: 'AUTH-02',
-    rule: 'Per-IP limit; 5 wrong codes per email lock it for 30 minutes (API design 6.2); the same answers for every email',
+    rule: 'Per-IP limit; 5 wrong codes per email lock it for 30 minutes, 24 hours from the third lockout in a day (API design 6.2); the same answers for every email',
   })
   @HttpCode(HttpStatus.OK)
   @Post('otp/verify')

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AppConfig } from '../../config/app-config.js';
+import { BackgroundMailer } from './background-mailer.js';
 import { AuthController } from './auth.controller.js';
 import { IdentityRepository } from './identity.repository.js';
 import { LoginService } from './login.service.js';
@@ -15,6 +16,7 @@ import { TokenService } from './token.service.js';
     IdentityRepository,
     SessionRepository,
     LoginService,
+    BackgroundMailer,
     OtpService,
     PublicCallLimiter,
     {

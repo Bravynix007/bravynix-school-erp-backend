@@ -63,6 +63,13 @@ export interface PublicCallCountersTable {
   created_at: Generated<Date>;
 }
 
+export interface LoginLockoutsTable {
+  id: Generated<string>;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  email_hmac: Buffer;
+  locked_until: Date;
+}
+
 export interface AuthSessionsTable {
   id: string;
   created_at: Generated<Date>;

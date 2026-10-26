@@ -3,6 +3,7 @@ export { OtpService, type OtpRequest, type OtpRequestResult } from './otp.servic
 export { AccountStatus, AuthCode, ClientType } from './auth-codes.js';
 export type {
   AuthSessionsTable,
+  LoginLockoutsTable,
   OtpChallengesTable,
   PublicCallCountersTable,
   RefreshTokensTable,
