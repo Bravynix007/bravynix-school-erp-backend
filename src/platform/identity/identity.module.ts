@@ -8,9 +8,12 @@ import { MeController } from './me.controller.js';
 import { AuthController } from './auth.controller.js';
 import { IdentityRepository } from './identity.repository.js';
 import { LoginService } from './login.service.js';
+import { MfaRepository } from './mfa.repository.js';
+import { MfaService } from './mfa.service.js';
 import { OtpHasher } from './otp-hasher.js';
 import { OtpService } from './otp.service.js';
 import { PublicCallLimiter } from './public-call-limiter.js';
+import { SecretBox } from './secret-box.js';
 import { SessionService } from './session.service.js';
 import { SessionTokenVerifier } from './session-token-verifier.js';
 import { SessionRepository } from './session.repository.js';
@@ -24,6 +27,8 @@ import { TokenService } from './token.service.js';
     IdentityRepository,
     SessionRepository,
     LoginService,
+    MfaRepository,
+    MfaService,
     SessionService,
     ContextService,
     SessionTokenVerifier,
@@ -38,6 +43,11 @@ import { TokenService } from './token.service.js';
       // The refresh-token hash shares the login secret; the domains are separate ("refresh:" vs "otp:", "email:").
       useFactory: ({ env }: AppConfig) =>
         new TokenService(env.JWT_SIGNING_KEY, env.JWT_KEY_ID, env.OTP_HMAC_SECRET),
+    },
+    {
+      provide: SecretBox,
+      inject: [AppConfig],
+      useFactory: ({ env }: AppConfig) => new SecretBox(env.MFA_ENCRYPTION_KEY),
     },
     {
       provide: OtpHasher,

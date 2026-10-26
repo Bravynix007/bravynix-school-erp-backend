@@ -2,6 +2,7 @@ import { parseEnv } from './env.schema.js';
 
 const base = { DATABASE_URL: 'postgres://u:p@localhost:5432/db' };
 const SECRET = 'unit-test-secret-not-used-anywhere-0123456789';
+const KEY = Buffer.alloc(32, 9).toString('base64');
 
 describe('parseEnv', () => {
   it('applies defaults', () => {
@@ -53,6 +54,7 @@ describe('parseEnv', () => {
       SMTP_URL: 'smtp://x',
       OTP_HMAC_SECRET: SECRET,
       JWT_SIGNING_KEY: 'pem',
+      MFA_ENCRYPTION_KEY: KEY,
     };
     expect(() => parseEnv(deployed)).toThrow(/EMAIL_FROM/);
     for (const bad of ['', 'no-reply', 'BravyNix <no-reply@bravynix>', 'a b@bravynix.in']) {
@@ -81,15 +83,30 @@ describe('parseEnv', () => {
       expect(() => parseEnv(deployed)).toThrow(/OTP_HMAC_SECRET/);
       expect(() => parseEnv({ ...deployed, OTP_HMAC_SECRET: 'short' })).toThrow(/OTP_HMAC_SECRET/);
       expect(
-        parseEnv({ ...deployed, OTP_HMAC_SECRET: SECRET, JWT_SIGNING_KEY: 'pem' }).OTP_HMAC_SECRET,
+        parseEnv({
+          ...deployed,
+          OTP_HMAC_SECRET: SECRET,
+          JWT_SIGNING_KEY: 'pem',
+          MFA_ENCRYPTION_KEY: KEY,
+        }).OTP_HMAC_SECRET,
       ).toBe(SECRET);
     });
 
     it('needs a token signing key in staging and production only', () => {
-      const withSecret = { ...deployed, OTP_HMAC_SECRET: SECRET };
+      const withSecret = { ...deployed, OTP_HMAC_SECRET: SECRET, MFA_ENCRYPTION_KEY: KEY };
       expect(() => parseEnv(withSecret)).toThrow(/JWT_SIGNING_KEY/);
       expect(parseEnv({ ...withSecret, JWT_SIGNING_KEY: 'pem' }).JWT_KEY_ID).toBe('k1');
       expect(parseEnv({ ...base }).JWT_SIGNING_KEY).toBeUndefined();
+    });
+
+    it('needs a 32-byte authenticator key in staging and production only', () => {
+      const withSecrets = { ...deployed, OTP_HMAC_SECRET: SECRET, JWT_SIGNING_KEY: 'pem' };
+      expect(() => parseEnv(withSecrets)).toThrow(/MFA_ENCRYPTION_KEY/);
+      expect(() => parseEnv({ ...withSecrets, MFA_ENCRYPTION_KEY: 'c2hvcnQ=' })).toThrow(
+        /MFA_ENCRYPTION_KEY/,
+      );
+      expect(parseEnv({ ...withSecrets, MFA_ENCRYPTION_KEY: KEY }).MFA_ENCRYPTION_KEY).toBe(KEY);
+      expect(parseEnv({ ...base }).MFA_ENCRYPTION_KEY).toBeUndefined();
     });
 
     it('does not need a secret in development, and echo is off by default', () => {
@@ -108,6 +125,7 @@ describe('parseEnv', () => {
             NODE_ENV,
             OTP_HMAC_SECRET: SECRET,
             JWT_SIGNING_KEY: 'pem',
+            MFA_ENCRYPTION_KEY: KEY,
             OTP_DEV_ECHO: 'true',
           }),
         ).toThrow(/OTP_DEV_ECHO/);

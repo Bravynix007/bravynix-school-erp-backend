@@ -8,6 +8,7 @@ import { runMigrations } from '../../src/platform/database/migrator.js';
 import { OtpService } from '../../src/platform/identity/otp.service.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { personaByKey } from '../../src/seeds/two-worlds.js';
+import { dumpTables } from '../support/audit-rows.js';
 import { clearLoginState } from '../support/login-state.js';
 import { createTestApp, type TestApp } from '../support/test-app.js';
 
@@ -173,24 +174,17 @@ describe('QA: AUTH-02', () => {
       const code = (await codeFor(ownerEmail))!;
       const res = await verify(ownerEmail, code).expect(200);
       const { accessToken, refreshToken } = res.body.data;
-      await owner
-        .transaction()
-        .execute(async (trx) => {
-          await sql`alter table audit_logs no force row level security`.execute(trx);
-          const { rows } = await sql<{ dump: string }>`
-          select concat_ws('|',
-            (select string_agg(t::text, '|') from auth_sessions t),
-            (select string_agg(t::text, '|') from refresh_tokens t),
-            (select string_agg(t::text, '|') from otp_challenges t),
-            (select string_agg(t::text, '|') from audit_logs t)) as dump`.execute(trx);
-          const dump = rows[0]!.dump;
-          for (const secret of [code, accessToken, refreshToken, refreshToken.slice(3)]) {
-            expect(dump).not.toContain(secret);
-          }
-          expect(dump).not.toContain(Buffer.from(refreshToken).toString('hex'));
-          await sql`rollback`.execute(trx).catch(() => undefined);
-        })
-        .catch(() => undefined);
+      const dump = await dumpTables(owner, [
+        'auth_sessions',
+        'refresh_tokens',
+        'otp_challenges',
+        'mfa_challenges',
+        'user_totp_factors',
+      ]);
+      for (const secret of [code, accessToken, refreshToken, refreshToken.slice(3)]) {
+        expect(dump).not.toContain(secret);
+      }
+      expect(dump).not.toContain(Buffer.from(refreshToken).toString('hex'));
     });
 
     it('the access token carries only the documented claims', async () => {

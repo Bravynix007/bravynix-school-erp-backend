@@ -7,6 +7,7 @@ import { TokenService } from '../../src/platform/identity/token.service.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { institutions, personaByKey, societies } from '../../src/seeds/two-worlds.js';
 import { FixtureModule } from '../support/fixture.module.js';
+import { readAuditRows } from '../support/audit-rows.js';
 import { clearLoginState } from '../support/login-state.js';
 import { signInMobile } from '../support/sessions.js';
 import { createTestApp, type TestApp } from '../support/test-app.js';
@@ -42,22 +43,7 @@ describe('AUTH-06 switch context and ME-01', () => {
       ownerDb,
     );
 
-  const auditRows = async <T>(where: RawBuilder<unknown>): Promise<T[]> => {
-    let found: T[] = [];
-    await ownerDb
-      .transaction()
-      .execute(async (trx) => {
-        await sql`alter table audit_logs no force row level security`.execute(trx);
-        found = (
-          await sql`select * from audit_logs where ${where} order by created_at`.execute(trx)
-        ).rows as T[];
-        throw new Error('rollback');
-      })
-      .catch((error: unknown) => {
-        if (!(error instanceof Error) || error.message !== 'rollback') throw error;
-      });
-    return found;
-  };
+  const auditRows = <T>(where: RawBuilder<unknown>) => readAuditRows<T>(ownerDb, where);
 
   beforeAll(async () => {
     await runMigrations(migrationUrl, 'latest');

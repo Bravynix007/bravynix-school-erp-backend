@@ -7,7 +7,7 @@ import { RequestContext } from '../../common/request-context/request-context.js'
 import { Clock } from '../../common/time/clock.js';
 import { AuditOutcome, AuditService } from '../audit/index.js';
 import { DatabaseService, type Tx } from '../database/index.js';
-import { AccountStatus, AuthCode, ClientType, reportedStatus, userTypeFor } from './auth-codes.js';
+import { AccountStatus, AuthCode, ClientType } from './auth-codes.js';
 import { mobileContexts, onlyContext, type Context } from './contexts.js';
 import { BackgroundMailer } from './background-mailer.js';
 import {
@@ -17,7 +17,9 @@ import {
   type LoginUser,
   NIL_UUID,
 } from './identity.repository.js';
+import { buildLoginResult, displayName, type LoginResult } from './login-result.js';
 import { lockoutEmail } from './lockout-email.js';
+import { MfaService, type MfaStart } from './mfa.service.js';
 import { OtpHasher } from './otp-hasher.js';
 import { lockSecondsFor, OTP_LIMITS } from './otp-limits.js';
 import { PublicCallLimiter } from './public-call-limiter.js';
@@ -36,23 +38,9 @@ export interface VerifyRequest {
   device?: DeviceDto;
 }
 
-export interface LoginResult {
-  userType: number | null;
-  userTypeName: string | null;
-  accessToken: string;
-  accessTokenExpiresAt: string;
-  refreshToken: string;
-  session: { id: string; activeContext: { roleCode: number; societyId: string | null } | null };
-  person: {
-    id: string;
-    email: string;
-    firstName: string | null;
-    lastName: string | null;
-    preferredLanguage: string;
-    accountStatus: number;
-  };
-  contexts: Context[];
-  requiredNotices: never[];
+/** AUTH-02 for a console Super Admin: no session yet, only the token for the authenticator step. */
+export interface MfaRequired extends MfaStart {
+  mfaRequired: true;
 }
 
 const NO_CODE = Buffer.alloc(32);
@@ -66,7 +54,8 @@ type Outcome =
       sessionId: string;
       contexts: Context[];
       active: Context | null;
-    };
+    }
+  | { kind: 'mfaRequired'; mfa: MfaStart };
 
 /**
  * AUTH-02: verify a login code and start a session (API design 10.2, DDD
@@ -74,8 +63,8 @@ type Outcome =
  * codes (30 minutes, and 24 hours from the third lockout within 24 hours), and the answers for an unknown email are the same as for a
  * registered one, so no answer tells them apart (I-07).
  *
- * Mobile sessions only for now: a Super Admin on the console also needs the
- * authenticator step (slice B8) and is not given a session here.
+ * A mobile sign-in gets its session here. A Super Admin on the console gets a
+ * 5-minute token instead and finishes with the authenticator (AUTH-03/04, MfaService).
  */
 @Injectable()
 export class LoginService {
@@ -89,9 +78,10 @@ export class LoginService {
     private readonly tokens: TokenService,
     private readonly limiter: PublicCallLimiter,
     private readonly mailer: BackgroundMailer,
+    private readonly mfa: MfaService,
   ) {}
 
-  async verify(request: VerifyRequest): Promise<LoginResult> {
+  async verify(request: VerifyRequest): Promise<LoginResult | MfaRequired> {
     const email = request.email.trim().toLowerCase();
     const ip = requestIp();
     // First, before a connection is held for anything else: every call counts.
@@ -108,37 +98,27 @@ export class LoginService {
       throw outcome.error;
     }
 
+    if (outcome.kind === 'mfaRequired') return { mfaRequired: true, ...outcome.mfa };
+
     const { user, sessionId, contexts, active } = outcome;
-    const signed = await this.tokens.signAccessToken(
+    const accessToken = await this.tokens.signAccessToken(
       {
         personId: user.id,
         sessionId,
         roleCode: active?.roleCode ?? null,
         societyId: active?.societyId ?? null,
-        clientType: request.clientType === ClientType.Mobile ? 'mobile' : 'console',
+        clientType: 'mobile',
       },
       this.clock.now(),
     );
-    return {
-      ...userTypeFor(active?.roleCode ?? null),
-      accessToken: signed.token,
-      accessTokenExpiresAt: signed.expiresAt.toISOString(),
-      refreshToken: refresh.token,
-      session: {
-        id: sessionId,
-        activeContext: active ? { roleCode: active.roleCode, societyId: active.societyId } : null,
-      },
-      person: {
-        id: user.id,
-        email: user.email,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        preferredLanguage: user.preferredLanguage,
-        accountStatus: reportedStatus(user.accountStatus),
-      },
+    return buildLoginResult({
+      user,
+      sessionId,
       contexts,
-      requiredNotices: [],
-    };
+      active,
+      accessToken,
+      refreshToken: refresh.token,
+    });
   }
 
   private async verifyInTransaction(
@@ -196,8 +176,14 @@ export class LoginService {
         await this.identity.clearFailures(tx, user.id);
         return refused(HttpStatus.FORBIDDEN, AuthCode.CONSOLE_NOT_ALLOWED);
       }
-      // A Super Admin also needs the authenticator step (B8); the code is kept for it.
-      return refused(HttpStatus.SERVICE_UNAVAILABLE, ErrorCode.SERVICE_UNAVAILABLE);
+      // The email code is spent; the authenticator step finishes the sign-in.
+      await this.identity.consumeChallenge(tx, emailHmac, matched.id, now);
+      await this.identity.clearFailures(tx, user.id);
+      // Too many wrong authenticator codes closed the console to this person for a while.
+      const locked = await this.mfa.activeLock(tx, user.id, now);
+      if (locked)
+        return refused(HttpStatus.LOCKED, AuthCode.AUTH_LOCKED, secondsUntil(locked, now));
+      return { kind: 'mfaRequired', mfa: await this.mfa.begin(tx, user.id, now) };
     }
 
     await this.identity.consumeChallenge(tx, emailHmac, matched.id, now);
@@ -311,9 +297,4 @@ export class LoginService {
 
 function refused(status: HttpStatus, code: string, retryAfterSeconds?: number): Refused {
   return { kind: 'refused', error: new AppException(status, code, { retryAfterSeconds }) };
-}
-
-function displayName(user: LoginUser): string | null {
-  const name = [user.firstName, user.lastName].filter(Boolean).join(' ');
-  return name || null;
 }

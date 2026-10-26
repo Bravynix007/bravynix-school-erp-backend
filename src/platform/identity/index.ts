@@ -5,9 +5,11 @@ export { AccountStatus, AuthCode, ClientType } from './auth-codes.js';
 export type {
   AuthSessionsTable,
   LoginLockoutsTable,
+  MfaChallengesTable,
   OtpChallengesTable,
   PublicCallCountersTable,
   RefreshTokensTable,
   RoleAssignmentsTable,
+  UserTotpFactorsTable,
   UsersTable,
 } from './identity.tables.js';
