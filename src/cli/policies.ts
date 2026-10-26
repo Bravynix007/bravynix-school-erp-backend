@@ -20,6 +20,7 @@ try {
       access: route.policy?.access ?? null,
       roles: route.policy?.roles.map((role) => RoleShortName[role]) ?? [],
       scope: route.policy?.scope ?? null,
+      allowWhenPaused: route.policy?.allowWhenPaused ?? false,
       rule: route.policy?.rule ?? null,
       handler: `${route.controller}.${route.handler}`,
     }));

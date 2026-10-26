@@ -5,8 +5,8 @@ import { ErrorCode } from '../../common/http/error-codes.js';
 import type { RoleCode } from '../../common/auth/roles.js';
 import { Clock } from '../../common/time/clock.js';
 import { DatabaseService } from '../database/index.js';
-import { AccountStatus, ClientType, SessionEndReason, endReasonName } from './auth-codes.js';
-import { MOBILE_SESSION_MS, roleNeedsGrant, TOUCH_AFTER_MS } from './session-rules.js';
+import { ClientType, SessionEndReason, endReasonName } from './auth-codes.js';
+import { endIfNoLongerAllowed, MOBILE_SESSION_MS, TOUCH_AFTER_MS } from './session-rules.js';
 import { SessionRepository } from './session.repository.js';
 import { TokenService } from './token.service.js';
 
@@ -53,26 +53,8 @@ export class SessionTokenVerifier extends AccessTokenVerifier {
       await this.sessions.endSession(db, session.id, SessionEndReason.Expired, now);
       throw ended(SessionEndReason.Expired);
     }
-    if (
-      session.accountStatus === AccountStatus.Blocked ||
-      session.accountStatus === AccountStatus.Inactive
-    ) {
-      await this.sessions.endUserSessions(db, session.userId, SessionEndReason.AccountBlocked, now);
-      throw ended(SessionEndReason.AccountBlocked);
-    }
-    if (
-      session.activeRoleCode !== null &&
-      roleNeedsGrant(session.activeRoleCode) &&
-      !(await this.sessions.hasGrant(
-        db,
-        session.userId,
-        session.activeRoleCode,
-        session.activeSocietyId,
-      ))
-    ) {
-      await this.sessions.endSession(db, session.id, SessionEndReason.AccessRevoked, now);
-      throw ended(SessionEndReason.AccessRevoked);
-    }
+    const lost = await endIfNoLongerAllowed(this.sessions, db, session, now);
+    if (lost !== null) throw ended(lost);
 
     // A mobile session lasts 30 days from last use.
     if (

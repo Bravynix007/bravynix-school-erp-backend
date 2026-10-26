@@ -509,6 +509,10 @@ describe('rolling back', () => {
           await import('../../src/platform/database/migrations/2026_10_25_0004_identity_sessions.js'),
           /session tables/,
         ],
+        [
+          await import('../../src/platform/database/migrations/2026_10_26_0006_tenancy_core.js'),
+          /tenancy tables/,
+        ],
       ] as const;
       for (const [migration, name] of guarded) {
         await expect(migration.down(null as never)).rejects.toThrow(
@@ -546,6 +550,8 @@ describe('tenant tables (DDD 15.3 checks in the build)', () => {
    * explicit so a new table cannot slip out of the check.
    */
   const globalIdentityTables = ['role_assignments'];
+  /** The Society is its own tenant, so `societies` has an `id` where others have a `society_id`. */
+  const tenantRoots = ['societies'];
 
   const tenantTables = async () => {
     const { rows } = await sql<{ name: string; rls: boolean; forced: boolean }>`
@@ -556,9 +562,12 @@ describe('tenant tables (DDD 15.3 checks in the build)', () => {
         and c.relkind in ('r', 'p')
         and not c.relispartition
         and c.relname <> all (${globalIdentityTables})
-        and exists (
-          select 1 from pg_attribute a
-          where a.attrelid = c.oid and a.attname in ('society_id', 'institution_id') and not a.attisdropped
+        and (
+          c.relname = any (${tenantRoots})
+          or exists (
+            select 1 from pg_attribute a
+            where a.attrelid = c.oid and a.attname in ('society_id', 'institution_id') and not a.attisdropped
+          )
         )
       order by c.relname
     `.execute(database.db);
@@ -567,7 +576,9 @@ describe('tenant tables (DDD 15.3 checks in the build)', () => {
 
   it('has forced row-level security on every table with a society_id or institution_id', async () => {
     const tables = await tenantTables();
-    expect(tables.map((table) => table.name)).toContain('audit_logs');
+    expect(tables.map((table) => table.name)).toEqual(
+      expect.arrayContaining(['audit_logs', 'institutions', 'societies']),
+    );
     expect(tables.filter((table) => !table.rls || !table.forced)).toEqual([]);
   });
 

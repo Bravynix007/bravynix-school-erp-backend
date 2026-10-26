@@ -8,6 +8,7 @@ import type {
   RoleAssignmentsTable,
   UsersTable,
 } from '../identity/identity.tables.js';
+import type { InstitutionsTable, SocietiesTable } from '../tenancy/tenancy.tables.js';
 
 /**
  * Kysely table types, one interface per table, added by the module that owns
@@ -23,4 +24,6 @@ export interface Database {
   auth_sessions: AuthSessionsTable;
   refresh_tokens: RefreshTokensTable;
   login_lockouts: LoginLockoutsTable;
+  societies: SocietiesTable;
+  institutions: InstitutionsTable;
 }

@@ -4,6 +4,12 @@ import type { Db, Tx } from '../database/index.js';
 import { AccountStatus } from './auth-codes.js';
 import { OTP_LIMITS } from './otp-limits.js';
 
+/**
+ * Stands in for the person of an unknown email, so that path runs the same
+ * statements as a registered one and takes the same time (PRD 5.1, I-07).
+ */
+export const NIL_UUID = '00000000-0000-0000-0000-000000000000';
+
 const OTP_MAX_ATTEMPTS = OTP_LIMITS.attemptsPerCode;
 
 export interface LoginUser {

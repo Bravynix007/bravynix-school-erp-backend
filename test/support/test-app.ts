@@ -7,6 +7,7 @@ import { AppModule } from '../../src/app.module.js';
 import { configureApp } from '../../src/bootstrap/configure-app.js';
 import { EnvelopeExpressAdapter } from '../../src/bootstrap/http-adapter.js';
 import { AccessTokenVerifier } from '../../src/common/auth/access-token-verifier.js';
+import { TenantAccessGate } from '../../src/common/auth/tenant-access-gate.js';
 import { LogDestination } from '../../src/common/logging/log-destination.js';
 import { Clock, FixedClock } from '../../src/common/time/clock.js';
 import { EmailSender } from '../../src/platform/email/email-sender.js';
@@ -26,6 +27,12 @@ export interface TestAppOptions {
   imports?: Type<unknown>[];
   /** Replaces the access token verifier (phase 1 tests use the real one). */
   verifier?: AccessTokenVerifier;
+  /**
+   * Replaces the pause check. With a fake `verifier` its Societies are not in
+   * the database, so the default is a gate that never pauses; a test of the
+   * pause passes its own. Without a `verifier` the real gate is used.
+   */
+  tenantGate?: TenantAccessGate;
   clockStart?: string;
   /** Collects the real log lines at `info` into `logs` instead of discarding them. */
   captureLogs?: boolean;
@@ -53,6 +60,10 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
   if (options.verifier) {
     builder = builder.overrideProvider(AccessTokenVerifier).useValue(options.verifier);
   }
+  const gate =
+    options.tenantGate ??
+    (options.verifier ? ({ isPaused: () => Promise.resolve(false) } as TenantAccessGate) : null);
+  if (gate) builder = builder.overrideProvider(TenantAccessGate).useValue(gate);
   const moduleRef = await builder.compile();
   const app = moduleRef.createNestApplication<NestExpressApplication>(
     new EnvelopeExpressAdapter(),

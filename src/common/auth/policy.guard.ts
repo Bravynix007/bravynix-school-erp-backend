@@ -6,6 +6,8 @@ import { ErrorCode } from '../http/error-codes.js';
 import { RequestContext } from '../request-context/request-context.js';
 import { AccessTokenVerifier, type Principal } from './access-token-verifier.js';
 import { POLICY_METADATA, type RoutePolicy } from './policy.decorator.js';
+import { RoleCode } from './roles.js';
+import { TenantAccessGate } from './tenant-access-gate.js';
 
 export type AuthenticatedRequest = Request & { principal?: Principal };
 
@@ -23,6 +25,7 @@ export class PolicyGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     private readonly verifier: AccessTokenVerifier,
+    private readonly tenantGate: TenantAccessGate,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -54,6 +57,16 @@ export class PolicyGuard implements CanActivate {
     if (!allowed) throw AppException.forbidden();
     if (principal.viaSupportAccess && !SAFE_METHODS.has(request.method)) {
       throw AppException.forbidden(ErrorCode.SUPPORT_READ_ONLY);
+    }
+
+    // A paused Society stops its users after sign-in. Super Admin belongs to no
+    // Society, so a pause never reaches the platform console.
+    if (
+      !policy.allowWhenPaused &&
+      principal.roleCode !== RoleCode.SuperAdmin &&
+      (await this.tenantGate.isPaused(principal))
+    ) {
+      throw AppException.paused();
     }
 
     request.principal = principal;
