@@ -114,3 +114,22 @@ describe('lockSecondsFor', () => {
     expect(lockSecondsFor(7)).toBe(24 * 3600);
   });
 });
+
+describe('evaluateIpLimit with its own limit', () => {
+  const windowStart = new Date('2026-10-25T10:00:00.000Z');
+  const at = new Date('2026-10-25T10:00:20.000Z');
+
+  it('lets refresh make 300 calls in the minute and refuses the 301st until the window ends', () => {
+    expect(evaluateIpLimit(at, windowStart, 300, 300)).toBeNull();
+    expect(evaluateIpLimit(at, windowStart, 301, 300)).toEqual({
+      status: HttpStatus.TOO_MANY_REQUESTS,
+      code: 'RATE_LIMITED',
+      retryAfterSeconds: 40,
+    });
+  });
+
+  it('keeps 20 as the default for the login-code endpoints', () => {
+    expect(evaluateIpLimit(at, windowStart, 20)).toBeNull();
+    expect(evaluateIpLimit(at, windowStart, 21)).not.toBeNull();
+  });
+});
