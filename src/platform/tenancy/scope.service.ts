@@ -23,7 +23,12 @@ export interface RequestScope {
 export interface InstitutionContext {
   institutionId: string;
   societyId: string;
-  /** Narrowed to this one Institution, so row-level security repeats the check. */
+  /**
+   * Narrowed to this one Institution, so tables keyed on `institution_id` also
+   * hide the rest in the database. The `institutions` and `societies` policies
+   * are Society-level, so every Institution endpoint must call
+   * `requireInstitution` itself.
+   */
   tenant: TenantContext;
 }
 

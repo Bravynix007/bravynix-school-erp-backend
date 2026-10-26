@@ -82,10 +82,10 @@ const tenantTables = async () => {
         and a.attname = 'institution_id' and not a.attisdropped) as "hasInstitution"
     from pg_class c join pg_namespace n on n.oid = c.relnamespace
     where n.nspname = 'public' and c.relkind in ('r', 'p') and not c.relispartition
-      and c.relname <> 'role_assignments'
+      and c.relname <> all (array['role_assignments', 'auth_sessions'])
       and (c.relname = 'societies' or exists (
         select 1 from pg_attribute a where a.attrelid = c.oid
-          and a.attname in ('society_id', 'institution_id') and not a.attisdropped))
+          and a.attname ~ '(^|_)(society|institution)_id$' and not a.attisdropped))
     order by c.relname
   `.execute(ownerDb);
   return rows;
