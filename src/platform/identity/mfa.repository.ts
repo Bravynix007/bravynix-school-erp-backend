@@ -169,4 +169,40 @@ export class MfaRepository {
   async spendChallenge(tx: Tx, id: string, now: Date): Promise<void> {
     await tx.updateTable('mfa_challenges').set({ used_at: now }).where('id', '=', id).execute();
   }
+
+  /** Which of these people have an authenticator that was confirmed. */
+  async confirmedAmong(db: Db, userIds: readonly string[]): Promise<Set<string>> {
+    if (userIds.length === 0) return new Set();
+    const rows = await db
+      .selectFrom('user_totp_factors')
+      .select('user_id')
+      .where('user_id', 'in', userIds)
+      .where('confirmed_at', 'is not', null)
+      .execute();
+    return new Set(rows.map((row) => row.user_id));
+  }
+
+  /** The person's authenticator is removed: they enrol again at the next console sign-in (PLT-18). */
+  async deleteFactor(tx: Tx, userId: string): Promise<void> {
+    await tx.deleteFrom('user_totp_factors').where('user_id', '=', userId).execute();
+  }
+
+  /** Lifts the console lock after wrong codes and starts the count again (support unlock). */
+  async clearLock(tx: Tx, userId: string): Promise<void> {
+    await tx
+      .updateTable('user_totp_factors')
+      .set({ locked_until: null, wrong_codes: 0, wrong_since: null })
+      .where('user_id', '=', userId)
+      .execute();
+  }
+
+  /** Open step-two tokens of the person are used up, so none outlives an email change or an authenticator reset. */
+  async spendTokens(tx: Tx, userId: string, now: Date): Promise<void> {
+    await tx
+      .updateTable('mfa_challenges')
+      .set({ used_at: now })
+      .where('user_id', '=', userId)
+      .where('used_at', 'is', null)
+      .execute();
+  }
 }

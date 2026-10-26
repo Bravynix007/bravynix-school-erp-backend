@@ -16,6 +16,7 @@ export async function clearLoginState(db: Kysely<unknown>): Promise<void> {
     'otp_challenges',
     'public_call_counters',
     'login_lockouts',
+    'login_unlocks',
   ]) {
     await sql`delete from ${sql.table(table)}`.execute(db);
   }

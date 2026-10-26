@@ -2,19 +2,14 @@ import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query } from 
 import { ApiTags } from '@nestjs/swagger';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { CurrentPrincipal } from '../../common/auth/current-principal.decorator.js';
-import { Policy } from '../../common/auth/policy.decorator.js';
-import { RoleCode } from '../../common/auth/roles.js';
+import { superAdminPolicy } from '../../common/auth/platform-policy.js';
 import type { ApiResult } from '../../common/http/api-result.js';
 import { UuidParamPipe } from '../../common/http/uuid-param.pipe.js';
 import { VersionDto } from '../../common/validation/version.dto.js';
 import { ListInstitutionsQueryDto } from './institution.dto.js';
 import type { InstitutionResource, InstitutionSummary } from './institution.resource.js';
 import { InstitutionService } from './institution.service.js';
-import { PauseDto } from './society.dto.js';
-
-/** The platform policy every route here shares: Super Admin only (API design 10.4c). */
-const superAdmin = (operationId: string, rule: string) =>
-  Policy({ roles: [RoleCode.SuperAdmin], scope: 'platform', operationId, rule });
+import { VersionedReasonDto } from '../../common/validation/reason.dto.js';
 
 /** PLT-19 to PLT-21: Super Admin looks across Societies and pauses one Institution. */
 @ApiTags('Platform: Institutions')
@@ -22,7 +17,7 @@ const superAdmin = (operationId: string, rule: string) =>
 export class PlatformInstitutionController {
   constructor(private readonly institutions: InstitutionService) {}
 
-  @superAdmin('PLT-19', 'Lists Institutions across Societies, with filters and sorting')
+  @superAdminPolicy('PLT-19', 'Lists Institutions across Societies, with filters and sorting')
   @Get()
   list(
     @CurrentPrincipal() principal: Principal,
@@ -31,18 +26,18 @@ export class PlatformInstitutionController {
     return this.institutions.list(principal, query);
   }
 
-  @superAdmin('PLT-20', 'Pauses one Institution’s access with a reason; no data changes')
+  @superAdminPolicy('PLT-20', 'Pauses one Institution’s access with a reason; no data changes')
   @HttpCode(HttpStatus.OK)
   @Post(':institutionId/pause')
   pause(
     @CurrentPrincipal() principal: Principal,
     @Param('institutionId', UuidParamPipe) institutionId: string,
-    @Body() body: PauseDto,
+    @Body() body: VersionedReasonDto,
   ): Promise<InstitutionResource> {
     return this.institutions.pause(principal, institutionId, body);
   }
 
-  @superAdmin('PLT-21', 'Resumes a paused Institution')
+  @superAdminPolicy('PLT-21', 'Resumes a paused Institution')
   @HttpCode(HttpStatus.OK)
   @Post(':institutionId/resume')
   resume(

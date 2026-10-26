@@ -3,7 +3,6 @@ import {
   requireActive,
   requirePausable,
   requireResumable,
-  requireVersion,
   RESUME_COLUMNS,
   type TenantRootRow,
 } from './record-rules.js';
@@ -17,17 +16,6 @@ const row = (overrides: Partial<TenantRootRow> = {}): TenantRootRow => ({
 const paused = new Date('2026-10-26T10:00:00.000Z');
 
 describe('record rules', () => {
-  it('answers a stale version with the current one', () => {
-    expect(() => requireVersion(row(), 3)).not.toThrow();
-    expect(() => requireVersion(row(), 2)).toThrow(
-      expect.objectContaining({
-        status: 409,
-        code: 'VERSION_CONFLICT',
-        options: { details: { currentVersion: 3 } },
-      }),
-    );
-  });
-
   it('refuses a deactivated record', () => {
     expect(() => requireActive(row())).not.toThrow();
     expect(() => requireActive(row({ status: 0 }))).toThrow(

@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { requireVersion } from '../../common/http/require-version.js';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { RoleCode } from '../../common/auth/roles.js';
 import { ApiResult } from '../../common/http/api-result.js';
@@ -12,7 +13,10 @@ import { Clock } from '../../common/time/clock.js';
 import { AuditService, type AuditValues } from '../audit/index.js';
 import {
   DatabaseService,
+  duplicateOn,
   insertStamp,
+  isDuplicateOn,
+  platformTenant,
   updateStamp,
   type TenantContext,
   type Tx,
@@ -38,20 +42,17 @@ import {
   type InstitutionResource,
   type InstitutionSummary,
 } from './institution.resource.js';
-import { platformTenant } from './platform-tenant.js';
 import { addressColumns, contactColumns } from './profile-columns.js';
 import {
   pauseColumns,
   requireActive,
   requirePausable,
   requireResumable,
-  requireVersion,
   RESUME_COLUMNS,
 } from './record-rules.js';
 import { ScopeService } from './scope.service.js';
-import type { PauseDto } from './society.dto.js';
+import type { VersionedReasonDto } from '../../common/validation/reason.dto.js';
 import { SocietyRepository } from './society.repository.js';
-import { isDuplicateOn, duplicateOn } from './duplicate.js';
 
 /** Why the Admin grants of a deactivated Institution were revoked. */
 export const INSTITUTION_DEACTIVATED = 'institution_deactivated';
@@ -260,7 +261,11 @@ export class InstitutionService {
   }
 
   /** PLT-20. */
-  async pause(principal: Principal, id: string, body: PauseDto): Promise<InstitutionResource> {
+  async pause(
+    principal: Principal,
+    id: string,
+    body: VersionedReasonDto,
+  ): Promise<InstitutionResource> {
     const tenant = await this.tenantFor(principal, id);
     const row = await this.database.transaction(tenant, async (tx) => {
       const current = await this.lockedAt(tx, id, body.version);

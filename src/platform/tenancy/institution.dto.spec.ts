@@ -1,22 +1,5 @@
-import { createValidationPipe } from '../../common/validation/validation.js';
-import { AppException, type FieldError } from '../../common/http/app-exception.js';
+import { body, problems } from '../../../test/support/dto-validation.js';
 import { CreateInstitutionDto, UpdateInstitutionDto } from './institution.dto.js';
-
-const pipe = createValidationPipe();
-const body = <T>(metatype: new () => T, value: unknown) =>
-  pipe.transform(value, { type: 'body', metatype }) as Promise<T>;
-
-async function problems(work: Promise<unknown>): Promise<Pick<FieldError, 'field' | 'code'>[]> {
-  try {
-    await work;
-  } catch (error) {
-    if (error instanceof AppException) {
-      return (error.options.errors ?? []).map(({ field, code }) => ({ field, code }));
-    }
-    throw error;
-  }
-  return [];
-}
 
 const valid = { name: 'Green Valley', code: 'GVS', address: { line1: '12 Lake Road' } };
 

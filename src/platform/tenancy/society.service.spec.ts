@@ -4,8 +4,9 @@ import { AppException } from '../../common/http/app-exception.js';
 import { FixedClock } from '../../common/time/clock.js';
 import type { AuditService } from '../audit/index.js';
 import type { DatabaseService, Tx } from '../database/index.js';
-import type { GrantDirectory, PersonDirectory } from '../identity/index.js';
+import type { GrantDirectory, GrantedPerson, PersonDirectory } from '../identity/index.js';
 import type { ListSocietiesQueryDto, UpdateSocietyDto } from './society.dto.js';
+import type { SocietyOwnerService } from './society-owner.service.js';
 import type { SocietyRepository, SocietyRow } from './society.repository.js';
 import { SOCIETY_DEACTIVATED, SocietyService } from './society.service.js';
 
@@ -55,17 +56,41 @@ function build(current: SocietyRow | null = society()) {
   const endAccessInSociety = vi
     .fn<GrantDirectory['endAccessInSociety']>()
     .mockResolvedValue({ grantsRevoked: 2, sessionsEnded: 1 });
+  const granted: GrantedPerson = {
+    id: 'owner-1',
+    email: 'asha@example.com',
+    displayName: 'Asha',
+    seatNo: 1,
+    created: true,
+  };
+  const addIn = vi.fn<SocietyOwnerService['addIn']>().mockResolvedValue(granted);
+  const welcome = vi.fn<SocietyOwnerService['welcome']>();
+  const societyOwners = vi.fn<GrantDirectory['societyOwners']>().mockResolvedValue([]);
   const service = new SocietyService(
     { transaction } as unknown as DatabaseService,
     { find, update, insert, page } as unknown as SocietyRepository,
     {
       describe: vi.fn<PersonDirectory['describe']>().mockResolvedValue(new Map()),
     } as unknown as PersonDirectory,
-    { endAccessInSociety } as unknown as GrantDirectory,
+    { endAccessInSociety, societyOwners } as unknown as GrantDirectory,
+    { addIn, welcome } as unknown as SocietyOwnerService,
     { record } as unknown as AuditService,
     new FixedClock('2026-10-26T10:00:00.000Z'),
   );
-  return { service, transaction, find, update, insert, page, record, endAccessInSociety, tx };
+  return {
+    service,
+    transaction,
+    find,
+    update,
+    insert,
+    page,
+    record,
+    endAccessInSociety,
+    addIn,
+    welcome,
+    granted,
+    tx,
+  };
 }
 
 async function refusal(work: Promise<unknown>): Promise<AppException> {
@@ -234,6 +259,29 @@ describe('SocietyService', () => {
       const failure = Object.assign(new Error('boom'), { code: '23505', constraint: 'uq_other' });
       t.insert.mockRejectedValue(failure);
       await expect(t.service.create(principal, { name: 'X', code: 'x' })).rejects.toBe(failure);
+    });
+
+    it('adds the first Owners in the same transaction and welcomes them after it', async () => {
+      const t = build();
+      const first = { email: 'asha@example.com' };
+      const second = { email: 'ravi@example.com', firstName: 'Ravi' };
+      const created = await t.service.create(principal, {
+        name: 'X',
+        code: 'x',
+        owners: [first, second],
+      });
+      expect(t.addIn).toHaveBeenCalledTimes(2);
+      expect(t.addIn).toHaveBeenNthCalledWith(1, t.tx, principal, expect.anything(), first);
+      expect(t.addIn).toHaveBeenNthCalledWith(2, t.tx, principal, expect.anything(), second);
+      expect(t.welcome).toHaveBeenCalledTimes(2);
+      expect(created).toMatchObject({ institutions: [], owners: [] });
+    });
+
+    it('adds no Owner when none are named', async () => {
+      const t = build();
+      await t.service.create(principal, { name: 'X', code: 'x' });
+      expect(t.addIn).not.toHaveBeenCalled();
+      expect(t.welcome).not.toHaveBeenCalled();
     });
 
     it('stamps the author on a new row, in the Society named by its own new ID', async () => {

@@ -153,6 +153,8 @@ describe('PLT-02 to PLT-08 Societies', () => {
         status: 1,
         accessPause: null,
         institutionCount: 0,
+        institutions: [],
+        owners: [],
         version: 1,
         createdBy: { id: superAdmin.id, displayName: expect.any(String), roleName: 'Super Admin' },
         createdAt: expect.stringMatching(/Z$/),

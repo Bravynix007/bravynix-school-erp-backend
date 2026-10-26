@@ -1,24 +1,30 @@
-import { AppException, type FieldError } from '../../common/http/app-exception.js';
-import { createValidationPipe } from '../../common/validation/validation.js';
-import { CreateSocietyDto, PauseDto, UpdateSocietyDto } from './society.dto.js';
-
-const pipe = createValidationPipe();
-const body = <T>(metatype: new () => T, value: unknown) =>
-  pipe.transform(value, { type: 'body', metatype }) as Promise<T>;
-
-async function problems(work: Promise<unknown>): Promise<Pick<FieldError, 'field' | 'code'>[]> {
-  try {
-    await work;
-  } catch (error) {
-    if (error instanceof AppException) {
-      return (error.options.errors ?? []).map(({ field, code }) => ({ field, code }));
-    }
-    throw error;
-  }
-  return [];
-}
+import { body, problems } from '../../../test/support/dto-validation.js';
+import { CreateSocietyDto, UpdateSocietyDto } from './society.dto.js';
 
 const valid = { name: 'Sunrise Education Trust', code: 'SUN' };
+
+const owner = (n: number) => ({ email: `owner${String(n)}@example.com` });
+
+describe('CreateSocietyDto owners', () => {
+  it('takes one to three Owners by email', async () => {
+    for (const owners of [[owner(1)], [owner(1), owner(2), owner(3)]]) {
+      expect(await problems(body(CreateSocietyDto, { ...valid, owners }))).toEqual([]);
+    }
+  });
+
+  it('refuses none, four, and a bad address, naming the field', async () => {
+    expect(await problems(body(CreateSocietyDto, { ...valid, owners: [] }))).toContainEqual({
+      field: 'owners',
+      code: 'TOO_FEW',
+    });
+    expect(
+      await problems(body(CreateSocietyDto, { ...valid, owners: [1, 2, 3, 4].map(owner) })),
+    ).toContainEqual({ field: 'owners', code: 'TOO_MANY' });
+    expect(
+      await problems(body(CreateSocietyDto, { ...valid, owners: [{ email: 'nope' }] })),
+    ).toContainEqual({ field: 'owners[0].email', code: 'INVALID_FORMAT' });
+  });
+});
 
 describe('CreateSocietyDto', () => {
   it('takes a name and a code alone, and the whole profile', async () => {
@@ -79,21 +85,4 @@ describe('UpdateSocietyDto', () => {
       });
     },
   );
-});
-
-describe('PauseDto', () => {
-  it('needs a reason of 1 to 500 characters and the version', async () => {
-    expect(await problems(body(PauseDto, { version: 1, reason: 'Dues' }))).toEqual([]);
-    for (const value of [
-      { version: 1 },
-      { version: 1, reason: '' },
-      { version: 1, reason: 'r'.repeat(501) },
-    ]) {
-      expect(await problems(body(PauseDto, value))).not.toEqual([]);
-    }
-    expect(await problems(body(PauseDto, { reason: 'x' }))).toContainEqual({
-      field: 'version',
-      code: 'INVALID_TYPE',
-    });
-  });
 });

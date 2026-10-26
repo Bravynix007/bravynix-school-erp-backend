@@ -163,8 +163,10 @@ export class IdentityRepository {
       select greatest(
         (select max(locked_until) from otp_challenges
           where email_hmac = ${emailHmac} and locked_until > ${now}),
-        (select max(locked_until) from login_lockouts
-          where email_hmac = ${emailHmac} and locked_until > ${now})
+        (select max(lockout.locked_until) from login_lockouts lockout
+          where lockout.email_hmac = ${emailHmac} and lockout.locked_until > ${now}
+            and not exists (select 1 from login_unlocks unlock
+              where unlock.email_hmac = lockout.email_hmac and unlock.created_at >= lockout.created_at))
       ) as until`.execute(tx);
     return rows[0]?.until ?? null;
   }
@@ -266,6 +268,34 @@ export class IdentityRepository {
       .where('email_hmac', '=', emailHmac)
       .where('created_at', '>', since)
       .execute();
+  }
+
+  /**
+   * Lifts the lock on this email and the person's counters (support unlock). The
+   * lockouts stay and an unlock row is recorded beside them, so they still count
+   * towards the 24-hour rule. Returns whether a lock was in force.
+   */
+  async liftLoginLock(
+    tx: Tx,
+    unlock: { emailHmac: Buffer; user: { id: string; lockedUntil: Date | null }; by: string },
+    now: Date,
+  ): Promise<boolean> {
+    const held = [
+      await this.activeChallengeLock(tx, unlock.emailHmac, now),
+      unlock.user.lockedUntil,
+    ].some((until) => until !== null && until > now);
+    await tx
+      .insertInto('login_unlocks')
+      .values({ email_hmac: unlock.emailHmac, unlocked_by: unlock.by, created_at: now })
+      .execute();
+    await tx
+      .updateTable('otp_challenges')
+      .set({ locked_until: now })
+      .where('email_hmac', '=', unlock.emailHmac)
+      .where('locked_until', '>', now)
+      .execute();
+    await this.clearFailures(tx, unlock.user.id);
+    return held;
   }
 
   /** A correct code: it is used up and any other live code for the email is replaced. */

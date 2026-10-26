@@ -2,6 +2,7 @@ import type { AuditLogsTable } from '../audit/audit.tables.js';
 import type {
   AuthSessionsTable,
   LoginLockoutsTable,
+  LoginUnlocksTable,
   MfaChallengesTable,
   OtpChallengesTable,
   PublicCallCountersTable,
@@ -26,6 +27,7 @@ export interface Database {
   auth_sessions: AuthSessionsTable;
   refresh_tokens: RefreshTokensTable;
   login_lockouts: LoginLockoutsTable;
+  login_unlocks: LoginUnlocksTable;
   user_totp_factors: UserTotpFactorsTable;
   mfa_challenges: MfaChallengesTable;
   societies: SocietiesTable;
