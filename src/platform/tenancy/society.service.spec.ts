@@ -319,6 +319,20 @@ describe('SocietyService', () => {
       }
     });
 
+    it('does not resume a Society that was deactivated while paused', async () => {
+      const t = build(
+        society({
+          status: 0,
+          access_paused_at: new Date(),
+          access_paused_by: 'a',
+          access_pause_reason: 'x',
+        }),
+      );
+      const error = await refusal(t.service.resume(principal, 'society-1', { version: 2 }));
+      expect(error.code).toBe('INVALID_STATE');
+      expect(t.update).not.toHaveBeenCalled();
+    });
+
     it('resumes a paused Society and refuses one that is not paused', async () => {
       const paused = society({
         access_paused_at: new Date(),

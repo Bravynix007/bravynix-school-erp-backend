@@ -265,6 +265,7 @@ export class SocietyService {
   async resume(principal: Principal, id: string, body: VersionDto): Promise<SocietyResource> {
     const row = await this.database.transaction(platformTenant(principal, id), async (tx) => {
       const current = await this.lockedAt(tx, id, body.version);
+      this.requireActive(current);
       if (current.access_paused_at === null) throw AppException.conflict(ErrorCode.INVALID_STATE);
       await this.societies.update(tx, id, {
         access_paused_at: null,
