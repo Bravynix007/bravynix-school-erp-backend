@@ -7,6 +7,8 @@ import { TokenService } from '../../src/platform/identity/token.service.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { institutions, personaByKey, societies } from '../../src/seeds/two-worlds.js';
 import { FixtureModule } from '../support/fixture.module.js';
+import { clearLoginState } from '../support/login-state.js';
+import { signInMobile } from '../support/sessions.js';
 import { createTestApp, type TestApp } from '../support/test-app.js';
 
 const migrationUrl = process.env.TEST_DATABASE_MIGRATION_URL!;
@@ -18,11 +20,11 @@ const superAdmin = personaByKey('SA1');
 const societyA = societies.find((s) => s.key === 'A')!;
 const societyB = societies.find((s) => s.key === 'B')!;
 const institutionB = institutions.find((i) => i.key === 'B1')!;
-const device = { platform: 1, label: 'Pixel 8', appVersion: '1.4.0' };
 
 describe('AUTH-06 switch context and ME-01', () => {
   let ownerDb: Kysely<unknown>;
   let t: TestApp;
+  const signIn = (email: string) => signInMobile(t, email);
   let otp: OtpService;
 
   const rows = async <T = Record<string, unknown>>(query: RawBuilder<unknown>): Promise<T[]> =>
@@ -32,21 +34,6 @@ describe('AUTH-06 switch context and ME-01', () => {
   const me = (token: string) => call('get', '/v1/me', token);
   const switchTo = (token: string, body: Record<string, unknown>) =>
     call('post', '/v1/auth/context', token, body);
-
-  async function signIn(email: string) {
-    await request(t.app.getHttpServer())
-      .post('/v1/auth/otp')
-      .send({ email, clientType: 1 })
-      .expect(202);
-    await otp.flush();
-    const code = t.email.latest(email, 'otp')!.variables!.code as string;
-    const res = await request(t.app.getHttpServer())
-      .post('/v1/auth/otp/verify')
-      .send({ email, code, clientType: 1, device })
-      .expect(200);
-    t.clock.advance(61_000);
-    return res.body.data;
-  }
 
   /** Gives the owner a second context: Institution Admin in Society B. */
   const grantSecondContext = () =>
@@ -85,11 +72,7 @@ describe('AUTH-06 switch context and ME-01', () => {
   });
 
   beforeEach(async () => {
-    await sql`delete from refresh_tokens`.execute(ownerDb);
-    await sql`delete from auth_sessions`.execute(ownerDb);
-    await sql`delete from otp_challenges`.execute(ownerDb);
-    await sql`delete from public_call_counters`.execute(ownerDb);
-    await sql`delete from login_lockouts`.execute(ownerDb);
+    await clearLoginState(ownerDb);
     await sql`delete from role_assignments where user_id in (${owner.id}, ${admin.id}) and role_code = 3`.execute(
       ownerDb,
     );

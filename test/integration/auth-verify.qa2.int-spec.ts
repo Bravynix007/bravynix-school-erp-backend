@@ -8,6 +8,7 @@ import { BackgroundMailer } from '../../src/platform/identity/background-mailer.
 import { OtpService } from '../../src/platform/identity/otp.service.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { personaByKey } from '../../src/seeds/two-worlds.js';
+import { clearLoginState } from '../support/login-state.js';
 import { createTestApp, type TestApp } from '../support/test-app.js';
 
 const migrationUrl = process.env.TEST_DATABASE_MIGRATION_URL!;
@@ -30,15 +31,7 @@ function visible(res: request.Response): unknown {
 }
 
 async function clean(): Promise<void> {
-  for (const table of [
-    'refresh_tokens',
-    'auth_sessions',
-    'otp_challenges',
-    'public_call_counters',
-    'login_lockouts',
-  ]) {
-    await sql`delete from ${sql.table(table)}`.execute(owner);
-  }
+  await clearLoginState(owner);
   await sql`update users set locked_until = null, failed_login_count = 0`.execute(owner);
 }
 

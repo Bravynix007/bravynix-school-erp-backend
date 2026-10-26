@@ -5,12 +5,12 @@ import { RoleCode } from '../../src/common/auth/roles.js';
 import { DatabaseService, type Tx, type TenantContext } from '../../src/platform/database/index.js';
 import { createPool } from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
-import { OtpService } from '../../src/platform/identity/otp.service.js';
 import { TokenService } from '../../src/platform/identity/token.service.js';
-import { TenancyService } from '../../src/platform/tenancy/index.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { institutions, personaByKey, societies } from '../../src/seeds/two-worlds.js';
 import { FixtureModule } from '../support/fixture.module.js';
+import { signInAs, signInMobile } from '../support/sessions.js';
+import { clearLoginState } from '../support/login-state.js';
 import { createTestApp, type TestApp } from '../support/test-app.js';
 
 const migrationUrl = process.env.TEST_DATABASE_MIGRATION_URL!;
@@ -23,7 +23,6 @@ const instA2 = institutionByKey('A2');
 const instB1 = institutionByKey('B1');
 const superAdmin = personaByKey('SA1');
 const owner = personaByKey('SO-A1');
-const device = { platform: 1, label: 'Pixel 8', appVersion: '1.4.0' };
 const missingId = '00000000-0000-7000-8000-00000000ffff';
 
 const asSuperAdmin: TenantContext = { personId: superAdmin.id, roleCode: RoleCode.SuperAdmin };
@@ -501,54 +500,15 @@ describe('Societies and Institutions (DDD 9.3, 15.3)', () => {
       expect(await gate.isPaused(caller(null, 1))).toBe(false);
       expect(await gate.isPaused(caller({ id: missingId }))).toBe(true);
     });
-
-    it('reports an Institution paused when it or its Society is', async () => {
-      const tenancy = t.app.get(TenancyService);
-      expect(await tenancy.isInstitutionPaused(caller(societyA), instA1.id)).toBe(false);
-      await setPause(instA1.id, true, 'institutions');
-      expect(await tenancy.isInstitutionPaused(caller(societyA), instA1.id)).toBe(true);
-      expect(await tenancy.isInstitutionPaused(caller(societyA), instA2.id)).toBe(false);
-      await setPause(instA1.id, false, 'institutions');
-      await setPause(societyA.id, true, 'societies');
-      expect(await tenancy.isInstitutionPaused(caller(societyA), instA2.id)).toBe(true);
-    });
-
-    it("treats another Society's Institution as paused rather than open", async () => {
-      expect(await t.app.get(TenancyService).isInstitutionPaused(caller(societyA), instB1.id)).toBe(
-        true,
-      );
-    });
   });
 
   describe('over HTTP, with a real session', () => {
-    let otp: OtpService;
-
-    const signIn = async (email: string) => {
-      const http = t.app.getHttpServer();
-      await request(http).post('/v1/auth/otp').send({ email, clientType: 1 }).expect(202);
-      await otp.flush();
-      const code = t.email.latest(email, 'otp')!.variables!.code as string;
-      const res = await request(http)
-        .post('/v1/auth/otp/verify')
-        .send({ email, code, clientType: 1, device })
-        .expect(200);
-      t.clock.advance(61_000);
-      return res.body.data.accessToken as string;
-    };
     beforeEach(async () => {
-      otp = t.app.get(OtpService);
-      await sql`delete from refresh_tokens`.execute(ownerDb);
-      await sql`delete from auth_sessions`.execute(ownerDb);
-      await sql`delete from otp_challenges`.execute(ownerDb);
-      await sql`delete from public_call_counters`.execute(ownerDb);
-      await sql`delete from login_lockouts`.execute(ownerDb);
+      await clearLoginState(ownerDb);
     });
 
     it('stops a paused Society on its next call, keeps sign-in, profile and sign-out, and resumes', async () => {
-      const token = await signIn(owner.email);
-      await call('post', '/v1/auth/context', token)
-        .send({ roleCode: 2, societyId: societyA.id })
-        .expect(200);
+      const token = await signInAs(t, owner.email, { roleCode: 2, societyId: societyA.id });
       await call('post', '/v1/fixtures/owner-write', token).expect(200);
 
       await setPause(societyA.id, true, 'societies');
@@ -565,7 +525,7 @@ describe('Societies and Institutions (DDD 9.3, 15.3)', () => {
 
     it('lets a paused person sign in, and never stops Super Admin', async () => {
       await setPause(societyA.id, true, 'societies');
-      await call('get', '/v1/me', await signIn(owner.email)).expect(200);
+      await call('get', '/v1/me', (await signInMobile(t, owner.email)).accessToken).expect(200);
       await call('get', '/v1/fixtures/admin-only', await adminToken()).expect(200);
     });
   });

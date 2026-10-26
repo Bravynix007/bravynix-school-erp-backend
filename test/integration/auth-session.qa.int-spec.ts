@@ -7,37 +7,22 @@ import { runMigrations } from '../../src/platform/database/migrator.js';
 import { OtpService } from '../../src/platform/identity/otp.service.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { personaByKey } from '../../src/seeds/two-worlds.js';
+import { clearLoginState } from '../support/login-state.js';
+import { signInMobile } from '../support/sessions.js';
 import { createTestApp, type TestApp } from '../support/test-app.js';
 
 const migrationUrl = process.env.TEST_DATABASE_MIGRATION_URL!;
 let owner: Kysely<unknown>;
 const person = personaByKey('SO-A1').email;
-const device = { platform: 1, label: 'Pixel 8', appVersion: '1.4.0' };
 
 describe('QA: AUTH-05, AUTH-07, AUTH-08', () => {
   let t: TestApp;
+  const signIn = (email: string, ip = '203.0.113.7') => signInMobile(t, email, ip);
   const server = () => t.app.getHttpServer();
   const refresh = (refreshToken: string, ip = '203.0.113.7') =>
     request(server()).post('/v1/auth/refresh').set('X-Forwarded-For', ip).send({ refreshToken });
   const call = (path: string, token: string) =>
     request(server()).post(path).set('Authorization', `Bearer ${token}`).send({});
-
-  async function signIn(email: string, ip = '203.0.113.7') {
-    await request(server())
-      .post('/v1/auth/otp')
-      .set('X-Forwarded-For', ip)
-      .send({ email, clientType: 1 })
-      .expect(202);
-    await t.app.get(OtpService).flush();
-    const code = t.email.latest(email, 'otp')!.variables!.code as string;
-    const res = await request(server())
-      .post('/v1/auth/otp/verify')
-      .set('X-Forwarded-For', ip)
-      .send({ email, code, clientType: 1, device })
-      .expect(200);
-    t.clock.advance(61_000);
-    return res.body.data as { accessToken: string; refreshToken: string; session: { id: string } };
-  }
 
   beforeAll(async () => {
     await runMigrations(migrationUrl, 'latest');
@@ -50,15 +35,7 @@ describe('QA: AUTH-05, AUTH-07, AUTH-08', () => {
     await owner.destroy();
   });
   beforeEach(async () => {
-    for (const table of [
-      'refresh_tokens',
-      'auth_sessions',
-      'otp_challenges',
-      'public_call_counters',
-      'login_lockouts',
-    ]) {
-      await sql`delete from ${sql.table(table)}`.execute(owner);
-    }
+    await clearLoginState(owner);
     await sql`update users set locked_until = null, failed_login_count = 0`.execute(owner);
     process.env.TRUST_PROXY = '1';
     t = await createTestApp({ captureLogs: true });

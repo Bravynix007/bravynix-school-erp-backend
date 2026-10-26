@@ -8,6 +8,7 @@ import { runMigrations } from '../../src/platform/database/migrator.js';
 import { OtpService } from '../../src/platform/identity/otp.service.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { personaByKey } from '../../src/seeds/two-worlds.js';
+import { clearLoginState } from '../support/login-state.js';
 import { createTestApp, type TestApp } from '../support/test-app.js';
 
 const migrationUrl = process.env.TEST_DATABASE_MIGRATION_URL!;
@@ -62,11 +63,7 @@ describe('QA: AUTH-02', () => {
     await owner.destroy();
   });
   beforeEach(async () => {
-    await sql`delete from refresh_tokens`.execute(owner);
-    await sql`delete from auth_sessions`.execute(owner);
-    await sql`delete from otp_challenges`.execute(owner);
-    await sql`delete from public_call_counters`.execute(owner);
-    await sql`delete from login_lockouts`.execute(owner);
+    await clearLoginState(owner);
     await sql`update users set locked_until = null, failed_login_count = 0`.execute(owner);
     process.env.TRUST_PROXY = '1';
     t = await createTestApp({ captureLogs: true });
@@ -132,9 +129,7 @@ describe('QA: AUTH-02', () => {
     it('registered, unknown, Inactive and Blocked: the same answers through the whole lock sequence', async () => {
       const runs: unknown[][] = [];
       for (const email of [parent, unknown, inactive, blocked]) {
-        await sql`delete from otp_challenges`.execute(owner);
-        await sql`delete from public_call_counters`.execute(owner);
-        await sql`delete from login_lockouts`.execute(owner);
+        await clearLoginState(owner);
         const steps: unknown[] = [];
         const code = await codeFor(email);
         for (let i = 0; i < 6; i += 1) steps.push(visible(await verify(email, wrongFor(code))));

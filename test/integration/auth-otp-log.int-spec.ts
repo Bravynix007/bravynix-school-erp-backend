@@ -1,10 +1,11 @@
-import { Kysely, PostgresDialect, sql } from 'kysely';
+import { Kysely, PostgresDialect } from 'kysely';
 import request from 'supertest';
 import { createPool } from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
 import { OtpService } from '../../src/platform/identity/otp.service.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { personaByKey } from '../../src/seeds/two-worlds.js';
+import { clearLoginState } from '../support/login-state.js';
 import { createTestApp, type TestApp } from '../support/test-app.js';
 
 const migrationUrl = process.env.TEST_DATABASE_MIGRATION_URL!;
@@ -22,8 +23,7 @@ describe('AUTH-01 when the mail cannot be sent', () => {
       dialect: new PostgresDialect({ pool: createPool(migrationUrl, 2, 30_000) }),
     });
     await writeIdentitySeed(owner);
-    await sql`delete from otp_challenges`.execute(owner);
-    await sql`delete from public_call_counters`.execute(owner);
+    await clearLoginState(owner);
     t = await createTestApp({ captureLogs: true });
   });
 

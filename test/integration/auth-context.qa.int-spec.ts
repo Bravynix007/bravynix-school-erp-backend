@@ -7,6 +7,8 @@ import { OtpService } from '../../src/platform/identity/otp.service.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { institutions, personaByKey, societies } from '../../src/seeds/two-worlds.js';
 import { FixtureModule } from '../support/fixture.module.js';
+import { clearLoginState } from '../support/login-state.js';
+import { signInMobile } from '../support/sessions.js';
 import { createTestApp, type TestApp } from '../support/test-app.js';
 
 const migrationUrl = process.env.TEST_DATABASE_MIGRATION_URL!;
@@ -15,7 +17,6 @@ const owner = personaByKey('SO-A1');
 const societyA = societies.find((s) => s.key === 'A')!;
 const societyB = societies.find((s) => s.key === 'B')!;
 const institutionB = institutions.find((i) => i.key === 'B1')!;
-const device = { platform: 1, label: 'Pixel 8', appVersion: '1.4.0' };
 
 const auditCount = async (action: string) => {
   let n = 0;
@@ -36,25 +37,11 @@ const auditCount = async (action: string) => {
 
 describe('QA: AUTH-06 and ME-01', () => {
   let t: TestApp;
+  const signIn = (email: string) => signInMobile(t, email);
   const call = (method: 'get' | 'post', path: string, token: string, body: object = {}) =>
     request(t.app.getHttpServer())[method](path).set('Authorization', `Bearer ${token}`).send(body);
   const switchTo = (token: string, body: Record<string, unknown>) =>
     call('post', '/v1/auth/context', token, body);
-
-  async function signIn(email: string) {
-    await request(t.app.getHttpServer())
-      .post('/v1/auth/otp')
-      .send({ email, clientType: 1 })
-      .expect(202);
-    await t.app.get(OtpService).flush();
-    const code = t.email.latest(email, 'otp')!.variables!.code as string;
-    const res = await request(t.app.getHttpServer())
-      .post('/v1/auth/otp/verify')
-      .send({ email, code, clientType: 1, device })
-      .expect(200);
-    t.clock.advance(61_000);
-    return res.body.data;
-  }
 
   beforeAll(async () => {
     await runMigrations(migrationUrl, 'latest');
@@ -74,15 +61,7 @@ describe('QA: AUTH-06 and ME-01', () => {
     await db.destroy();
   });
   beforeEach(async () => {
-    for (const table of [
-      'refresh_tokens',
-      'auth_sessions',
-      'otp_challenges',
-      'public_call_counters',
-      'login_lockouts',
-    ]) {
-      await sql`delete from ${sql.table(table)}`.execute(db);
-    }
+    await clearLoginState(db);
     await sql`delete from role_assignments where user_id = ${owner.id} and role_code = 3`.execute(
       db,
     );

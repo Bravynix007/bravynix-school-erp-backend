@@ -8,6 +8,7 @@ import { OtpService } from '../../src/platform/identity/otp.service.js';
 import { TokenService } from '../../src/platform/identity/token.service.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { personaByKey, societies } from '../../src/seeds/two-worlds.js';
+import { clearLoginState } from '../support/login-state.js';
 import { createTestApp, type TestApp } from '../support/test-app.js';
 
 const migrationUrl = process.env.TEST_DATABASE_MIGRATION_URL!;
@@ -121,11 +122,7 @@ describe('AUTH-02 verify the code', () => {
   });
 
   beforeEach(async () => {
-    await sql`delete from refresh_tokens`.execute(ownerDb);
-    await sql`delete from auth_sessions`.execute(ownerDb);
-    await sql`delete from otp_challenges`.execute(ownerDb);
-    await sql`delete from public_call_counters`.execute(ownerDb);
-    await sql`delete from login_lockouts`.execute(ownerDb);
+    await clearLoginState(ownerDb);
     await sql`update users set locked_until = null, failed_login_count = 0, first_login_at = null, last_login_at = null`.execute(
       ownerDb,
     );

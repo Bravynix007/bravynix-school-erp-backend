@@ -547,9 +547,11 @@ describe('tenant tables (DDD 15.3 checks in the build)', () => {
    * Identity tables are global (DDD 15.3 "None"): the login reads a person's
    * grants before any Society is known. `role_assignments` names a Society as
    * the scope of a grant; it is not a tenant row. The list stays short and
-   * explicit so a new table cannot slip out of the check.
+   * explicit so a new table cannot slip out of the check. Any column ending in
+   * `society_id` or `institution_id` counts, so `target_society_id` is caught too;
+   * `auth_sessions.active_society_id` is the session's own choice of context.
    */
-  const globalIdentityTables = ['role_assignments'];
+  const globalIdentityTables = ['role_assignments', 'auth_sessions'];
   /** The Society is its own tenant, so `societies` has an `id` where others have a `society_id`. */
   const tenantRoots = ['societies'];
 
@@ -566,7 +568,7 @@ describe('tenant tables (DDD 15.3 checks in the build)', () => {
           c.relname = any (${tenantRoots})
           or exists (
             select 1 from pg_attribute a
-            where a.attrelid = c.oid and a.attname in ('society_id', 'institution_id') and not a.attisdropped
+            where a.attrelid = c.oid and a.attname ~ '(^|_)(society|institution)_id$' and not a.attisdropped
           )
         )
       order by c.relname
