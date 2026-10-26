@@ -52,6 +52,7 @@ describe('parseEnv', () => {
       EMAIL_DRIVER: 'smtp',
       SMTP_URL: 'smtp://x',
       OTP_HMAC_SECRET: SECRET,
+      JWT_SIGNING_KEY: 'pem',
     };
     expect(() => parseEnv(deployed)).toThrow(/EMAIL_FROM/);
     for (const bad of ['', 'no-reply', 'BravyNix <no-reply@bravynix>', 'a b@bravynix.in']) {
@@ -79,7 +80,16 @@ describe('parseEnv', () => {
     it('needs a secret of at least 32 characters in staging and production', () => {
       expect(() => parseEnv(deployed)).toThrow(/OTP_HMAC_SECRET/);
       expect(() => parseEnv({ ...deployed, OTP_HMAC_SECRET: 'short' })).toThrow(/OTP_HMAC_SECRET/);
-      expect(parseEnv({ ...deployed, OTP_HMAC_SECRET: SECRET }).OTP_HMAC_SECRET).toBe(SECRET);
+      expect(
+        parseEnv({ ...deployed, OTP_HMAC_SECRET: SECRET, JWT_SIGNING_KEY: 'pem' }).OTP_HMAC_SECRET,
+      ).toBe(SECRET);
+    });
+
+    it('needs a token signing key in staging and production only', () => {
+      const withSecret = { ...deployed, OTP_HMAC_SECRET: SECRET };
+      expect(() => parseEnv(withSecret)).toThrow(/JWT_SIGNING_KEY/);
+      expect(parseEnv({ ...withSecret, JWT_SIGNING_KEY: 'pem' }).JWT_KEY_ID).toBe('k1');
+      expect(parseEnv({ ...base }).JWT_SIGNING_KEY).toBeUndefined();
     });
 
     it('does not need a secret in development, and echo is off by default', () => {
@@ -93,7 +103,13 @@ describe('parseEnv', () => {
       expect(parseEnv({ ...base, NODE_ENV: 'test', OTP_DEV_ECHO: 'true' }).OTP_DEV_ECHO).toBe(true);
       for (const NODE_ENV of ['staging', 'production']) {
         expect(() =>
-          parseEnv({ ...deployed, NODE_ENV, OTP_HMAC_SECRET: SECRET, OTP_DEV_ECHO: 'true' }),
+          parseEnv({
+            ...deployed,
+            NODE_ENV,
+            OTP_HMAC_SECRET: SECRET,
+            JWT_SIGNING_KEY: 'pem',
+            OTP_DEV_ECHO: 'true',
+          }),
         ).toThrow(/OTP_DEV_ECHO/);
       }
     });

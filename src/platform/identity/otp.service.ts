@@ -1,24 +1,19 @@
-import { HttpStatus, Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
-import { isIP } from 'node:net';
+import { HttpStatus, Injectable } from '@nestjs/common';
 import { AppException } from '../../common/http/app-exception.js';
 import { newId } from '../../common/ids/ids.js';
-import { RequestContext } from '../../common/request-context/request-context.js';
 import { Clock } from '../../common/time/clock.js';
 import { AppConfig } from '../../config/app-config.js';
 import { DatabaseService } from '../database/index.js';
-import { EmailSender } from '../email/email-sender.js';
 import { AuthCode, ClientType } from './auth-codes.js';
+import { BackgroundMailer } from './background-mailer.js';
 import { canReceiveCode, IdentityRepository } from './identity.repository.js';
 import { otpEmail } from './otp-email.js';
 import { OtpHasher, generateOtpCode } from './otp-hasher.js';
 import { evaluateOtpRequest, OTP_LIMITS } from './otp-limits.js';
 import { PublicCallLimiter } from './public-call-limiter.js';
-import { withTimeout } from './with-timeout.js';
+import { requestIp } from './request-ip.js';
 
 const NIL_UUID = '00000000-0000-0000-0000-000000000000';
-
-/** SES gets this long before the send is given up on (SDD 11.3). */
-const SEND_TIMEOUT_MS = 3000;
 
 export interface OtpRequest {
   email: string;
@@ -36,14 +31,6 @@ function later(date: Date | null | undefined, other: Date | null | undefined): D
   return date > other ? date : other;
 }
 
-/** Callers send the address Express resolved; drop an IPv6 zone, which `inet` refuses. */
-function requestIp(): string | null {
-  const raw = RequestContext.current()?.ipAddress?.split('%')[0];
-  // A dual-stack socket reports an IPv4 caller as ::ffff:a.b.c.d.
-  const ip = raw?.replace(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i, '$1');
-  return ip && isIP(ip) ? ip : null;
-}
-
 /**
  * AUTH-01: request a login code (API design 10.1).
  *
@@ -54,16 +41,13 @@ function requestIp(): string | null {
  * does not tell the two cases apart either.
  */
 @Injectable()
-export class OtpService implements OnModuleDestroy {
-  private readonly logger = new Logger(OtpService.name);
-  private readonly inFlight = new Set<Promise<void>>();
-
+export class OtpService {
   constructor(
     private readonly database: DatabaseService,
     private readonly repository: IdentityRepository,
     private readonly clock: Clock,
     private readonly config: AppConfig,
-    private readonly email: EmailSender,
+    private readonly mailer: BackgroundMailer,
     private readonly hasher: OtpHasher,
     private readonly limiter: PublicCallLimiter,
   ) {}
@@ -131,44 +115,12 @@ export class OtpService implements OnModuleDestroy {
     });
 
     if (issued === null) return {};
-    this.dispatch(email, issued);
+    this.mailer.send(otpEmail(email, issued));
     return this.config.env.OTP_DEV_ECHO ? { devCode: issued } : {};
   }
 
-  /** Waits for mail still being sent. For tests and a clean shutdown. */
+  /** Waits for mail still being sent. For tests. */
   async flush(): Promise<void> {
-    await Promise.allSettled(this.inFlight);
-  }
-
-  async onModuleDestroy(): Promise<void> {
-    await this.flush();
-  }
-
-  /**
-   * Sends in the background. A failed or slow send is logged without the
-   * address or the code and the answer stays 202 (SDD 11.3); the person can
-   * ask again after the 60-second gap. A retry queue arrives with the Jobs
-   * module.
-   */
-  private dispatch(to: string, code: string): void {
-    const task = withTimeout(
-      this.email.send(otpEmail(to, code)),
-      SEND_TIMEOUT_MS,
-      'EmailTimeout',
-    ).catch((error: unknown) => {
-      this.logger.warn({
-        msg: 'Login code email was not sent',
-        template: 'otp',
-        // The name or our own timeout reason; an SMTP message can hold the address.
-        error:
-          error instanceof Error && error.message === 'EmailTimeout'
-            ? 'EmailTimeout'
-            : error instanceof Error
-              ? error.name
-              : 'unknown',
-      });
-    });
-    this.inFlight.add(task);
-    void task.finally(() => this.inFlight.delete(task));
+    await this.mailer.flush();
   }
 }

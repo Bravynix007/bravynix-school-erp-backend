@@ -62,3 +62,36 @@ export interface PublicCallCountersTable {
   calls: number;
   created_at: Generated<Date>;
 }
+
+export interface LoginLockoutsTable {
+  id: Generated<string>;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  email_hmac: Buffer;
+  locked_until: Date;
+}
+
+export interface AuthSessionsTable {
+  id: string;
+  created_at: Generated<Date>;
+  user_id: string;
+  client_type: number;
+  active_role_code: number | null;
+  active_society_id: string | null;
+  last_used_at: Date;
+  idle_expires_at: Date;
+  absolute_expires_at: Date | null;
+  ended_at: Date | null;
+  end_reason: number | null;
+  ip_address: ColumnType<string | null, string | null, never>;
+  user_agent: string | null;
+  device_label: string | null;
+}
+
+export interface RefreshTokensTable {
+  id: string;
+  created_at: Generated<Date>;
+  session_id: string;
+  token_hmac: Buffer;
+  expires_at: Date;
+  used_at: Date | null;
+}

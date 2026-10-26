@@ -56,6 +56,15 @@ export const envSchema = z
      */
     OTP_HMAC_SECRET: z.string().min(32).optional(),
     /**
+     * The ES256 private key (PKCS#8 PEM, `\n` accepted for line breaks) that
+     * signs access tokens (SDD 13.2). Required in staging and production,
+     * where it comes from Secrets Manager; elsewhere a key is made at start, so
+     * tokens do not survive a restart.
+     */
+    JWT_SIGNING_KEY: z.string().min(1).optional(),
+    /** Names the signing key in the token header, so a rotated key can be told apart. */
+    JWT_KEY_ID: z.string().min(1).max(40).default('k1'),
+    /**
      * Development only: a login code request for a registered account also
      * returns the code, so the app can be tried without a mail server. The
      * process refuses to start with it on in staging or production.
@@ -106,6 +115,13 @@ export const envSchema = z
       ctx.addIssue({
         code: 'custom',
         path: ['OTP_HMAC_SECRET'],
+        message: 'is required in staging and production',
+      });
+    }
+    if (deployed && !env.JWT_SIGNING_KEY) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['JWT_SIGNING_KEY'],
         message: 'is required in staging and production',
       });
     }

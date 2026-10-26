@@ -18,10 +18,24 @@ export const OTP_LIMITS = {
   /** Failed logins in a row that lock an email, and for how long. */
   lockAfterFailures: 5,
   lockSeconds: 30 * 60,
+  /** The lockouts within the window that make the next one a long lock (PRD 5.1). */
+  lockoutsBeforeLongLock: 3,
+  lockoutWindowSeconds: 24 * 3600,
+  longLockSeconds: 24 * 3600,
   /** Unauthenticated requests per IP per minute (Proposed; tuned in the load test). */
   ipRequestsPerMinute: 20,
   ipWindowSeconds: 60,
 } as const;
+
+/**
+ * How long a lockout lasts, given how many lockouts the email has had in the
+ * last 24 hours including this one: 30 minutes, and 24 hours from the third.
+ */
+export function lockSecondsFor(lockoutsInWindow: number): number {
+  return lockoutsInWindow >= OTP_LIMITS.lockoutsBeforeLongLock
+    ? OTP_LIMITS.longLockSeconds
+    : OTP_LIMITS.lockSeconds;
+}
 
 export interface OtpRequestFacts {
   now: Date;

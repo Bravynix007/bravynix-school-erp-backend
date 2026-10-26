@@ -40,7 +40,7 @@ describe('AUTH-01 when the mail cannot be sent', () => {
       .expect(202);
     await t.app.get(OtpService).flush();
     const text = JSON.stringify(t.logs);
-    expect(text).toContain('Login code email was not sent');
+    expect(text).toContain('Email was not sent');
     expect(text).not.toContain(registered);
     expect(text).not.toMatch(/\b\d{6}\b/);
   });
