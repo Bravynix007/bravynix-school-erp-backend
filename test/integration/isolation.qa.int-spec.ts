@@ -7,6 +7,7 @@ import { runMigrations } from '../../src/platform/database/migrator.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { institutions, personaByKey, societies } from '../../src/seeds/two-worlds.js';
 import { FixtureModule } from '../support/fixture.module.js';
+import { clearLoginState } from '../support/login-state.js';
 import { signInAs } from '../support/sessions.js';
 import { createTestApp, type TestApp } from '../support/test-app.js';
 
@@ -52,15 +53,7 @@ describe('QA: tenant scope (B7)', () => {
       dialect: new PostgresDialect({ pool: createPool(migrationUrl, 2, 30_000) }),
     });
     await writeIdentitySeed(db);
-    for (const table of [
-      'refresh_tokens',
-      'auth_sessions',
-      'otp_challenges',
-      'public_call_counters',
-      'login_lockouts',
-    ]) {
-      await sql`delete from ${sql.table(table)}`.execute(db);
-    }
+    await clearLoginState(db);
     for (const id of [a1.id, a2.id]) {
       await sql`insert into role_assignments (user_id, role_code, society_id, institution_id, staff_member_id)
         values (${admin.id}, 3, ${socA.id}, ${id}, gen_random_uuid())`.execute(db);
