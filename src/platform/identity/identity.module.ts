@@ -2,6 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { AccessTokenVerifier } from '../../common/auth/access-token-verifier.js';
 import { AppConfig } from '../../config/app-config.js';
 import { BackgroundMailer } from './background-mailer.js';
+import { GrantDirectory } from './grant-directory.js';
 import { ContextService } from './context.service.js';
 import { MeController } from './me.controller.js';
 import { AuthController } from './auth.controller.js';
@@ -28,6 +29,7 @@ import { TokenService } from './token.service.js';
     SessionTokenVerifier,
     { provide: AccessTokenVerifier, useExisting: SessionTokenVerifier },
     BackgroundMailer,
+    GrantDirectory,
     OtpService,
     PublicCallLimiter,
     {
@@ -43,6 +45,6 @@ import { TokenService } from './token.service.js';
       useFactory: ({ env }: AppConfig) => new OtpHasher(env.OTP_HMAC_SECRET),
     },
   ],
-  exports: [OtpService, PublicCallLimiter, TokenService, AccessTokenVerifier],
+  exports: [OtpService, PublicCallLimiter, TokenService, AccessTokenVerifier, GrantDirectory],
 })
 export class IdentityModule {}
