@@ -19,6 +19,7 @@ import { lockoutEmail } from './lockout-email.js';
 import { OtpHasher } from './otp-hasher.js';
 import { lockSecondsFor, OTP_LIMITS } from './otp-limits.js';
 import { PublicCallLimiter } from './public-call-limiter.js';
+import { MOBILE_SESSION_MS } from './session-rules.js';
 import { requestIp } from './request-ip.js';
 import { SessionRepository, type Grant } from './session.repository.js';
 import type { EmailMessage } from '../email/email-sender.js';
@@ -57,9 +58,6 @@ export interface LoginResult {
   requiredNotices: never[];
 }
 
-const DAY_MS = 24 * 3600 * 1000;
-/** Mobile sessions last 30 days from last use (SDD NFR-14); console sessions arrive with slice B8. */
-const MOBILE_SESSION_MS = 30 * DAY_MS;
 const NO_CODE = Buffer.alloc(32);
 const NIL_UUID = '00000000-0000-0000-0000-000000000000';
 

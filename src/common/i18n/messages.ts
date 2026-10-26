@@ -50,6 +50,11 @@ const en: Catalogue = {
   OTP_ATTEMPTS_EXCEEDED: 'Too many wrong codes, please try again later',
   ACCOUNT_BLOCKED: "This account is blocked and can't access the app",
   CONSOLE_NOT_ALLOWED: 'This account cannot sign in to the console',
+  REFRESH_OK: 'Session renewed',
+  REFRESH_TOKEN_INVALID: 'Please sign in again',
+  REFRESH_TOKEN_REUSED: 'For your safety you have been signed out, please sign in again',
+  LOGOUT_OK: 'You have been signed out',
+  LOGOUT_ALL_OK: 'You have been signed out of every device',
   // Field codes
   REQUIRED: 'This field is required',
   FIELD_NOT_ALLOWED: 'This field is not allowed',

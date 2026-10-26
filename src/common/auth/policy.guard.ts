@@ -47,7 +47,11 @@ export class PolicyGuard implements CanActivate {
       throw AppException.unauthorized(ErrorCode.TOKEN_INVALID);
     }
 
-    if (!policy.roles.includes(principal.roleCode)) throw AppException.forbidden();
+    const allowed =
+      principal.roleCode === null
+        ? policy.allowNoContext === true
+        : policy.roles.includes(principal.roleCode);
+    if (!allowed) throw AppException.forbidden();
     if (principal.viaSupportAccess && !SAFE_METHODS.has(request.method)) {
       throw AppException.forbidden(ErrorCode.SUPPORT_READ_ONLY);
     }
@@ -57,7 +61,7 @@ export class PolicyGuard implements CanActivate {
     if (ctx) {
       ctx.personId = principal.personId;
       ctx.societyId = principal.societyId ?? undefined;
-      ctx.roleCode = principal.roleCode;
+      ctx.roleCode = principal.roleCode ?? undefined;
     }
     return true;
   }

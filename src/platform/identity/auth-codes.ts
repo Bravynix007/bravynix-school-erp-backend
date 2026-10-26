@@ -10,6 +10,11 @@ export const AuthCode = {
   OTP_ATTEMPTS_EXCEEDED: 'OTP_ATTEMPTS_EXCEEDED',
   ACCOUNT_BLOCKED: 'ACCOUNT_BLOCKED',
   CONSOLE_NOT_ALLOWED: 'CONSOLE_NOT_ALLOWED',
+  REFRESH_OK: 'REFRESH_OK',
+  REFRESH_TOKEN_INVALID: 'REFRESH_TOKEN_INVALID',
+  REFRESH_TOKEN_REUSED: 'REFRESH_TOKEN_REUSED',
+  LOGOUT_OK: 'LOGOUT_OK',
+  LOGOUT_ALL_OK: 'LOGOUT_ALL_OK',
 } as const;
 
 /** Client types of API design 10.1. */
@@ -31,6 +36,21 @@ export const SessionEndReason = {
   EmailChanged: 7,
 } as const;
 export type SessionEndReason = (typeof SessionEndReason)[keyof typeof SessionEndReason];
+
+/** The `reason` a client reads in a 401 `SESSION_ENDED` (API design 6.4), by `end_reason`. */
+const END_REASON_NAMES: Record<number, string> = {
+  1: 'logout',
+  2: 'logout_all',
+  3: 'blocked',
+  4: 'admin_revoked',
+  5: 'token_reused',
+  6: 'expired',
+  7: 'email_changed',
+};
+
+export function endReasonName(endReason: number | null): string {
+  return (endReason === null ? undefined : END_REASON_NAMES[endReason]) ?? 'expired';
+}
 
 /** `userTypeName` for each role code (API design 10.2). */
 const USER_TYPE_NAMES = {

@@ -26,6 +26,12 @@ export interface RoutePolicy {
   scope: TenantScope;
   /** The fine rule in words, as in the endpoint's spec (API design 6.4 part 3). */
   rule?: string;
+  /**
+   * Also open to a signed-in session that has not chosen a context yet
+   * (logout, switching context, the caller's own profile). Every other
+   * endpoint refuses such a session with 403 `FORBIDDEN`.
+   */
+  allowNoContext?: boolean;
   /** Catalogue operation ID, e.g. `STU-01`. */
   operationId?: string;
 }
@@ -37,6 +43,7 @@ function policyDecorator(policy: RoutePolicy) {
       access: policy.access,
       roles: policy.roles.map((role) => RoleShortName[role]),
       scope: policy.scope,
+      allowNoContext: policy.allowNoContext ?? false,
       rule: policy.rule ?? null,
       operationId: policy.operationId ?? null,
     }),

@@ -1,12 +1,17 @@
 import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { Public } from '../../common/auth/policy.decorator.js';
+import type { Principal } from '../../common/auth/access-token-verifier.js';
+import { CurrentPrincipal } from '../../common/auth/current-principal.decorator.js';
+import { Policy, Public } from '../../common/auth/policy.decorator.js';
+import { ALL_ROLES } from '../../common/auth/roles.js';
 import { ApiResult } from '../../common/http/api-result.js';
 import { AuthCode } from './auth-codes.js';
 import { LoginService, type LoginResult } from './login.service.js';
 import { OtpService } from './otp.service.js';
 import { OTP_LIMITS } from './otp-limits.js';
+import { RefreshTokenDto } from './refresh-token.dto.js';
 import { RequestOtpDto } from './request-otp.dto.js';
+import { SessionService, type RefreshResult } from './session.service.js';
 import { VerifyOtpDto } from './verify-otp.dto.js';
 
 @ApiTags('Auth')
@@ -15,6 +20,7 @@ export class AuthController {
   constructor(
     private readonly otp: OtpService,
     private readonly login: LoginService,
+    private readonly sessions: SessionService,
   ) {}
 
   @Public({
@@ -44,5 +50,43 @@ export class AuthController {
   @Post('otp/verify')
   async verifyCode(@Body() body: VerifyOtpDto): Promise<ApiResult<LoginResult>> {
     return ApiResult.ok(await this.login.verify(body), AuthCode.LOGIN_OK);
+  }
+
+  @Public({
+    operationId: 'AUTH-05',
+    rule: 'Per-IP limit; the refresh token is the credential and works once, a second use ends the session (API design 10.3)',
+  })
+  @HttpCode(HttpStatus.OK)
+  @Post('refresh')
+  async refresh(@Body() body: RefreshTokenDto): Promise<ApiResult<RefreshResult>> {
+    return ApiResult.ok(await this.sessions.refresh(body.refreshToken), AuthCode.REFRESH_OK);
+  }
+
+  @Policy({
+    roles: ALL_ROLES,
+    scope: 'self',
+    allowNoContext: true,
+    operationId: 'AUTH-07',
+    rule: "Ends the caller's own session",
+  })
+  @HttpCode(HttpStatus.OK)
+  @Post('logout')
+  async logout(@CurrentPrincipal() principal: Principal): Promise<ApiResult<null>> {
+    await this.sessions.logout(principal);
+    return ApiResult.ok(null, AuthCode.LOGOUT_OK);
+  }
+
+  @Policy({
+    roles: ALL_ROLES,
+    scope: 'self',
+    allowNoContext: true,
+    operationId: 'AUTH-08',
+    rule: 'Ends every session of the caller',
+  })
+  @HttpCode(HttpStatus.OK)
+  @Post('logout-all')
+  async logoutAll(@CurrentPrincipal() principal: Principal): Promise<ApiResult<null>> {
+    await this.sessions.logoutAll(principal);
+    return ApiResult.ok(null, AuthCode.LOGOUT_ALL_OK);
   }
 }
