@@ -1,13 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { AppException } from '../../common/http/app-exception.js';
-import { FieldErrorCode } from '../../common/http/error-codes.js';
+import { ErrorCode, FieldErrorCode } from '../../common/http/error-codes.js';
 import { message } from '../../common/i18n/messages.js';
 import { RequestContext } from '../../common/request-context/request-context.js';
 import { Clock } from '../../common/time/clock.js';
 import { AuditService } from '../audit/index.js';
 import { DatabaseService } from '../database/index.js';
-import { AuthCode, reportedStatus, userTypeFor } from './auth-codes.js';
+import { AuthCode, endReasonName, reportedStatus, userTypeFor } from './auth-codes.js';
 import { canActAs, mobileContexts, type Context } from './contexts.js';
 import { IdentityRepository } from './identity.repository.js';
 import { SessionRepository } from './session.repository.js';
@@ -91,7 +91,19 @@ export class ContextService {
 
     const now = this.clock.now();
     await this.database.transaction({}, async (tx) => {
-      await this.sessions.setActiveContext(tx, principal.sessionId, request.roleCode, societyId);
+      const moved = await this.sessions.setActiveContext(
+        tx,
+        principal.sessionId,
+        request.roleCode,
+        societyId,
+      );
+      if (!moved) {
+        // The session ended after the guard read it: answer as the guard would on the next call.
+        const ended = await this.sessions.findSession(tx, principal.sessionId);
+        throw AppException.unauthorized(ErrorCode.SESSION_ENDED, {
+          reason: endReasonName(ended?.endReason ?? null),
+        });
+      }
       await this.audit.record(tx, {
         action: 'auth.context_switch',
         institutionId: null,

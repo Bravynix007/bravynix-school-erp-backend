@@ -5,7 +5,7 @@ import type { DatabaseService } from '../database/index.js';
 import { AccountStatus } from './auth-codes.js';
 import { ContextService } from './context.service.js';
 import type { IdentityRepository, LoginUser } from './identity.repository.js';
-import type { Grant, SessionRepository } from './session.repository.js';
+import type { Grant, SessionRepository, SessionRow } from './session.repository.js';
 import { TokenService } from './token.service.js';
 
 /** The rules of AUTH-06 and ME-01 with the database replaced; the SQL is covered by the integration tests. */
@@ -32,11 +32,18 @@ const principal = (patch: Partial<Principal> = {}): Principal => ({
   ...patch,
 });
 
-function build(grants: Grant[], found: LoginUser | null = user) {
+function build(
+  grants: Grant[],
+  found: LoginUser | null = user,
+  options: { moved?: boolean; ended?: SessionRow } = {},
+) {
   const clock = new FixedClock();
   const sessions = {
     activeGrants: vi.fn<SessionRepository['activeGrants']>(async () => grants),
-    setActiveContext: vi.fn<SessionRepository['setActiveContext']>(async () => undefined),
+    setActiveContext: vi.fn<SessionRepository['setActiveContext']>(
+      async () => options.moved ?? true,
+    ),
+    findSession: vi.fn<SessionRepository['findSession']>(async () => options.ended),
   };
   const identity = {
     findUserById: vi.fn<IdentityRepository['findUserById']>(async () => found ?? undefined),
@@ -152,6 +159,23 @@ describe('ContextService.switchContext', () => {
       });
     }
     expect(t.sessions.setActiveContext).not.toHaveBeenCalled();
+  });
+
+  it('answers SESSION_ENDED, with the reason, when the session ended a moment ago', async () => {
+    const ended = { endReason: 1 } as SessionRow;
+    const t = build([owner], user, { moved: false, ended });
+    const error = await fail(
+      t.service.switchContext(principal({ roleCode: 2, societyId: SOCIETY }), {
+        roleCode: 2,
+        societyId: SOCIETY,
+      }),
+    );
+    expect(error).toMatchObject({
+      status: 401,
+      code: 'SESSION_ENDED',
+      options: { details: { reason: 'logout' } },
+    });
+    expect(t.record).not.toHaveBeenCalled();
   });
 
   it('refuses a console session before it looks at anything else', async () => {

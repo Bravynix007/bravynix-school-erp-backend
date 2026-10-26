@@ -196,13 +196,14 @@ export class SessionRepository {
     sessionId: string,
     roleCode: number,
     societyId: string | null,
-  ): Promise<void> {
-    await db
+  ): Promise<boolean> {
+    const result = await db
       .updateTable('auth_sessions')
       .set({ active_role_code: roleCode, active_society_id: societyId })
       .where('id', '=', sessionId)
       .where('ended_at', 'is', null)
-      .execute();
+      .executeTakeFirst();
+    return Number(result.numUpdatedRows) > 0;
   }
 
   /** Ends one session; a session that has already ended keeps its first reason. */
