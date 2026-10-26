@@ -6,7 +6,7 @@ import { OtpService } from '../../src/platform/identity/otp.service.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { newId } from '../../src/common/ids/ids.js';
 import { personaByKey } from '../../src/seeds/two-worlds.js';
-import { readAuditRows } from '../support/audit-rows.js';
+import { dumpTables, readAuditRows } from '../support/audit-rows.js';
 import { Authenticator, signInConsole, startConsoleSignIn } from '../support/console-session.js';
 import { clearLoginState } from '../support/login-state.js';
 import { createTestApp, type TestApp } from '../support/test-app.js';
@@ -81,7 +81,7 @@ describe('AUTH-03 and AUTH-04: the Super Admin authenticator', () => {
     );
     await setStatus(1);
     auditFloor = newId();
-    t = await createTestApp();
+    t = await createTestApp({ captureLogs: true });
     otp = t.app.get(OtpService);
   });
 
@@ -139,6 +139,8 @@ describe('AUTH-03 and AUTH-04: the Super Admin authenticator', () => {
         confirmed_at: Date | null;
       }>(sql`select secret_ciphertext, secret_key_version, confirmed_at from user_totp_factors`);
       expect(factor).toMatchObject({ secret_key_version: 1, confirmed_at: null });
+      // Neither the raw bytes nor the base32 text appear in what is stored.
+      expect(factor!.secret_ciphertext.includes(app.secret)).toBe(false);
       expect(factor!.secret_ciphertext.toString('latin1')).not.toContain(body.data.secret);
       const entries = await auditRows<{ entity_id: string }>(
         sql`action = 'auth.mfa_enrol_started'`,
@@ -243,6 +245,33 @@ describe('AUTH-03 and AUTH-04: the Super Admin authenticator', () => {
       expect(audit.find((e) => e.action === 'auth.login')!.new_values).toEqual({
         channel: 'console',
       });
+    });
+
+    it('stores no token, cookie or secret in the clear, in any table or in the log', async () => {
+      const { started, app } = await enrolled();
+      const res = await verify(started.mfaToken, app.code(t.clock.now())).expect(200);
+      const cookie = cookieHeader((res.headers['set-cookie'] as unknown as string[])[0]!).split(
+        '=',
+      )[1]!;
+      const dump = await dumpTables(ownerDb, [
+        'mfa_challenges',
+        'user_totp_factors',
+        'auth_sessions',
+        'refresh_tokens',
+        'otp_challenges',
+      ]);
+      const secretText = Buffer.from(app.secret).toString('base64');
+      for (const secret of [
+        started.mfaToken,
+        started.mfaToken.slice(4),
+        cookie,
+        res.body.data.accessToken,
+        app.secret.toString('hex'),
+        secretText,
+      ]) {
+        expect(dump).not.toContain(secret);
+      }
+      expect(JSON.stringify(t.logs)).not.toContain(started.mfaToken);
     });
 
     it('signs in again with the app, and a token works once', async () => {

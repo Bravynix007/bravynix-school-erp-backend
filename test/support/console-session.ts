@@ -8,7 +8,8 @@ const BASE32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
 /** An authenticator app: holds the secret from the setup link and shows the code for a moment. */
 export class Authenticator {
-  private readonly secret: Buffer;
+  /** The raw secret bytes, so a test can prove they are stored nowhere. */
+  readonly secret: Buffer;
 
   constructor(base32Secret: string) {
     let bits = 0;

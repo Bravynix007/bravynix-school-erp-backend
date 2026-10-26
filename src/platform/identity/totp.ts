@@ -6,7 +6,7 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
  * here rather than imported because it is a page of code with published test
  * vectors, and it is the one place a second factor is checked.
  */
-export const TOTP_STEP_SECONDS = 30;
+const TOTP_STEP_SECONDS = 30;
 const DIGITS = 6;
 /** Steps either side of now that are accepted, for a phone clock a few seconds off. */
 const WINDOW_STEPS = 1;

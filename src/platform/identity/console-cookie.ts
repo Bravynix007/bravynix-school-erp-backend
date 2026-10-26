@@ -7,8 +7,8 @@ import { ErrorCode } from '../../common/http/error-codes.js';
 export const REFRESH_COOKIE = 'bnx_refresh';
 
 /** The header the console adds to refresh and logout; a cross-site form cannot send it (API design 6.1). */
-export const CONSOLE_HEADER = 'x-requested-with';
-export const CONSOLE_HEADER_VALUE = 'bravynix-console';
+const CONSOLE_HEADER = 'x-requested-with';
+const CONSOLE_HEADER_VALUE = 'bravynix-console';
 
 export interface RefreshCookie {
   value: string;

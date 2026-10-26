@@ -7,6 +7,7 @@ import { OtpService } from '../../src/platform/identity/otp.service.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { institutions, personaByKey, societies } from '../../src/seeds/two-worlds.js';
 import { FixtureModule } from '../support/fixture.module.js';
+import { readAuditRows } from '../support/audit-rows.js';
 import { clearLoginState } from '../support/login-state.js';
 import { signInMobile } from '../support/sessions.js';
 import { createTestApp, type TestApp } from '../support/test-app.js';
@@ -18,22 +19,8 @@ const societyA = societies.find((s) => s.key === 'A')!;
 const societyB = societies.find((s) => s.key === 'B')!;
 const institutionB = institutions.find((i) => i.key === 'B1')!;
 
-const auditCount = async (action: string) => {
-  let n = 0;
-  await db
-    .transaction()
-    .execute(async (trx) => {
-      await sql`alter table audit_logs no force row level security`.execute(trx);
-      n = (
-        await sql<{
-          n: number;
-        }>`select count(*)::int as n from audit_logs where action = ${action}`.execute(trx)
-      ).rows[0]!.n;
-      throw new Error('rollback');
-    })
-    .catch(() => undefined);
-  return n;
-};
+const auditCount = async (action: string) =>
+  (await readAuditRows(db, sql`action = ${action}`)).length;
 
 describe('QA: AUTH-06 and ME-01', () => {
   let t: TestApp;
