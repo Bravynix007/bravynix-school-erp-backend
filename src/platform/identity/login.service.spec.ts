@@ -123,7 +123,7 @@ describe('LoginService.verify', () => {
       userTypeName: 'society_owner',
       session: { activeContext: { roleCode: 2, societyId: 'soc-1' } },
       person: { email: EMAIL, accountStatus: 1 },
-      contexts: [owner],
+      contexts: [{ roleCode: 2, societyId: 'soc-1' }],
     });
     expect(t.identity.consumeChallenge).toHaveBeenCalledOnce();
     expect(t.identity.recordLogin).toHaveBeenCalledOnce();

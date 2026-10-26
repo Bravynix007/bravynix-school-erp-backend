@@ -51,7 +51,19 @@ function callerKey(address: RawBuilder<unknown>): RawBuilder<string> {
 @Injectable()
 export class IdentityRepository {
   async findUserByEmail(tx: Tx, email: string): Promise<LoginUser | undefined> {
-    const row = await tx
+    return this.findUser(tx, 'email', email);
+  }
+
+  async findUserById(db: Db, id: string): Promise<LoginUser | undefined> {
+    return this.findUser(db, 'id', id);
+  }
+
+  private async findUser(
+    db: Db,
+    column: 'email' | 'id',
+    value: string,
+  ): Promise<LoginUser | undefined> {
+    const row = await db
       .selectFrom('users')
       .select([
         'id',
@@ -62,7 +74,7 @@ export class IdentityRepository {
         'preferred_language',
         'locked_until',
       ])
-      .where('email', '=', email)
+      .where(column, '=', value)
       .executeTakeFirst();
     return (
       row && {
@@ -124,14 +136,15 @@ export class IdentityRepository {
    * Counts a call to a public endpoint from this IP in the window and returns
    * the count so far. One autocommitted statement, so a flood neither holds a
    * transaction nor waits on a lock, and the row count stays at one per IP per
-   * window, keyed by the caller key.
+   * window, keyed by the caller key. `scope` keeps the counters of different
+   * endpoint groups apart (1 login codes, 2 refresh).
    */
-  async countPublicCall(db: Db, ip: string, windowStart: Date): Promise<number> {
+  async countPublicCall(db: Db, scope: number, ip: string, windowStart: Date): Promise<number> {
     const { rows } = await sql<{ calls: number }>`
-      insert into public_call_counters (ip, window_start, calls)
-      select ${callerKey(sql.ref('a'))}, ${windowStart}, 1
+      insert into public_call_counters (scope, ip, window_start, calls)
+      select ${scope}, ${callerKey(sql.ref('a'))}, ${windowStart}, 1
       from (select ${ip}::inet as a) as caller
-      on conflict (ip, window_start)
+      on conflict (scope, ip, window_start)
         do update set calls = public_call_counters.calls + 1
       returning calls`.execute(db);
     return rows[0]!.calls;

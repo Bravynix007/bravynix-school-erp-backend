@@ -15,7 +15,14 @@ export const AuthCode = {
   REFRESH_TOKEN_REUSED: 'REFRESH_TOKEN_REUSED',
   LOGOUT_OK: 'LOGOUT_OK',
   LOGOUT_ALL_OK: 'LOGOUT_ALL_OK',
+  CONTEXT_NOT_AVAILABLE: 'CONTEXT_NOT_AVAILABLE',
+  CONTEXT_SWITCHED: 'CONTEXT_SWITCHED',
 } as const;
+
+/** A Pending account is shown as Active: the first login makes it so (API design 10.2). */
+export function reportedStatus(accountStatus: number): number {
+  return accountStatus === AccountStatus.Pending ? AccountStatus.Active : accountStatus;
+}
 
 /** Client types of API design 10.1. */
 export const ClientType = { Mobile: 1, Console: 2 } as const;

@@ -267,8 +267,18 @@ describe('AUTH-05, AUTH-07, AUTH-08 and the per-request session check', () => {
       expect(res.body.code).toBe('REFRESH_TOKEN_INVALID');
     });
 
-    it('counts toward the 20 calls a minute per address', async () => {
-      for (let i = 0; i < 20; i += 1) await refresh('rt_nothing').expect(401);
+    it('has its own limit of 300 calls a minute per address, apart from the login codes', async () => {
+      // Twenty-one refreshes from one address are all answered: refresh is not held to the code limit.
+      for (let i = 0; i < 21; i += 1) await refresh('rt_nothing').expect(401);
+      // And the code endpoints keep their own 20 a minute, untouched by refresh calls.
+      for (let i = 0; i < 20; i += 1) {
+        await post('/v1/auth/otp', { email: `nobody${i}@two-worlds.test`, clientType: 1 });
+      }
+      expect(
+        (await post('/v1/auth/otp', { email: 'x@two-worlds.test', clientType: 1 })).status,
+      ).toBe(429);
+      // Refresh is refused from the 301st call of the minute.
+      for (let i = 21; i < 300; i += 1) await refresh('rt_nothing').expect(401);
       const limited = await refresh('rt_nothing').expect(429);
       expect(limited.body.code).toBe('RATE_LIMITED');
       expect(Number(limited.headers['retry-after'])).toBeGreaterThan(0);

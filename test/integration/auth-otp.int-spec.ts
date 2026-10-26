@@ -738,7 +738,7 @@ describe('public_call_counters', () => {
     try {
       const { db } = t.app.get(DatabaseService);
       await sql`insert into public_call_counters (ip, window_start, calls)
-        values ('203.0.113.50', now(), 1) on conflict (ip, window_start) do update set calls = public_call_counters.calls + 1`.execute(
+        values ('203.0.113.50', now(), 1) on conflict (scope, ip, window_start) do update set calls = public_call_counters.calls + 1`.execute(
         db,
       );
       const { rows } = await sql<{ n: number }>`

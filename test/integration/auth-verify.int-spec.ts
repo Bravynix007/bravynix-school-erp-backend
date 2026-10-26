@@ -152,7 +152,7 @@ describe('AUTH-02 verify the code', () => {
           userTypeName: 'society_owner',
           session: { activeContext: { roleCode: 2, societyId: societyA.id } },
           person: { id: owner1.id, email: owner1.email, accountStatus: 1 },
-          contexts: [{ roleCode: 2, societyId: societyA.id, institutionId: null }],
+          contexts: [{ roleCode: 2, societyId: societyA.id }],
           requiredNotices: [],
         },
       });

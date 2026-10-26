@@ -92,7 +92,7 @@ describe('SessionService.refresh', () => {
       () => t.service.refresh(PRESENTED),
     );
     const now = t.clock.now();
-    expect(t.check).toHaveBeenCalledWith('203.0.113.9');
+    expect(t.check).toHaveBeenCalledWith('203.0.113.9', 'refresh');
     expect(t.repository.lockRefreshToken).toHaveBeenCalledWith(
       expect.anything(),
       tokens.refreshTokenHmac(PRESENTED),

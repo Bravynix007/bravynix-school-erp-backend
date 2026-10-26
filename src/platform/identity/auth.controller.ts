@@ -3,15 +3,17 @@ import { ApiTags } from '@nestjs/swagger';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { CurrentPrincipal } from '../../common/auth/current-principal.decorator.js';
 import { Policy, Public } from '../../common/auth/policy.decorator.js';
-import { ALL_ROLES } from '../../common/auth/roles.js';
+import { ALL_ROLES, RoleCode } from '../../common/auth/roles.js';
 import { ApiResult } from '../../common/http/api-result.js';
 import { AuthCode } from './auth-codes.js';
 import { LoginService, type LoginResult } from './login.service.js';
 import { OtpService } from './otp.service.js';
 import { OTP_LIMITS } from './otp-limits.js';
+import { ContextService, type SwitchResult } from './context.service.js';
 import { RefreshTokenDto } from './refresh-token.dto.js';
 import { RequestOtpDto } from './request-otp.dto.js';
 import { SessionService, type RefreshResult } from './session.service.js';
+import { SwitchContextDto } from './switch-context.dto.js';
 import { VerifyOtpDto } from './verify-otp.dto.js';
 
 @ApiTags('Auth')
@@ -21,6 +23,7 @@ export class AuthController {
     private readonly otp: OtpService,
     private readonly login: LoginService,
     private readonly sessions: SessionService,
+    private readonly contexts: ContextService,
   ) {}
 
   @Public({
@@ -60,6 +63,30 @@ export class AuthController {
   @Post('refresh')
   async refresh(@Body() body: RefreshTokenDto): Promise<ApiResult<RefreshResult>> {
     return ApiResult.ok(await this.sessions.refresh(body.refreshToken), AuthCode.REFRESH_OK);
+  }
+
+  @Policy({
+    roles: [
+      RoleCode.SocietyOwner,
+      RoleCode.InstitutionAdmin,
+      RoleCode.TeacherStaff,
+      RoleCode.StudentParent,
+    ],
+    scope: 'self',
+    allowNoContext: true,
+    operationId: 'AUTH-06',
+    rule: 'Mobile sessions only; the person must hold the grant, staff record or guardian link for the role (API design 10.4)',
+  })
+  @HttpCode(HttpStatus.OK)
+  @Post('context')
+  async switchContext(
+    @CurrentPrincipal() principal: Principal,
+    @Body() body: SwitchContextDto,
+  ): Promise<ApiResult<SwitchResult>> {
+    return ApiResult.ok(
+      await this.contexts.switchContext(principal, body),
+      AuthCode.CONTEXT_SWITCHED,
+    );
   }
 
   @Policy({

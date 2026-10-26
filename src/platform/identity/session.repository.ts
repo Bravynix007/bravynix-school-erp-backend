@@ -92,7 +92,7 @@ function toSession(row: {
 @Injectable()
 export class SessionRepository {
   /** The grants that let this person act as Super Admin, Owner or Institution Admin. */
-  async activeGrants(tx: Tx, userId: string): Promise<Grant[]> {
+  async activeGrants(tx: Db, userId: string): Promise<Grant[]> {
     const rows = await tx
       .selectFrom('role_assignments')
       .select(['role_code', 'society_id', 'institution_id'])
@@ -188,6 +188,22 @@ export class SessionRepository {
       .where('id', '=', sessionId)
       .where('ended_at', 'is', null)
       .execute();
+  }
+
+  /** The role and Society the session acts as from now on. */
+  async setActiveContext(
+    db: Db,
+    sessionId: string,
+    roleCode: number,
+    societyId: string | null,
+  ): Promise<boolean> {
+    const result = await db
+      .updateTable('auth_sessions')
+      .set({ active_role_code: roleCode, active_society_id: societyId })
+      .where('id', '=', sessionId)
+      .where('ended_at', 'is', null)
+      .executeTakeFirst();
+    return Number(result.numUpdatedRows) > 0;
   }
 
   /** Ends one session; a session that has already ended keeps its first reason. */

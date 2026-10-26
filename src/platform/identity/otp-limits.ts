@@ -25,6 +25,8 @@ export const OTP_LIMITS = {
   /** Unauthenticated requests per IP per minute (Proposed; tuned in the load test). */
   ipRequestsPerMinute: 20,
   ipWindowSeconds: 60,
+  /** Refresh per IP per minute (Proposed; tuned in the load test). Higher: people share school and carrier addresses, and a refresh token cannot be guessed. */
+  refreshRequestsPerMinute: 300,
 } as const;
 
 /**
@@ -68,8 +70,13 @@ function plusSeconds(date: Date, seconds: number): Date {
  * 21st is refused until the window ends. Fixed windows allow up to twice the
  * limit across a boundary, which the "Proposed" value accepts.
  */
-export function evaluateIpLimit(now: Date, windowStart: Date, calls: number): OtpRefusal | null {
-  if (calls <= OTP_LIMITS.ipRequestsPerMinute) return null;
+export function evaluateIpLimit(
+  now: Date,
+  windowStart: Date,
+  calls: number,
+  limit: number = OTP_LIMITS.ipRequestsPerMinute,
+): OtpRefusal | null {
+  if (calls <= limit) return null;
   return {
     status: HttpStatus.TOO_MANY_REQUESTS,
     code: ErrorCode.RATE_LIMITED,
