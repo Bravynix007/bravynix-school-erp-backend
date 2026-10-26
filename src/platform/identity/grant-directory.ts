@@ -51,6 +51,29 @@ export class GrantDirectory {
   }
 
   /**
+   * An Institution was deactivated: the Institution Admin grants for it are
+   * revoked. An Admin left with no other grant in the Society loses the role on
+   * their next call (the per-request check asks for a grant in the Society); one
+   * with another Institution keeps working there. Runs in the caller's
+   * transaction. Returns how many grants ended.
+   */
+  async endAdminAccessInInstitution(
+    tx: Tx,
+    institutionId: string,
+    by: string | null,
+    reason: string,
+    now: Date,
+  ): Promise<number> {
+    const grants = await tx
+      .updateTable('role_assignments')
+      .set({ revoked_at: now, revoked_by: by, revoke_reason: reason })
+      .where('institution_id', '=', institutionId)
+      .where('revoked_at', 'is', null)
+      .executeTakeFirst();
+    return Number(grants.numUpdatedRows);
+  }
+
+  /**
    * A Society was deactivated: every grant in it is revoked, so none counts at
    * sign-in or in the context list, and every open session acting in it ends
    * with `admin_revoked`, whatever the role (API design 10.4b). Runs in the

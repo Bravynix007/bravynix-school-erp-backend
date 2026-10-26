@@ -1,10 +1,7 @@
 import { ApiProperty, ApiPropertyOptional, IntersectionType } from '@nestjs/swagger';
-import { Transform, Type } from 'class-transformer';
+import { Type } from 'class-transformer';
 import {
-  IsArray,
-  IsBoolean,
   IsEmail,
-  IsIn,
   IsISO8601,
   IsNotEmpty,
   IsOptional,
@@ -16,33 +13,10 @@ import {
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
-import { PageQueryDto } from '../../common/pagination/pagination.js';
+import { AddressDto } from '../../common/validation/address.dto.js';
 import { PhoneDto } from '../../common/validation/phone.dto.js';
 import { VersionDto } from '../../common/validation/version.dto.js';
-
-/** PLT-03 and PLT-05 address (API design 7.3); the master-list ids join when the masters exist. */
-export class AddressDto {
-  @ApiPropertyOptional({ maxLength: 255, nullable: true })
-  @IsOptional()
-  @IsString()
-  @MinLength(1)
-  @MaxLength(255)
-  line1?: string | null;
-
-  @ApiPropertyOptional({ maxLength: 255, nullable: true })
-  @IsOptional()
-  @IsString()
-  @MinLength(1)
-  @MaxLength(255)
-  line2?: string | null;
-
-  @ApiPropertyOptional({ maxLength: 10, nullable: true })
-  @IsOptional()
-  @IsString()
-  @MinLength(1)
-  @MaxLength(10)
-  pincode?: string | null;
-}
+import { TenantRootListQueryDto } from './tenant-root-list.query.js';
 
 const WEBSITE = /^https?:\/\/\S+$/i;
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
@@ -127,24 +101,5 @@ export class PauseSocietyDto extends VersionDto {
 
 export const SOCIETY_SORT_FIELDS = ['name', 'code', 'createdAt'] as const;
 
-const toList = ({ value }: { value: unknown }): unknown =>
-  Array.isArray(value) ? value : value === undefined ? undefined : [value];
-
-/** PLT-02 query. Query values arrive as strings, so these do convert them. */
-export class ListSocietiesQueryDto extends PageQueryDto {
-  @ApiPropertyOptional({ enum: [0, 1], isArray: true, description: 'Repeat for both' })
-  @IsOptional()
-  @Transform((params) => {
-    const list = toList(params);
-    return Array.isArray(list) ? list.map((item) => (item === '' ? item : Number(item))) : list;
-  })
-  @IsArray()
-  @IsIn([0, 1], { each: true })
-  status?: number[];
-
-  @ApiPropertyOptional({ description: 'Only paused, or only not paused' })
-  @IsOptional()
-  @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
-  @IsBoolean()
-  paused?: boolean;
-}
+/** PLT-02 query. */
+export class ListSocietiesQueryDto extends TenantRootListQueryDto {}

@@ -10,6 +10,35 @@ export interface PersonRef {
   roleName: string | null;
 }
 
+interface PersonRow {
+  id: string;
+  email: string;
+  first_name: string | null;
+  last_name: string | null;
+}
+
+interface GrantRow {
+  role_code: number;
+  revoked_at: Date | null;
+}
+
+/**
+ * The person for an author stamp. `roleName` is the role they hold now, the
+ * highest if several, else the one they held last (`grants` newest first), and
+ * `null` for a person who never held a role granted here.
+ */
+export function personRef(user: PersonRow, grants: readonly GrantRow[]): PersonRef {
+  const held = grants.filter((grant) => grant.revoked_at === null);
+  const role = held.length
+    ? Math.min(...held.map((grant) => grant.role_code))
+    : grants[0]?.role_code;
+  return {
+    id: user.id,
+    displayName: personName(user.first_name, user.last_name) ?? user.email,
+    roleName: role === undefined ? null : (RoleName[role as RoleCode] ?? null),
+  };
+}
+
 /**
  * Who a person is, for other modules' author stamps. The `users` and
  * `role_assignments` tables stay private to Identity (SDD 9.3 rule 1).
@@ -21,8 +50,8 @@ export class PersonDirectory {
   /**
    * The people with these IDs, by ID. A person who has since left still
    * shows their name. `roleName` is the role they hold now, the highest if
-   * several, else the one they held last, and `null` for a person who never
-   * held a role granted here (staff and parents are named by the People module).
+   * several, else the one they held last (see `personRef`); staff and parents
+   * are named by the People module.
    */
   async describe(ids: readonly (string | null)[], db: Db = this.database.db) {
     const wanted = [...new Set(ids.filter((id): id is string => id !== null))];
@@ -41,15 +70,7 @@ export class PersonDirectory {
       .execute();
     for (const user of users) {
       const mine = grants.filter((grant) => grant.user_id === user.id);
-      const held = mine.filter((grant) => grant.revoked_at === null);
-      const role = held.length
-        ? Math.min(...held.map((grant) => grant.role_code))
-        : mine[0]?.role_code;
-      people.set(user.id, {
-        id: user.id,
-        displayName: personName(user.first_name, user.last_name) ?? user.email,
-        roleName: role === undefined ? null : (RoleName[role as RoleCode] ?? null),
-      });
+      people.set(user.id, personRef(user, mine));
     }
     return people;
   }
