@@ -14,7 +14,7 @@ export const MOBILE_SESSION_MS = 30 * DAY_MS;
 export const TOUCH_AFTER_MS = 5 * 60 * 1000;
 
 /** Roles 1 to 3 exist only by a grant row; 4 and 5 come from staff and guardian records (slice B5). */
-export function roleNeedsGrant(roleCode: number): boolean {
+function roleNeedsGrant(roleCode: number): boolean {
   return roleCode >= 1 && roleCode <= 3;
 }
 

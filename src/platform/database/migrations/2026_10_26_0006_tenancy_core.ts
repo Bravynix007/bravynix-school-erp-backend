@@ -124,9 +124,11 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     `.execute(db);
   }
 
-  // Only Super Admin pauses or resumes access, and only Super Admin sets a
-  // Society's code. The owner-role migrations and seeds run with no tenant
-  // set and only insert, so they are not affected.
+  // Only Super Admin pauses or resumes access (on insert as well as update, so
+  // no row is created already paused), and only Super Admin sets a Society's
+  // code or activates and deactivates it (PRD 3.1). An Institution's status
+  // stays editable by its Society (PRD 7.1). Migrations and seeds insert rows
+  // with no pause set.
   await sql`
     create function tenancy_guard_platform_columns() returns trigger
     language plpgsql as $$
@@ -135,9 +137,12 @@ export async function up(db: Kysely<unknown>): Promise<void> {
         new.access_paused_at is distinct from old.access_paused_at
         or new.access_paused_by is distinct from old.access_paused_by
         or new.access_pause_reason is distinct from old.access_pause_reason
-        or (tg_table_name = 'societies' and new.code is distinct from old.code)
+        or (
+          tg_op = 'UPDATE' and tg_table_name = 'societies'
+          and (new.code is distinct from old.code or new.status is distinct from old.status)
+        )
       ) then
-        raise exception 'Only Super Admin may change % pause or code', tg_table_name
+        raise exception 'Only Super Admin may change % pause, status or code', tg_table_name
           using errcode = '42501';
       end if;
       return new;
@@ -146,7 +151,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   `.execute(db);
   for (const table of ['societies', 'institutions']) {
     await sql`
-      create trigger ${sql.raw(`trg_${table}_platform_columns`)} before update on ${sql.table(table)}
+      create trigger ${sql.raw(`trg_${table}_platform_columns`)} before insert or update on ${sql.table(table)}
         for each row execute function tenancy_guard_platform_columns()
     `.execute(db);
   }
@@ -211,12 +216,22 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     alter table auth_sessions
       add constraint fk_auth_sessions_society foreign key (active_society_id) references societies (id)
   `.execute(db);
+  // Roles 2 to 4 act inside a Society (roles 1 and 5 have none, DDD 9.1), so a
+  // session without one would slip past the pause check.
+  await sql`
+    alter table auth_sessions
+      add constraint ck_auth_sessions_society
+      check (active_role_code is null or active_role_code in (1, 5) or active_society_id is not null)
+  `.execute(db);
 }
 
 export async function down(db: Kysely<unknown>): Promise<void> {
   if (process.env.NODE_ENV === 'production') {
     throw new Error('Refusing to drop the tenancy tables in production: they hold every school');
   }
+  await sql`alter table auth_sessions drop constraint if exists ck_auth_sessions_society`.execute(
+    db,
+  );
   await sql`alter table auth_sessions drop constraint if exists fk_auth_sessions_society`.execute(
     db,
   );

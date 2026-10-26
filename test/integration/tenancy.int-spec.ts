@@ -338,6 +338,26 @@ describe('Societies and Institutions (DDD 9.3, 15.3)', () => {
       await inRolledBack(asSuperAdmin, recode);
     });
 
+    it('does not let an owner deactivate or reactivate their Society, and lets Super Admin', async () => {
+      const deactivate = (tx: Tx) =>
+        sql`update societies set status = 0 where id = ${societyA.id}`.execute(tx);
+      await expect(inRolledBack(asOwnerOf(societyA), deactivate)).rejects.toThrow(
+        /Only Super Admin may change/,
+      );
+      await inRolledBack(asSuperAdmin, deactivate);
+    });
+
+    it('lets an owner deactivate an Institution of their Society (PRD 7.1)', async () => {
+      const done = await inRolledBack(asOwnerOf(societyA), (tx) =>
+        tx
+          .updateTable('institutions')
+          .set({ status: 0 })
+          .where('id', '=', instA2.id)
+          .executeTakeFirst(),
+      );
+      expect(done.numUpdatedRows).toBe(1n);
+    });
+
     it('lets an owner change the code and name of an Institution', async () => {
       const done = await inRolledBack(asOwnerOf(societyA), (tx) =>
         tx
@@ -438,6 +458,21 @@ describe('Societies and Institutions (DDD 9.3, 15.3)', () => {
 
     it('accepts a grant to an Institution of that Society', async () => {
       await accepted(grant(societyA.id, instA1.id));
+    });
+
+    it('refuses a session acting as role 2, 3 or 4 with no Society, and allows roles 1 and 5', async () => {
+      const session = (role: number) =>
+        sql`insert into auth_sessions (user_id, client_type, active_role_code, idle_expires_at, absolute_expires_at)
+          values (${owner.id}, 1, ${role}, now() + interval '1 hour', now() + interval '1 hour')`.execute(
+          ownerDb,
+        );
+      for (const role of [2, 3, 4]) {
+        await expect(session(role)).rejects.toThrow(/ck_auth_sessions_society/);
+      }
+      for (const role of [1, 5]) {
+        await session(role);
+      }
+      await sql`delete from auth_sessions where user_id = ${owner.id}`.execute(ownerDb);
     });
 
     it('refuses a session whose active Society does not exist', async () => {
