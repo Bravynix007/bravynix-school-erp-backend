@@ -57,6 +57,8 @@ export interface OtpChallengesTable {
 }
 
 export interface PublicCallCountersTable {
+  /** 1 login-code endpoints, 2 refresh. */
+  scope: Generated<number>;
   ip: string;
   window_start: Date;
   calls: number;

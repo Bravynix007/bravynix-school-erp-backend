@@ -3,6 +3,7 @@ import * as m0001 from './2026_10_23_0001_foundation.js';
 import * as m0002 from './2026_10_25_0002_audit_logs.js';
 import * as m0003 from './2026_10_25_0003_identity_users_otp.js';
 import * as m0004 from './2026_10_25_0004_identity_sessions.js';
+import * as m0005 from './2026_10_26_0005_identity_call_scope.js';
 
 /**
  * Every migration, in order. Listed explicitly (not read from disk) so the
@@ -17,6 +18,7 @@ const migrations: Record<string, Migration> = {
   '2026_10_25_0002_audit_logs': m0002,
   '2026_10_25_0003_identity_users_otp': m0003,
   '2026_10_25_0004_identity_sessions': m0004,
+  '2026_10_26_0005_identity_call_scope': m0005,
 };
 
 export const migrationProvider: MigrationProvider = {

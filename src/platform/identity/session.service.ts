@@ -54,7 +54,7 @@ export class SessionService {
 
   async refresh(presented: string): Promise<RefreshResult> {
     // Every call counts toward the per-IP limit, before a connection is held.
-    await this.limiter.check(requestIp());
+    await this.limiter.check(requestIp(), 'refresh');
 
     const next = this.tokens.newRefreshToken();
     const now = this.clock.now();
