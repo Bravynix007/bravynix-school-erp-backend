@@ -184,7 +184,7 @@ describe('QA B9a: Societies on the platform console', () => {
     expect(`${edit.status} ${edit.body.code}`).toBe('409 INVALID_STATE');
   });
 
-  it('D1: a deactivated Society that was paused can still be resumed', async () => {
+  it('D1: a deactivated Society that was paused is refused on resume', async () => {
     const s = (await create()).body.data as { id: string; version: number };
     await call('post', `${BASE}/${s.id}/pause`, { version: s.version, reason: 'Fees' }).expect(200);
     await call('delete', `${BASE}/${s.id}`).expect(200);
