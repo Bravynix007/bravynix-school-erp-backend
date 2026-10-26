@@ -51,7 +51,19 @@ function callerKey(address: RawBuilder<unknown>): RawBuilder<string> {
 @Injectable()
 export class IdentityRepository {
   async findUserByEmail(tx: Tx, email: string): Promise<LoginUser | undefined> {
-    const row = await tx
+    return this.findUser(tx, 'email', email);
+  }
+
+  async findUserById(db: Db, id: string): Promise<LoginUser | undefined> {
+    return this.findUser(db, 'id', id);
+  }
+
+  private async findUser(
+    db: Db,
+    column: 'email' | 'id',
+    value: string,
+  ): Promise<LoginUser | undefined> {
+    const row = await db
       .selectFrom('users')
       .select([
         'id',
@@ -62,7 +74,7 @@ export class IdentityRepository {
         'preferred_language',
         'locked_until',
       ])
-      .where('email', '=', email)
+      .where(column, '=', value)
       .executeTakeFirst();
     return (
       row && {

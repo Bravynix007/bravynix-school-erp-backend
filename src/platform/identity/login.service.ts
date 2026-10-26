@@ -7,7 +7,8 @@ import { RequestContext } from '../../common/request-context/request-context.js'
 import { Clock } from '../../common/time/clock.js';
 import { AuditOutcome, AuditService } from '../audit/index.js';
 import { DatabaseService, type Tx } from '../database/index.js';
-import { AccountStatus, AuthCode, ClientType, userTypeFor } from './auth-codes.js';
+import { AccountStatus, AuthCode, ClientType, reportedStatus, userTypeFor } from './auth-codes.js';
+import { mobileContexts, onlyContext, type Context } from './contexts.js';
 import { BackgroundMailer } from './background-mailer.js';
 import {
   canReceiveCode,
@@ -21,7 +22,7 @@ import { lockSecondsFor, OTP_LIMITS } from './otp-limits.js';
 import { PublicCallLimiter } from './public-call-limiter.js';
 import { MOBILE_SESSION_MS } from './session-rules.js';
 import { requestIp } from './request-ip.js';
-import { SessionRepository, type Grant } from './session.repository.js';
+import { SessionRepository } from './session.repository.js';
 import type { EmailMessage } from '../email/email-sender.js';
 import { TokenService } from './token.service.js';
 import type { DeviceDto } from './verify-otp.dto.js';
@@ -31,12 +32,6 @@ export interface VerifyRequest {
   code: string;
   clientType: ClientType;
   device?: DeviceDto;
-}
-
-export interface Context {
-  roleCode: number;
-  societyId: string | null;
-  institutionId: string | null;
 }
 
 export interface LoginResult {
@@ -64,7 +59,13 @@ const NIL_UUID = '00000000-0000-0000-0000-000000000000';
 type Refused = { kind: 'refused'; error: AppException; mail?: EmailMessage };
 type Outcome =
   | Refused
-  | { kind: 'signedIn'; user: LoginUser; sessionId: string; grants: Grant[]; active: Grant | null };
+  | {
+      kind: 'signedIn';
+      user: LoginUser;
+      sessionId: string;
+      contexts: Context[];
+      active: Context | null;
+    };
 
 /**
  * AUTH-02: verify a login code and start a session (API design 10.2, DDD
@@ -106,7 +107,7 @@ export class LoginService {
       throw outcome.error;
     }
 
-    const { user, sessionId, grants, active } = outcome;
+    const { user, sessionId, contexts, active } = outcome;
     const signed = await this.tokens.signAccessToken(
       {
         personId: user.id,
@@ -132,10 +133,9 @@ export class LoginService {
         firstName: user.firstName,
         lastName: user.lastName,
         preferredLanguage: user.preferredLanguage,
-        accountStatus:
-          user.accountStatus === AccountStatus.Pending ? AccountStatus.Active : user.accountStatus,
+        accountStatus: reportedStatus(user.accountStatus),
       },
-      contexts: grants,
+      contexts,
       requiredNotices: [],
     };
   }
@@ -202,11 +202,9 @@ export class LoginService {
     await this.identity.consumeChallenge(tx, emailHmac, matched.id, now);
     await this.identity.recordLogin(tx, user.id, now);
 
-    // A Super Admin acts on the console only (API design 10.4: roles 2 to 5 have a context).
-    const grants = allGrants.filter((grant) => grant.roleCode !== 1);
-
     // One context starts the session in it; several wait for the role chooser (AUTH-06).
-    const active = grants.length === 1 ? (grants[0] ?? null) : null;
+    const contexts = mobileContexts(allGrants);
+    const active = onlyContext(contexts);
     const sessionId = newId();
     await this.sessions.createSession(tx, {
       id: sessionId,
@@ -241,7 +239,7 @@ export class LoginService {
       },
       after: { channel: 'mobile', platform: request.device?.platform ?? null },
     });
-    return { kind: 'signedIn', user, sessionId, grants, active };
+    return { kind: 'signedIn', user, sessionId, contexts, active };
   }
 
   /**

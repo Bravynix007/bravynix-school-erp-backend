@@ -55,6 +55,8 @@ const en: Catalogue = {
   REFRESH_TOKEN_REUSED: 'For your safety you have been signed out, please sign in again',
   LOGOUT_OK: 'You have been signed out',
   LOGOUT_ALL_OK: 'You have been signed out of every device',
+  CONTEXT_NOT_AVAILABLE: 'You do not have access to that role',
+  CONTEXT_SWITCHED: 'Role changed',
   // Field codes
   REQUIRED: 'This field is required',
   FIELD_NOT_ALLOWED: 'This field is not allowed',

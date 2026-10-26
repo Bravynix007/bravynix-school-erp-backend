@@ -2,6 +2,8 @@ import { Global, Module } from '@nestjs/common';
 import { AccessTokenVerifier } from '../../common/auth/access-token-verifier.js';
 import { AppConfig } from '../../config/app-config.js';
 import { BackgroundMailer } from './background-mailer.js';
+import { ContextService } from './context.service.js';
+import { MeController } from './me.controller.js';
 import { AuthController } from './auth.controller.js';
 import { IdentityRepository } from './identity.repository.js';
 import { LoginService } from './login.service.js';
@@ -16,12 +18,13 @@ import { TokenService } from './token.service.js';
 /** Global so the policy guard in the common module finds the real access token check. */
 @Global()
 @Module({
-  controllers: [AuthController],
+  controllers: [AuthController, MeController],
   providers: [
     IdentityRepository,
     SessionRepository,
     LoginService,
     SessionService,
+    ContextService,
     SessionTokenVerifier,
     { provide: AccessTokenVerifier, useExisting: SessionTokenVerifier },
     BackgroundMailer,
