@@ -61,7 +61,6 @@ describe('PLT-02 to PLT-08 Societies', () => {
         ...fields,
       }),
     );
-    if (res.status !== 201) console.log(JSON.stringify(t.logs.slice(-3)));
     expect(res.status).toBe(201);
     made.push(res.body.data.id);
     return res.body.data;
@@ -101,7 +100,7 @@ describe('PLT-02 to PLT-08 Societies', () => {
       dialect: new PostgresDialect({ pool: createPool(migrationUrl, 2, 30_000) }),
     });
     await writeIdentitySeed(ownerDb);
-    t = await createTestApp({ imports: [FixtureModule], captureLogs: true });
+    t = await createTestApp({ imports: [FixtureModule] });
   });
 
   afterAll(async () => {
