@@ -1,6 +1,7 @@
 import { HttpStatus } from '@nestjs/common';
 import { ErrorCode } from '../../common/http/error-codes.js';
 import { AuthCode } from './auth-codes.js';
+import { secondsUntil } from './time-rules.js';
 
 /** The limits of API design 6.2 / PRD 5.1. All counted per email in the database. */
 export const OTP_LIMITS = {
@@ -53,10 +54,6 @@ export interface OtpRefusal {
   status: HttpStatus;
   code: string;
   retryAfterSeconds: number;
-}
-
-function secondsUntil(target: Date, now: Date): number {
-  return Math.max(1, Math.ceil((target.getTime() - now.getTime()) / 1000));
 }
 
 function plusSeconds(date: Date, seconds: number): Date {

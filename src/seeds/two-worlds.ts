@@ -220,9 +220,6 @@ export const personas: SeedPersona[] = [
   ),
 ];
 
-/** Variant used by pause tests: Society A paused, Institution A2 paused. */
-export const pausedVariant = { pausedSocieties: ['A'], pausedInstitutions: ['A2'] } as const;
-
 export function personaByKey(key: string): SeedPersona {
   const found = personas.find((p) => p.key === key);
   if (!found) throw new Error(`Unknown seed persona: ${key}`);

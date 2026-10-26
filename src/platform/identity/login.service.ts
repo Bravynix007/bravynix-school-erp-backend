@@ -15,6 +15,7 @@ import {
   IdentityRepository,
   type LiveChallenge,
   type LoginUser,
+  NIL_UUID,
 } from './identity.repository.js';
 import { lockoutEmail } from './lockout-email.js';
 import { OtpHasher } from './otp-hasher.js';
@@ -23,6 +24,7 @@ import { PublicCallLimiter } from './public-call-limiter.js';
 import { MOBILE_SESSION_MS } from './session-rules.js';
 import { requestIp } from './request-ip.js';
 import { SessionRepository } from './session.repository.js';
+import { latest, secondsUntil } from './time-rules.js';
 import type { EmailMessage } from '../email/email-sender.js';
 import { TokenService } from './token.service.js';
 import type { DeviceDto } from './verify-otp.dto.js';
@@ -54,7 +56,6 @@ export interface LoginResult {
 }
 
 const NO_CODE = Buffer.alloc(32);
-const NIL_UUID = '00000000-0000-0000-0000-000000000000';
 
 type Refused = { kind: 'refused'; error: AppException; mail?: EmailMessage };
 type Outcome =
@@ -310,16 +311,6 @@ export class LoginService {
 
 function refused(status: HttpStatus, code: string, retryAfterSeconds?: number): Refused {
   return { kind: 'refused', error: new AppException(status, code, { retryAfterSeconds }) };
-}
-
-function latest(a: Date | null | undefined, b: Date | null | undefined): Date | null {
-  if (!a) return b ?? null;
-  if (!b) return a;
-  return a > b ? a : b;
-}
-
-function secondsUntil(target: Date, now: Date): number {
-  return Math.max(1, Math.ceil((target.getTime() - now.getTime()) / 1000));
 }
 
 function displayName(user: LoginUser): string | null {
