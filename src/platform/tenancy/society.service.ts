@@ -23,7 +23,7 @@ import {
   SOCIETY_SORT_FIELDS,
   type CreateSocietyDto,
   type ListSocietiesQueryDto,
-  type PauseSocietyDto,
+  type PauseDto,
   type UpdateSocietyDto,
 } from './society.dto.js';
 import { SocietyRepository, type SocietyChanges, type SocietyRow } from './society.repository.js';
@@ -194,7 +194,7 @@ export class SocietyService {
     return { id, status: 0 };
   }
 
-  async pause(principal: Principal, id: string, body: PauseSocietyDto): Promise<SocietyResource> {
+  async pause(principal: Principal, id: string, body: PauseDto): Promise<SocietyResource> {
     const row = await this.database.transaction(platformTenant(principal, id), async (tx) => {
       const current = await this.lockedAt(tx, id, body.version);
       requirePausable(current);

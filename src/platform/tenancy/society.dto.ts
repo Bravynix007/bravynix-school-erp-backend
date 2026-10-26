@@ -92,7 +92,7 @@ export class UpdateSocietyDto extends IntersectionType(VersionDto, SocietyProfil
 }
 
 /** PLT-07 body: why access is paused, shown to the Society's people. */
-export class PauseSocietyDto extends VersionDto {
+export class PauseDto extends VersionDto {
   @ApiProperty({ minLength: 1, maxLength: 500, example: 'Annual fee unpaid' })
   @IsString()
   @Length(1, 500)

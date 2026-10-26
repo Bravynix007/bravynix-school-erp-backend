@@ -24,7 +24,7 @@ import { VersionDto } from '../../common/validation/version.dto.js';
 import { TenantRootListQueryDto } from './tenant-root-list.query.js';
 
 /** PRD 11.4: 1 CBSE, 2 ICSE, 3 State Board, 4 IB, 5 IGCSE, 6 Other. */
-export const BOARD_CODES = [1, 2, 3, 4, 5, 6] as const;
+const BOARD_CODES = [1, 2, 3, 4, 5, 6] as const;
 
 const GSTIN = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 

@@ -49,7 +49,7 @@ import {
   RESUME_COLUMNS,
 } from './record-rules.js';
 import { ScopeService } from './scope.service.js';
-import type { PauseSocietyDto } from './society.dto.js';
+import type { PauseDto } from './society.dto.js';
 import { SocietyRepository } from './society.repository.js';
 import { isDuplicateOn, duplicateOn } from './duplicate.js';
 
@@ -260,11 +260,7 @@ export class InstitutionService {
   }
 
   /** PLT-20. */
-  async pause(
-    principal: Principal,
-    id: string,
-    body: PauseSocietyDto,
-  ): Promise<InstitutionResource> {
+  async pause(principal: Principal, id: string, body: PauseDto): Promise<InstitutionResource> {
     const tenant = await this.tenantFor(principal, id);
     const row = await this.database.transaction(tenant, async (tx) => {
       const current = await this.lockedAt(tx, id, body.version);

@@ -10,7 +10,7 @@ import { VersionDto } from '../../common/validation/version.dto.js';
 import { ListInstitutionsQueryDto } from './institution.dto.js';
 import type { InstitutionResource, InstitutionSummary } from './institution.resource.js';
 import { InstitutionService } from './institution.service.js';
-import { PauseSocietyDto } from './society.dto.js';
+import { PauseDto } from './society.dto.js';
 
 /** The platform policy every route here shares: Super Admin only (API design 10.4c). */
 const superAdmin = (operationId: string, rule: string) =>
@@ -37,7 +37,7 @@ export class PlatformInstitutionController {
   pause(
     @CurrentPrincipal() principal: Principal,
     @Param('institutionId', UuidParamPipe) institutionId: string,
-    @Body() body: PauseSocietyDto,
+    @Body() body: PauseDto,
   ): Promise<InstitutionResource> {
     return this.institutions.pause(principal, institutionId, body);
   }

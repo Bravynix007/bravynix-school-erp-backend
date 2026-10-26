@@ -1,6 +1,6 @@
 import { AppException, type FieldError } from '../../common/http/app-exception.js';
 import { createValidationPipe } from '../../common/validation/validation.js';
-import { CreateSocietyDto, PauseSocietyDto, UpdateSocietyDto } from './society.dto.js';
+import { CreateSocietyDto, PauseDto, UpdateSocietyDto } from './society.dto.js';
 
 const pipe = createValidationPipe();
 const body = <T>(metatype: new () => T, value: unknown) =>
@@ -81,17 +81,17 @@ describe('UpdateSocietyDto', () => {
   );
 });
 
-describe('PauseSocietyDto', () => {
+describe('PauseDto', () => {
   it('needs a reason of 1 to 500 characters and the version', async () => {
-    expect(await problems(body(PauseSocietyDto, { version: 1, reason: 'Dues' }))).toEqual([]);
+    expect(await problems(body(PauseDto, { version: 1, reason: 'Dues' }))).toEqual([]);
     for (const value of [
       { version: 1 },
       { version: 1, reason: '' },
       { version: 1, reason: 'r'.repeat(501) },
     ]) {
-      expect(await problems(body(PauseSocietyDto, value))).not.toEqual([]);
+      expect(await problems(body(PauseDto, value))).not.toEqual([]);
     }
-    expect(await problems(body(PauseSocietyDto, { reason: 'x' }))).toContainEqual({
+    expect(await problems(body(PauseDto, { reason: 'x' }))).toContainEqual({
       field: 'version',
       code: 'INVALID_TYPE',
     });
