@@ -70,10 +70,10 @@ export const societies: DemoSociety[] = [
   },
   {
     id: id(9102),
-    code: 'NET',
-    name: 'Navodaya Education Trust',
+    code: 'LET',
+    name: 'Lakeshore Education Trust',
     description: 'A trust running a public school in Mysuru.',
-    email: 'office@navodaya.demo.test',
+    email: 'office@lakeshore.demo.test',
     line1: '4 Temple Street',
     pincode: '570001',
   },
@@ -100,9 +100,9 @@ export const institutions: DemoInstitution[] = [
   },
   {
     id: id(9203),
-    society: 'NET',
-    code: 'NPS',
-    name: 'Navodaya Public School',
+    society: 'LET',
+    code: 'LPS',
+    name: 'Lakeshore Public School',
     place: 'Mysuru',
     line1: '4 Temple Street',
     pincode: '570001',
@@ -113,7 +113,7 @@ export const institutions: DemoInstitution[] = [
 export const owners: { person: DemoPerson; society: DemoSociety['code'] }[] = [
   { person: asha, society: 'SVES' },
   { person: meera, society: 'SVES' },
-  { person: asha, society: 'NET' },
+  { person: asha, society: 'LET' },
 ];
 
 /** Institution Admins: one per Institution of Sri Vidya. */

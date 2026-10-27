@@ -23,7 +23,7 @@ describe('seedScenario', () => {
     ).rejects.toThrow(/refused in staging and production/);
   });
 
-  it('writes no password and no key: every demo email is on a reserved domain', async () => {
+  it('keeps every demo email on a reserved domain, so nothing can be delivered', async () => {
     const { people } = await import('../seeds/demo.js');
     for (const p of people) expect(p.email).toMatch(/@demo\.test$/);
   });

@@ -79,7 +79,7 @@ describe('the demo seed', () => {
         order by u.email, s.code
       `.execute(tx);
       expect(ownerGrants.rows).toEqual([
-        { email: asha.email, code: 'NET' },
+        { email: asha.email, code: 'LET' },
         { email: asha.email, code: 'SVES' },
         { email: meera.email, code: 'SVES' },
       ]);
