@@ -31,6 +31,8 @@ export const PgErrorCode = {
   deadlockDetected: '40P01',
 } as const;
 
+const poolLogger = new Logger('DatabasePool');
+
 export function createPool(
   connectionString: string,
   max: number,
@@ -43,13 +45,20 @@ export function createPool(
   pg.types.setTypeParser(pg.types.builtins.NUMERIC, (value) => value);
   // bigint counts fit in a JS number for this system's volumes.
   pg.types.setTypeParser(pg.types.builtins.INT8, (value) => Number(value));
-  return new pg.Pool({
+  const pool = new pg.Pool({
     connectionString,
     max,
     statement_timeout: statementTimeoutMs,
     idle_in_transaction_session_timeout: statementTimeoutMs * 2,
     application_name: 'bravynix-school-erp-api',
   });
+  // An idle connection dies for ordinary reasons: a failover, a restart, a proxy timeout. The pool reports it as
+  // 'error', and with no listener Node ends the process. The pool drops the dead client and the next query opens
+  // a new one, so the loss is only logged.
+  pool.on('error', (error) => {
+    poolLogger.warn({ err: error }, 'An idle database connection was lost');
+  });
+  return pool;
 }
 
 @Injectable()
