@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { RoleName } from '../../common/auth/roles.js';
+import { RoleCode, RoleName } from '../../common/auth/roles.js';
 import { AppException } from '../../common/http/app-exception.js';
-import type { ErrorCode } from '../../common/http/error-codes.js';
+import { ErrorCode } from '../../common/http/error-codes.js';
 import { duplicateOn, type Tx } from '../database/index.js';
 import { welcomeEmail } from './account-email.js';
 import type { NewPersonDto } from './account.dto.js';
@@ -42,7 +42,9 @@ export class AccountDirectory {
    * Gives a person the role by email: a new email makes a Pending account, an
    * email that already belongs to a person gives them the role (one email is
    * one person, PRD 5.2). The lowest free seat is taken; none free is 409
-   * `SEAT_LIMIT_REACHED`. A person who already holds the seat kind is 409 `DUPLICATE`.
+   * `SEAT_LIMIT_REACHED`. A person who already holds the seat kind is 409
+   * `DUPLICATE`; one who holds the other platform role (Super Admin and Society
+   * Owner are never the same person) is 409 `ROLE_CONFLICT`.
    */
   async grant(
     tx: Tx,
@@ -59,6 +61,7 @@ export class AccountDirectory {
       if (await this.accounts.activeGrant(tx, existing.id, kind.roleCode, kind.societyId)) {
         throw duplicateOn('email');
       }
+      await this.requireSeparateRoles(tx, existing.id, kind.roleCode);
     }
     const holder =
       existing ??
@@ -87,6 +90,19 @@ export class AccountDirectory {
       seatNo,
       created: existing === undefined,
     };
+  }
+
+  /** Under the person lock, so a concurrent grant of the other role sees this one or is seen by it. */
+  private async requireSeparateRoles(
+    tx: Tx,
+    userId: string,
+    roleCode: SeatKind['roleCode'],
+  ): Promise<void> {
+    await this.accounts.lockPerson(tx, userId);
+    const other = roleCode === RoleCode.SuperAdmin ? RoleCode.SocietyOwner : RoleCode.SuperAdmin;
+    if (await this.accounts.holdsActiveGrant(tx, userId, [other])) {
+      throw AppException.conflict(ErrorCode.ROLE_CONFLICT);
+    }
   }
 
   /**

@@ -61,6 +61,15 @@ export class AccountRepository {
     );
   }
 
+  /**
+   * One grant at a time per person, so a Super Admin grant and an Owner grant
+   * for the same person cannot both pass the separation check (PRD 5.2). Taken
+   * after the seat lock, always in that order. Released when the transaction ends.
+   */
+  async lockPerson(tx: Tx, userId: string): Promise<void> {
+    await sql`select pg_advisory_xact_lock(hashtextextended(${`person:${userId}`}, 0))`.execute(tx);
+  }
+
   async takenSeats(tx: Tx, roleCode: number, societyId: string | null): Promise<number[]> {
     const rows = await tx
       .selectFrom('role_assignments')
