@@ -35,6 +35,15 @@ npm run start:dev            # http://localhost:3000, OpenAPI UI at /docs
 
 Mail sent locally lands in Mailpit at http://localhost:8025.
 
+### Demo data
+
+`npm run demo:reset` drops and rebuilds a separate database, `school_erp_demo`, and writes the `demo` scenario (two
+Societies, three Institutions, two Owners, two Institution Admins; every email ends in `@demo.test`). `npm run
+demo:api` runs the API against it with `demo.env`. Both refuse anything but a local database, and `demo:reset`
+touches only `school_erp_demo`. It needs the database administrator: `DEMO_ADMIN_URL` (default
+`postgres://postgres:postgres@localhost:5432/postgres`, the docker compose user). The run-through script is the
+project's `docs/DEMO_RUNBOOK.md`.
+
 ## Scripts
 
 | Script                                           | What it does                                                                                 |
@@ -47,7 +56,8 @@ Mail sent locally lands in Mailpit at http://localhost:8025.
 | `test:int`                                       | Integration tests on PostgreSQL (`test/integration`)                                         |
 | `lint`, `lint:boundaries`, `typecheck`, `format` | Static checks                                                                                |
 | `db:migrate`, `db:migrate:down`                  | Applies or rolls back migrations (migration user)                                            |
-| `db:seed [scenario]`                             | Writes test data; refused in staging and production                                          |
+| `db:seed [scenario]`                             | Writes test data (`two-worlds`, or `demo`); refused in staging and production                |
+| `demo:reset`, `demo:api`                         | Rebuilds the demo database and its data; runs the API against it                             |
 | `openapi`                                        | Writes `openapi.json`                                                                        |
 | `policies`                                       | Writes `policies.json`: every endpoint with its role policy, for QA's authorization matrix   |
 

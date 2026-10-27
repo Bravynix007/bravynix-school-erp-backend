@@ -171,20 +171,22 @@ export async function writeDemoSeed(db: Kysely<unknown>): Promise<void> {
 
   await sql`
     insert into role_assignments (user_id, role_code, seat_no)
-    select ${superAdmin.id}, 1, 1
+    select ${superAdmin.id}, 1, (
+      select coalesce(max(seat_no), 0) + 1 from role_assignments where role_code = 1 and revoked_at is null
+    )
     where not exists (
       select 1 from role_assignments where user_id = ${superAdmin.id} and role_code = 1 and revoked_at is null
     )
   `.execute(db);
 
-  const seats = new Map<string, number>();
   for (const { person: p, society: code } of owners) {
     const society = societyOf(code);
-    const seat = (seats.get(society.id) ?? 0) + 1;
-    seats.set(society.id, seat);
     await sql`
       insert into role_assignments (user_id, role_code, society_id, seat_no)
-      select ${p.id}, 2, ${society.id}, ${seat}
+      select ${p.id}, 2, ${society.id}, (
+        select coalesce(max(seat_no), 0) + 1 from role_assignments
+        where role_code = 2 and society_id = ${society.id} and revoked_at is null
+      )
       where not exists (
         select 1 from role_assignments
         where user_id = ${p.id} and role_code = 2 and society_id = ${society.id} and revoked_at is null
