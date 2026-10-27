@@ -1,9 +1,13 @@
 import { Global, Module } from '@nestjs/common';
 import { TenantAccessGate } from '../../common/auth/tenant-access-gate.js';
+import { AccessBlockRepository } from './access-block.repository.js';
+import { AccessBlockService } from './access-block.service.js';
 import { InstitutionController } from './institution.controller.js';
 import { InstitutionRepository } from './institution.repository.js';
 import { InstitutionService } from './institution.service.js';
+import { PlatformAccessBlockController } from './platform-access-block.controller.js';
 import { PlatformInstitutionController } from './platform-institution.controller.js';
+import { SocietyAccessBlockController } from './society-access-block.controller.js';
 import { SocietyOwnerController } from './society-owner.controller.js';
 import { SocietyOwnerService } from './society-owner.service.js';
 import { SocietyController } from './society.controller.js';
@@ -13,7 +17,7 @@ import { ScopeService } from './scope.service.js';
 import { TenancyAccessGate } from './tenancy-access-gate.js';
 import { TenancyRepository } from './tenancy.repository.js';
 
-/** Global so the policy guard in the common module finds the real pause check. */
+/** Global so the policy guard in the common module finds the real block check. */
 @Global()
 @Module({
   controllers: [
@@ -21,6 +25,8 @@ import { TenancyRepository } from './tenancy.repository.js';
     SocietyOwnerController,
     InstitutionController,
     PlatformInstitutionController,
+    PlatformAccessBlockController,
+    SocietyAccessBlockController,
   ],
   providers: [
     TenancyRepository,
@@ -29,6 +35,8 @@ import { TenancyRepository } from './tenancy.repository.js';
     SocietyOwnerService,
     InstitutionRepository,
     InstitutionService,
+    AccessBlockRepository,
+    AccessBlockService,
     ScopeService,
     { provide: TenantAccessGate, useClass: TenancyAccessGate },
   ],

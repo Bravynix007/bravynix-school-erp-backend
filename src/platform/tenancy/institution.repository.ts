@@ -8,9 +8,17 @@ import {
 } from 'kysely';
 import { containsPattern, type SortKey } from '../../common/pagination/pagination.js';
 import type { Database, Tx } from '../database/index.js';
+import { BlockSection } from '../../common/auth/block-section.js';
+import { institutionHasBlock } from './block-columns.js';
 import type { InstitutionsTable } from './tenancy.tables.js';
 
 export type InstitutionRow = Selectable<InstitutionsTable> & { society_name: string };
+
+/** A row of the PLT-19 list: which sections of the Institution are blocked. */
+export type InstitutionListRow = InstitutionRow & {
+  staff_blocked: boolean;
+  students_blocked: boolean;
+};
 
 export type NewInstitution = Insertable<InstitutionsTable>;
 export type InstitutionChanges = Updateable<InstitutionsTable>;
@@ -19,7 +27,8 @@ export interface InstitutionFilter {
   q?: string;
   societyId?: string;
   statuses?: readonly number[];
-  paused?: boolean;
+  /** Any of its sections blocked, or none. */
+  blocked?: boolean;
 }
 
 export type InstitutionSortField = 'name' | 'code' | 'createdAt';
@@ -56,8 +65,9 @@ export class InstitutionRepository {
       if (filter.societyId) conditions.push(eb('institutions.society_id', '=', filter.societyId));
       if (filter.statuses?.length)
         conditions.push(eb('institutions.status', 'in', filter.statuses));
-      if (filter.paused !== undefined) {
-        conditions.push(eb('institutions.access_paused_at', filter.paused ? 'is not' : 'is', null));
+      if (filter.blocked !== undefined) {
+        const any = sql<boolean>`(${institutionHasBlock(BlockSection.Staff)} or ${institutionHasBlock(BlockSection.Students)})`;
+        conditions.push(filter.blocked ? any : sql<boolean>`not ${any}`);
       }
       return eb.and(conditions);
     };
@@ -69,8 +79,13 @@ export class InstitutionRepository {
     sort: readonly SortKey<InstitutionSortField>[],
     limit: number,
     offset: number,
-  ): Promise<{ rows: InstitutionRow[]; total: number }> {
-    let query = this.selectInstitution(tx).where(this.matching(filter));
+  ): Promise<{ rows: InstitutionListRow[]; total: number }> {
+    let query = this.selectInstitution(tx)
+      .select([
+        institutionHasBlock(BlockSection.Staff).as('staff_blocked'),
+        institutionHasBlock(BlockSection.Students).as('students_blocked'),
+      ])
+      .where(this.matching(filter));
     for (const key of sort) query = query.orderBy(SORT_COLUMN[key.field], key.direction);
     const rows = await query.orderBy('institutions.id').limit(limit).offset(offset).execute();
     const { total } = await tx

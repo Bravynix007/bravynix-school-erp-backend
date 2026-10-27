@@ -15,7 +15,7 @@ export class MeController {
     roles: ALL_ROLES,
     scope: 'self',
     allowNoContext: true,
-    allowWhenPaused: true,
+    allowWhenBlocked: true,
     operationId: 'ME-01',
     rule: "The caller's own profile and contexts",
   })

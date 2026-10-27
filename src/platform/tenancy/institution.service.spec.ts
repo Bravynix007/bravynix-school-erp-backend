@@ -1,3 +1,4 @@
+import { BlockSection } from '../../common/auth/block-section.js';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { AppException } from '../../common/http/app-exception.js';
 import { FixedClock } from '../../common/time/clock.js';
@@ -18,7 +19,6 @@ const caller = (roleCode: Principal['roleCode'], societyId: string | null = null
   clientType: roleCode === 1 ? 'console' : 'mobile',
   viaSupportAccess: false,
 });
-const superAdmin = caller(1);
 const owner = caller(2, 'society-1');
 
 const institution = (overrides: Partial<InstitutionRow> = {}): InstitutionRow => ({
@@ -46,9 +46,6 @@ const institution = (overrides: Partial<InstitutionRow> = {}): InstitutionRow =>
   pincode: null,
   latitude: null,
   longitude: null,
-  access_paused_at: null,
-  access_paused_by: null,
-  access_pause_reason: null,
   ...overrides,
 });
 
@@ -62,6 +59,7 @@ function build(
   const update = vi.fn<InstitutionRepository['update']>().mockResolvedValue();
   const insert = vi.fn<InstitutionRepository['insert']>().mockResolvedValue();
   const activeAmong = vi.fn<InstitutionRepository['activeAmong']>().mockResolvedValue([]);
+  const page = vi.fn<InstitutionRepository['page']>().mockResolvedValue({ rows: [], total: 0 });
   const findSociety = vi.fn<SocietyRepository['find']>().mockResolvedValue(society as SocietyRow);
   const record = vi.fn<AuditService['record']>().mockResolvedValue('audit-1');
   const endAdminAccessInInstitution = vi
@@ -80,12 +78,12 @@ function build(
     personId: 'person-1',
     roleCode: 2,
     societyId: 'society-1',
-    institutions: [{ id: 'inst-1', paused: false }],
+    institutions: [{ id: 'inst-1', staffBlocked: false }],
     tenant,
   });
   const service = new InstitutionService(
     { transaction } as unknown as DatabaseService,
-    { find, update, insert, activeAmong } as unknown as InstitutionRepository,
+    { find, update, insert, activeAmong, page } as unknown as InstitutionRepository,
     { find: findSociety } as unknown as SocietyRepository,
     { requireInstitution, forPrincipal } as unknown as ScopeService,
     {
@@ -102,6 +100,7 @@ function build(
     update,
     insert,
     activeAmong,
+    page,
     record,
     endAdminAccessInInstitution,
     requireInstitution,
@@ -128,21 +127,10 @@ const creation = (body: Partial<CreateInstitutionDto> = {}) =>
 
 describe('InstitutionService', () => {
   describe('create: which Society', () => {
-    it('needs Super Admin to name it', async () => {
+    it('is the Owner’s own, and an Owner with none is refused', async () => {
       const t = build();
-      const error = await refusal(t.service.create(superAdmin, creation()));
-      expect(error.options.errors).toEqual([
-        expect.objectContaining({ field: 'societyId', code: 'REQUIRED' }),
-      ]);
+      expect((await refusal(t.service.create(caller(2), creation()))).status).toBe(403);
       expect(t.transaction).not.toHaveBeenCalled();
-    });
-
-    it('does not let an Owner name one, not even their own', async () => {
-      const t = build();
-      const error = await refusal(t.service.create(owner, creation({ societyId: 'society-1' })));
-      expect(error.options.errors).toEqual([
-        expect.objectContaining({ field: 'societyId', code: 'FIELD_NOT_ALLOWED' }),
-      ]);
     });
 
     it('uses an Owner’s own Society, in a context that names the new Institution', async () => {
@@ -165,22 +153,11 @@ describe('InstitutionService', () => {
       });
     });
 
-    it('opens Super Admin’s context in the named Society', async () => {
-      const t = build();
-      await t.service.create(superAdmin, creation({ societyId: 'society-9' }));
-      expect(t.transaction.mock.calls[0]![0]).toMatchObject({
-        roleCode: 1,
-        societyId: 'society-9',
-      });
-    });
-
     it('answers 404 for a Society that is not there and 409 for a deactivated one', async () => {
       const none = build(institution(), null);
-      expect(
-        (await refusal(none.service.create(superAdmin, creation({ societyId: 's' })))).status,
-      ).toBe(404);
+      expect((await refusal(none.service.create(owner, creation()))).status).toBe(404);
       const gone = build(institution(), { status: 0 });
-      const error = await refusal(gone.service.create(superAdmin, creation({ societyId: 's' })));
+      const error = await refusal(gone.service.create(owner, creation()));
       expect(error).toMatchObject({ status: 409, code: 'INVALID_STATE' });
       expect(gone.insert).not.toHaveBeenCalled();
     });
@@ -214,31 +191,16 @@ describe('InstitutionService', () => {
   });
 
   describe('which context a change runs in', () => {
-    it('gives an Owner the context of the scope check, so a stranger’s Institution is 404 and a paused one 423', async () => {
+    it('gives an Owner the context of the scope check, so a stranger’s Institution is 404 and one whose staff are blocked 423', async () => {
       const t = build();
       t.requireInstitution.mockRejectedValueOnce(AppException.notFound());
       expect((await refusal(t.service.update(owner, 'inst-9', patch({ version: 1 })))).status).toBe(
         404,
       );
-      t.requireInstitution.mockRejectedValueOnce(AppException.paused());
+      t.requireInstitution.mockRejectedValueOnce(AppException.sectionBlocked(BlockSection.Staff));
       expect((await refusal(t.service.deactivate(owner, 'inst-1'))).status).toBe(423);
       await t.service.update(owner, 'inst-1', patch({ version: 2, name: 'New' }));
       expect(t.transaction).toHaveBeenLastCalledWith(t.tenant, expect.any(Function));
-    });
-
-    it('gives Super Admin the Society and Institution it found', async () => {
-      const t = build(institution({ society_id: 'society-7' }));
-      await t.service.update(superAdmin, 'inst-1', patch({ version: 2, name: 'New' }));
-      expect(t.requireInstitution).not.toHaveBeenCalled();
-      expect(t.transaction).toHaveBeenLastCalledWith(
-        { personId: 'person-1', roleCode: 1, societyId: 'society-7', institutionIds: ['inst-1'] },
-        expect.any(Function),
-      );
-    });
-
-    it('answers 404 to Super Admin for an Institution that is not there', async () => {
-      const t = build(null);
-      expect((await refusal(t.service.deactivate(superAdmin, 'inst-1'))).status).toBe(404);
     });
   });
 
@@ -246,12 +208,12 @@ describe('InstitutionService', () => {
     it('refuses a stale version first, then a deactivated Institution', async () => {
       const stale = build(institution({ status: 0, version: 5 }));
       const error = await refusal(
-        stale.service.update(superAdmin, 'inst-1', patch({ version: 2, name: 'x' })),
+        stale.service.update(owner, 'inst-1', patch({ version: 2, name: 'x' })),
       );
       expect(error.code).toBe('VERSION_CONFLICT');
       const gone = build(institution({ status: 0 }));
       const inactive = await refusal(
-        gone.service.update(superAdmin, 'inst-1', patch({ version: 2, name: 'x' })),
+        gone.service.update(owner, 'inst-1', patch({ version: 2, name: 'x' })),
       );
       expect(inactive).toMatchObject({ status: 409, code: 'INVALID_STATE' });
     });
@@ -259,7 +221,7 @@ describe('InstitutionService', () => {
     it('writes nothing, and keeps the version, when the request changes nothing', async () => {
       const t = build();
       const result = await t.service.update(
-        superAdmin,
+        owner,
         'inst-1',
         patch({
           version: 2,
@@ -339,74 +301,8 @@ describe('InstitutionService', () => {
 
     it('refuses an Institution that is already deactivated, without touching grants', async () => {
       const t = build(institution({ status: 0 }));
-      expect((await refusal(t.service.deactivate(superAdmin, 'inst-1'))).code).toBe(
-        'INVALID_STATE',
-      );
+      expect((await refusal(t.service.deactivate(owner, 'inst-1'))).code).toBe('INVALID_STATE');
       expect(t.endAdminAccessInInstitution).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('pause and resume', () => {
-    const pausedRow = institution({
-      access_paused_at: new Date(),
-      access_paused_by: 'a',
-      access_pause_reason: 'x',
-    });
-
-    it('pauses with the time, the person and the reason, and audits the reason', async () => {
-      const t = build();
-      await t.service.pause(superAdmin, 'inst-1', { version: 2, reason: 'Dues' });
-      expect(t.update).toHaveBeenCalledWith(t.tx, 'inst-1', {
-        access_paused_at: new Date('2026-10-26T10:00:00.000Z'),
-        access_paused_by: 'person-1',
-        access_pause_reason: 'Dues',
-        updated_by: 'person-1',
-      });
-      expect(t.record).toHaveBeenCalledWith(
-        t.tx,
-        expect.objectContaining({
-          action: 'access.pause',
-          reason: 'Dues',
-          institutionId: 'inst-1',
-        }),
-      );
-    });
-
-    it('refuses to pause a paused or deactivated Institution, and to resume one that is not paused or is deactivated', async () => {
-      for (const [row, run] of [
-        [
-          pausedRow,
-          (s: InstitutionService) => s.pause(superAdmin, 'inst-1', { version: 2, reason: 'r' }),
-        ],
-        [
-          institution({ status: 0 }),
-          (s: InstitutionService) => s.pause(superAdmin, 'inst-1', { version: 2, reason: 'r' }),
-        ],
-        [institution(), (s: InstitutionService) => s.resume(superAdmin, 'inst-1', { version: 2 })],
-        [
-          institution({ ...pausedRow, status: 0 }),
-          (s: InstitutionService) => s.resume(superAdmin, 'inst-1', { version: 2 }),
-        ],
-      ] as const) {
-        const t = build(row);
-        expect((await refusal(run(t.service))).code).toBe('INVALID_STATE');
-        expect(t.update).not.toHaveBeenCalled();
-      }
-    });
-
-    it('resumes a paused Institution, clearing the three columns together', async () => {
-      const t = build(pausedRow);
-      await t.service.resume(superAdmin, 'inst-1', { version: 2 });
-      expect(t.update).toHaveBeenCalledWith(t.tx, 'inst-1', {
-        access_paused_at: null,
-        access_paused_by: null,
-        access_pause_reason: null,
-        updated_by: 'person-1',
-      });
-      expect(t.record).toHaveBeenCalledWith(
-        t.tx,
-        expect.objectContaining({ action: 'access.resume' }),
-      );
     });
   });
 
@@ -431,6 +327,45 @@ describe('InstitutionService', () => {
       const result = await t.service.options(caller(4));
       expect(result.data).toEqual([]);
       expect(t.transaction).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('get (INS-03)', () => {
+    it('reads the Institution in the context the scope check narrowed to', async () => {
+      const t = build();
+      const result = await t.service.get(owner, 'inst-1');
+      expect(t.requireInstitution).toHaveBeenCalledWith(owner, 'inst-1');
+      expect(t.find).toHaveBeenCalledWith(t.tx, 'inst-1');
+      expect(result).toMatchObject({ id: 'inst-1', societyId: 'society-1' });
+    });
+
+    it('answers 404 when the row is gone', async () => {
+      const t = build(null);
+      expect((await refusal(t.service.get(owner, 'inst-1'))).status).toBe(404);
+    });
+  });
+
+  describe('list (PLT-19)', () => {
+    it('pages across Societies as Super Admin, with the blocked filter, and names the blocked sections', async () => {
+      const t = build();
+      t.page.mockResolvedValueOnce({
+        rows: [{ ...institution(), staff_blocked: true, students_blocked: false }],
+        total: 1,
+      });
+      const result = await t.service.list(caller(1), {
+        page: 1,
+        limit: 20,
+        blocked: true,
+      } as Parameters<InstitutionService['list']>[1]);
+      expect(t.page).toHaveBeenCalledWith(
+        t.tx,
+        { q: undefined, societyId: undefined, statuses: undefined, blocked: true },
+        [{ field: 'name', direction: 'asc' }],
+        20,
+        0,
+      );
+      expect(result.data).toMatchObject([{ id: 'inst-1', blockedSections: ['staff'] }]);
+      expect(result.options.meta).toEqual({ page: 1, limit: 20, totalItems: 1, totalPages: 1 });
     });
   });
 });

@@ -115,6 +115,8 @@ const owner: Grant = {
   societyId: 'soc-1',
   societyName: 'North Trust',
   institutionId: null,
+  ownersBlocked: false,
+  staffBlocked: false,
 };
 const fail = async (promise: Promise<unknown>) =>
   (await promise.then(
@@ -169,7 +171,11 @@ describe('LoginService.verify', () => {
     );
     expect(t.record).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ action: 'auth.login', societyId: null, institutionId: null }),
+      expect.objectContaining({
+        action: 'auth.login',
+        societyId: null,
+        institutionId: null,
+      }),
     );
     expect(t.check).toHaveBeenCalledWith('203.0.113.9');
     const check = await t.tokens.checkAccessToken(result.accessToken, t.clock.now());
@@ -190,7 +196,14 @@ describe('LoginService.verify', () => {
       live: [live()],
       grants: [
         owner,
-        { roleCode: 3, societyId: 'soc-1', societyName: 'North Trust', institutionId: 'ins-1' },
+        {
+          roleCode: 3,
+          societyId: 'soc-1',
+          societyName: 'North Trust',
+          institutionId: 'ins-1',
+          ownersBlocked: false,
+          staffBlocked: false,
+        },
       ],
     });
     const several = await signedIn(two.service.verify(request()));
@@ -201,7 +214,16 @@ describe('LoginService.verify', () => {
     const sa = build({
       user: user(),
       live: [live()],
-      grants: [{ roleCode: 1, societyId: null, societyName: null, institutionId: null }],
+      grants: [
+        {
+          roleCode: 1,
+          societyId: null,
+          societyName: null,
+          institutionId: null,
+          ownersBlocked: false,
+          staffBlocked: false,
+        },
+      ],
     });
     const onlyConsole = await signedIn(sa.service.verify(request()));
     expect(onlyConsole.contexts).toEqual([]);
@@ -407,7 +429,16 @@ describe('LoginService.verify', () => {
     const admin = build({
       user: user(),
       live: [live()],
-      grants: [{ roleCode: 1, societyId: null, societyName: null, institutionId: null }],
+      grants: [
+        {
+          roleCode: 1,
+          societyId: null,
+          societyName: null,
+          institutionId: null,
+          ownersBlocked: false,
+          staffBlocked: false,
+        },
+      ],
     });
     expect(await admin.service.verify(consoleRequest)).toEqual({
       mfaRequired: true,
@@ -422,7 +453,16 @@ describe('LoginService.verify', () => {
     const locked = build({
       user: user(),
       live: [live()],
-      grants: [{ roleCode: 1, societyId: null, societyName: null, institutionId: null }],
+      grants: [
+        {
+          roleCode: 1,
+          societyId: null,
+          societyName: null,
+          institutionId: null,
+          ownersBlocked: false,
+          staffBlocked: false,
+        },
+      ],
       mfaLock: new Date(admin.clock.now().getTime() + 7200_000),
     });
     expect(await fail(locked.service.verify(consoleRequest))).toMatchObject({

@@ -1,23 +1,10 @@
-import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  HttpCode,
-  HttpStatus,
-  Param,
-  Patch,
-  Post,
-  Query,
-} from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { CurrentPrincipal } from '../../common/auth/current-principal.decorator.js';
 import { superAdminPolicy } from '../../common/auth/platform-policy.js';
 import { ApiResult } from '../../common/http/api-result.js';
 import { UuidParamPipe } from '../../common/http/uuid-param.pipe.js';
-import { VersionedReasonDto } from '../../common/validation/reason.dto.js';
-import { VersionDto } from '../../common/validation/version.dto.js';
 import { CreateSocietyDto, ListSocietiesQueryDto, UpdateSocietyDto } from './society.dto.js';
 import type { SocietyDetail, SocietyResource, SocietySummary } from './society.resource.js';
 import { SocietyService } from './society.service.js';
@@ -54,7 +41,7 @@ export class SocietyController {
     return this.societies.get(principal, societyId);
   }
 
-  @superAdminPolicy('PLT-05', 'Edits the profile; the code, status and pause are not editable here')
+  @superAdminPolicy('PLT-05', 'Edits the profile; the code and status are not editable here')
   @Patch(':societyId')
   update(
     @CurrentPrincipal() principal: Principal,
@@ -74,27 +61,5 @@ export class SocietyController {
     @Param('societyId', UuidParamPipe) societyId: string,
   ): Promise<{ id: string; status: 0 }> {
     return this.societies.deactivate(principal, societyId);
-  }
-
-  @superAdminPolicy('PLT-07', 'Pauses a Society’s access with a reason; no data changes')
-  @HttpCode(HttpStatus.OK)
-  @Post(':societyId/pause')
-  pause(
-    @CurrentPrincipal() principal: Principal,
-    @Param('societyId', UuidParamPipe) societyId: string,
-    @Body() body: VersionedReasonDto,
-  ): Promise<SocietyResource> {
-    return this.societies.pause(principal, societyId, body);
-  }
-
-  @superAdminPolicy('PLT-08', 'Resumes a paused Society')
-  @HttpCode(HttpStatus.OK)
-  @Post(':societyId/resume')
-  resume(
-    @CurrentPrincipal() principal: Principal,
-    @Param('societyId', UuidParamPipe) societyId: string,
-    @Body() body: VersionDto,
-  ): Promise<SocietyResource> {
-    return this.societies.resume(principal, societyId, body);
   }
 }

@@ -1,7 +1,8 @@
 import type { Principal } from '../../common/auth/access-token-verifier.js';
+import { BlockSection } from '../../common/auth/block-section.js';
+import type { ActiveBlock } from './access-block.rules.js';
 import type { RequestScope, ScopeService } from './scope.service.js';
 import { TenancyAccessGate } from './tenancy-access-gate.js';
-import type { TenancyRepository } from './tenancy.repository.js';
 
 const principal = (overrides: Partial<Principal> = {}): Principal => ({
   personId: 'person-1',
@@ -13,74 +14,76 @@ const principal = (overrides: Partial<Principal> = {}): Principal => ({
   ...overrides,
 });
 
-function build(state: boolean | null, paused: boolean[] = []) {
-  const societyPauseState = vi
-    .fn<TenancyRepository['societyPauseState']>()
-    .mockResolvedValue(state);
+const owners: ActiveBlock = { section: BlockSection.Owners, institutionId: null };
+const staffOf = (institutionId: string): ActiveBlock => ({
+  section: BlockSection.Staff,
+  institutionId,
+});
+const studentsOf = (institutionId: string): ActiveBlock => ({
+  section: BlockSection.Students,
+  institutionId,
+});
+
+function build(blocks: ActiveBlock[] = [], reached: string[] = []) {
+  const activeBlocks = vi.fn<ScopeService['activeBlocks']>().mockResolvedValue(blocks);
   const forPrincipal = vi.fn<ScopeService['forPrincipal']>().mockResolvedValue({
-    institutions: paused.map((isPaused, i) => ({ id: `i${i}`, paused: isPaused })),
+    institutions: reached.map((id) => ({ id, staffBlocked: false })),
   } as unknown as RequestScope);
-  const gate = new TenancyAccessGate(
-    { societyPauseState } as unknown as TenancyRepository,
-    { forPrincipal } as unknown as ScopeService,
-  );
-  return { gate, societyPauseState, forPrincipal };
+  const gate = new TenancyAccessGate({ activeBlocks, forPrincipal } as unknown as ScopeService);
+  return { gate, activeBlocks, forPrincipal };
 }
 
 describe('TenancyAccessGate', () => {
-  it('reports a paused Society', async () => {
-    expect(await build(true).gate.isPaused(principal())).toBe(true);
-  });
-
-  it('reports an open Society', async () => {
-    expect(await build(false).gate.isPaused(principal())).toBe(false);
-  });
-
-  it('counts a Society the caller cannot see as paused, so an unknown scope never opens the door', async () => {
-    expect(await build(null).gate.isPaused(principal())).toBe(true);
-  });
-
   it('does not look anything up for a caller with no Society', async () => {
-    const { gate, societyPauseState } = build(true);
-    expect(await gate.isPaused(principal({ societyId: null, roleCode: 1 }))).toBe(false);
-    expect(societyPauseState).not.toHaveBeenCalled();
+    const { gate, activeBlocks } = build([owners]);
+    expect(await gate.blockedSection(principal({ societyId: null, roleCode: 1 }))).toBeNull();
+    expect(activeBlocks).not.toHaveBeenCalled();
   });
 
-  it('reads the Society as the caller, so row-level security applies to the check itself', async () => {
-    const { gate, societyPauseState } = build(false);
-    await gate.isPaused(principal());
-    expect(societyPauseState).toHaveBeenCalledWith(
-      { personId: 'person-1', societyId: 'society-1', roleCode: 2, viaSupportAccess: false },
-      'society-1',
-    );
+  describe('a Society Owner', () => {
+    it('is stopped by an owners block, with the section named', async () => {
+      expect(await build([owners]).gate.blockedSection(principal())).toBe(BlockSection.Owners);
+    });
+
+    it('carries on when only staff or students are blocked, or nothing', async () => {
+      expect(await build().gate.blockedSection(principal())).toBeNull();
+      const t = build([staffOf('i1'), studentsOf('i2')]);
+      expect(await t.gate.blockedSection(principal())).toBeNull();
+    });
+
+    it('costs one read: the Institutions are not looked up', async () => {
+      const t = build([owners]);
+      await t.gate.blockedSection(principal());
+      expect(t.forPrincipal).not.toHaveBeenCalled();
+    });
   });
 
   describe('an Institution Admin', () => {
     const admin = principal({ roleCode: 3 });
 
-    it('is stopped when every Institution they reach is paused', async () => {
-      expect(await build(false, [true]).gate.isPaused(admin)).toBe(true);
-      expect(await build(false, [true, true]).gate.isPaused(admin)).toBe(true);
+    it('is stopped when every Institution they reach has its staff blocked', async () => {
+      const shut = [staffOf('i1'), staffOf('i2')];
+      expect(await build(shut, ['i1']).gate.blockedSection(admin)).toBe(BlockSection.Staff);
+      expect(await build(shut, ['i1', 'i2']).gate.blockedSection(admin)).toBe(BlockSection.Staff);
     });
 
     it('carries on while one Institution is open', async () => {
-      expect(await build(false, [true, false]).gate.isPaused(admin)).toBe(false);
+      const t = build([staffOf('i1')], ['i1', 'i2']);
+      expect(await t.gate.blockedSection(admin)).toBeNull();
     });
 
-    it('is not stopped for reaching no Institution: there is nothing paused to blame', async () => {
-      expect(await build(false, []).gate.isPaused(admin)).toBe(false);
+    it('is not stopped by an owners or students block', async () => {
+      expect(await build([owners, studentsOf('i1')], ['i1']).gate.blockedSection(admin)).toBeNull();
     });
 
-    it('is stopped by a Society pause without reading the Institutions', async () => {
-      const t = build(true, [false]);
-      expect(await t.gate.isPaused(admin)).toBe(true);
-      expect(t.forPrincipal).not.toHaveBeenCalled();
+    it('is not stopped for reaching no Institution: there is nothing blocked to blame', async () => {
+      expect(await build([staffOf('i1')], []).gate.blockedSection(admin)).toBeNull();
     });
   });
 
-  it('leaves a Society Owner running while every Institution is paused', async () => {
-    const t = build(false, [true, true]);
-    expect(await t.gate.isPaused(principal({ roleCode: 2 }))).toBe(false);
-    expect(t.forPrincipal).not.toHaveBeenCalled();
+  it('leaves a parent to the per-child check, where a request names a child', async () => {
+    expect(
+      await build([studentsOf('i1')]).gate.blockedSection(principal({ roleCode: 5 })),
+    ).toBeNull();
   });
 });

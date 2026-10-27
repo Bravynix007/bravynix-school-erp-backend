@@ -20,9 +20,9 @@ export class TenantRootListQueryDto extends PageQueryDto {
   @IsIn([0, 1], { each: true })
   status?: number[];
 
-  @ApiPropertyOptional({ description: 'Only paused, or only not paused' })
+  @ApiPropertyOptional({ description: 'Only with a blocked section, or only with none' })
   @IsOptional()
   @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
   @IsBoolean()
-  paused?: boolean;
+  blocked?: boolean;
 }

@@ -252,12 +252,14 @@ describe('PLT-03, PLT-09 to PLT-11 Society Owners', () => {
       );
     });
 
-    it('is not stopped by a paused Society: Super Admin is never stopped', async () => {
+    it('is not stopped by a block on the Society’s Owners: Super Admin is never stopped', async () => {
       const society = await createSociety();
-      await api('post', `/v1/platform/societies/${society.body.data.id}/pause`, admin, {
+      const blocked = await api('post', '/v1/platform/access-blocks', admin, {
+        section: 'owners',
+        societyId: society.body.data.id,
         reason: 'Dues',
-        version: society.body.data.version,
       });
+      expect(blocked.status).toBe(201);
       expect((await addOwner(society.body.data.id, { email: email() })).status).toBe(201);
     });
   });

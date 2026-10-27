@@ -105,13 +105,8 @@ class AddressChangeDto {
   address?: RequiredAddressDto;
 }
 
-/** INS-02 body. `societyId` is for Super Admin only; the service checks it, because it depends on the caller. */
+/** INS-02 body. The Society is the Owner's own, so `societyId` is not a field: it answers FIELD_NOT_ALLOWED. */
 export class CreateInstitutionDto extends InstitutionProfileDto {
-  @ApiPropertyOptional({ format: 'uuid', description: 'Super Admin only: the Society to add to' })
-  @IsOptional()
-  @IsUUID()
-  societyId?: string;
-
   @ApiProperty({ maxLength: 255 })
   @IsString()
   @IsNotEmpty()
@@ -134,7 +129,7 @@ export class CreateInstitutionDto extends InstitutionProfileDto {
 /**
  * INS-04 body. An omitted field stays, `null` clears an optional one; `phone`,
  * `address` and `location` are replaced as a whole. `code`, `societyId`,
- * `status` and the pause are not fields here, so they answer FIELD_NOT_ALLOWED.
+ * `status` and the blocks are not fields here, so they answer FIELD_NOT_ALLOWED.
  */
 export class UpdateInstitutionDto extends IntersectionType(
   VersionDto,

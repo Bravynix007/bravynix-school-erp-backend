@@ -517,6 +517,10 @@ describe('rolling back', () => {
           await import('../../src/platform/database/migrations/2026_10_26_0007_identity_mfa.js'),
           /authenticator tables/,
         ],
+        [
+          await import('../../src/platform/database/migrations/2026_10_27_0011_tenancy_access_blocks.js'),
+          /access_blocks/,
+        ],
       ] as const;
       for (const [migration, name] of guarded) {
         await expect(migration.down(null as never)).rejects.toThrow(

@@ -8,6 +8,10 @@ export interface Grant {
   societyId: string | null;
   societyName: string | null;
   institutionId: string | null;
+  /** The Society's Owners are blocked (section `owners`). */
+  ownersBlocked: boolean;
+  /** The grant's Institution has its staff blocked (section `staff`). */
+  staffBlocked: boolean;
 }
 
 export interface NewSession {
@@ -94,15 +98,28 @@ function toSession(row: {
 export class SessionRepository {
   /** The grants that let this person act as Super Admin, Owner or Institution Admin. */
   async activeGrants(tx: Db, userId: string): Promise<Grant[]> {
-    // Sign-in has no role set, so row-level security hides every Society; the function
-    // hands back the one name for a Society the person holds a grant in.
+    // Sign-in has no role set, so row-level security hides every Society and block; the
+    // functions hand back the one name, and the active blocks, of a Society the person
+    // holds a grant in.
     const rows = await tx
       .selectFrom('role_assignments')
       .select([
         'role_code',
         'society_id',
         'institution_id',
-        sql<string | null>`app_society_name(society_id)`.as('society_name'),
+        sql<
+          string | null
+        >`app_society_name(role_assignments.society_id, role_assignments.user_id)`.as(
+          'society_name',
+        ),
+        sql<boolean>`exists (
+          select 1 from app_active_blocks(role_assignments.society_id, role_assignments.user_id) b
+          where b.section = 1
+        )`.as('owners_blocked'),
+        sql<boolean>`exists (
+          select 1 from app_active_blocks(role_assignments.society_id, role_assignments.user_id) b
+          where b.section = 2 and b.institution_id = role_assignments.institution_id
+        )`.as('staff_blocked'),
       ])
       .where('user_id', '=', userId)
       .where('revoked_at', 'is', null)
@@ -114,6 +131,8 @@ export class SessionRepository {
       societyId: row.society_id,
       societyName: row.society_name,
       institutionId: row.institution_id,
+      ownersBlocked: row.owners_blocked,
+      staffBlocked: row.staff_blocked,
     }));
   }
 
