@@ -15,6 +15,9 @@ export interface SocietyOwnerSummary {
   email: string;
   displayName: string;
   accountStatus: number;
+  blockedAt: string | null;
+  blockReason: string | null;
+  version: number;
   seatNo: number;
   grantedAt: string;
   society: { id: string; code: string; name: string };
@@ -39,6 +42,9 @@ export function ownerSummary(
     email: grant.email,
     displayName: grant.displayName,
     accountStatus: grant.accountStatus,
+    blockedAt: grant.blockedAt?.toISOString() ?? null,
+    blockReason: grant.blockReason,
+    version: grant.version,
     seatNo: grant.seatNo,
     grantedAt: grant.grantedAt.toISOString(),
     society: societies.get(grant.societyId)!,

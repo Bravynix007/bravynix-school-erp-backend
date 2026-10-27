@@ -31,6 +31,9 @@ interface OwnerRow {
   email: string;
   displayName: string;
   accountStatus: number;
+  blockedAt: string | null;
+  blockReason: string | null;
+  version: number;
   seatNo: number;
   society: { id: string; code: string; name: string };
 }
@@ -418,9 +421,34 @@ describe('PLT-03, PLT-09 to PLT-11 Society Owners', () => {
         displayName: 'Asha Zed',
         accountStatus: 1,
         seatNo: 1,
+        blockedAt: null,
+        blockReason: null,
+        version: expect.any(Number),
         society: { id: one, name: 'Alpha Trust' },
       });
       expect(inOne.body.meta).toMatchObject({ page: 1, totalItems: 1, totalPages: 1 });
+
+      // The listed version is what PLT-15 and PLT-16 need: act on the Owner from this list alone.
+      const listed = (inOne.body.data as unknown as OwnerRow[])[0]!;
+      const block = await api('post', `/v1/platform/users/${listed.id}/block`, admin, {
+        reason: 'Unpaid dues',
+        version: listed.version,
+      });
+      expect(block.status).toBe(200);
+      const blocked = (
+        (await api('get', `/v1/platform/society-owners?societyId=${one}`, admin)).body
+          .data as unknown as OwnerRow[]
+      )[0]!;
+      expect(blocked).toMatchObject({
+        accountStatus: 2,
+        blockReason: 'Unpaid dues',
+        blockedAt: expect.any(String),
+      });
+      expect(blocked.version).toBeGreaterThan(listed.version);
+      const unblock = await api('post', `/v1/platform/users/${listed.id}/unblock`, admin, {
+        version: blocked.version,
+      });
+      expect(unblock.status).toBe(200);
 
       const byName = await api(
         'get',
