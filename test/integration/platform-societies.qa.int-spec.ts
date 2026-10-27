@@ -127,8 +127,8 @@ describe('QA B9a: Societies on the platform console', () => {
       ['get', `${BASE}/${societyA.id}`, {}],
       ['patch', `${BASE}/${societyA.id}`, { version: 1, name: 'Hijacked' }],
       ['delete', `${BASE}/${target.id}`, {}],
-      ['post', `${BASE}/${societyA.id}/pause`, { version: 1, reason: 'x' }],
-      ['post', `${BASE}/${societyB.id}/resume`, { version: 1 }],
+      ['post', '/v1/platform/access-blocks', { section: 'owners', societyId: societyA.id }],
+      ['delete', `/v1/platform/access-blocks/${societyB.id}`, {}],
     ];
     const wrong: string[] = [];
     for (const [who, token, expected] of callers) {
@@ -165,32 +165,25 @@ describe('QA B9a: Societies on the platform console', () => {
     expect(answers.find((a) => a.status === 409)!.body.data.currentVersion).toBe(s.version + 1);
   });
 
-  it('a stale version beats INVALID_STATE on a deactivated Society, for edit, pause and resume', async () => {
+  it('a stale version beats INVALID_STATE on a deactivated Society', async () => {
     const s = (await create()).body.data as { id: string; version: number };
-    await call('post', `${BASE}/${s.id}/pause`, { version: s.version, reason: 'Fees' }).expect(200);
     await call('delete', `${BASE}/${s.id}`).expect(200);
     const now = (await call('get', `${BASE}/${s.id}`)).body.data.version as number;
-    expect(now).toBeGreaterThan(s.version + 1);
-    for (const [path, body] of [
-      [`${BASE}/${s.id}`, { name: 'Y' }],
-      [`${BASE}/${s.id}/pause`, { reason: 'x' }],
-      [`${BASE}/${s.id}/resume`, {}],
-    ] as const) {
-      const method = path.endsWith(s.id) ? 'patch' : 'post';
-      const stale = await call(method, path, { ...body, version: s.version });
-      expect(`${stale.status} ${stale.body.code}`).toBe('409 VERSION_CONFLICT');
-    }
+    expect(now).toBeGreaterThan(s.version);
+    const stale = await call('patch', `${BASE}/${s.id}`, { name: 'Y', version: s.version });
+    expect(`${stale.status} ${stale.body.code}`).toBe('409 VERSION_CONFLICT');
     const edit = await call('patch', `${BASE}/${s.id}`, { name: 'Y', version: now });
     expect(`${edit.status} ${edit.body.code}`).toBe('409 INVALID_STATE');
   });
 
-  it('D1: a deactivated Society that was paused is refused on resume', async () => {
-    const s = (await create()).body.data as { id: string; version: number };
-    await call('post', `${BASE}/${s.id}/pause`, { version: s.version, reason: 'Fees' }).expect(200);
+  it('a deactivated Society cannot have its Owners blocked: INVALID_STATE, as for an edit', async () => {
+    const s = (await create()).body.data as { id: string };
     await call('delete', `${BASE}/${s.id}`).expect(200);
-    const now = (await call('get', `${BASE}/${s.id}`)).body.data.version as number;
-    const res = await call('post', `${BASE}/${s.id}/resume`, { version: now });
-    // Pause and edit refuse a deactivated Society with INVALID_STATE; resume should too.
+    const res = await call('post', '/v1/platform/access-blocks', {
+      section: 'owners',
+      societyId: s.id,
+      reason: 'Fees',
+    });
     expect(`${res.status} ${res.body.code}`).toBe('409 INVALID_STATE');
   });
 
@@ -263,7 +256,7 @@ describe('QA B9a: Societies on the platform console', () => {
       'page=0',
       'sort=id',
       'sort=-version',
-      'paused=yes',
+      'blocked=yes',
       'status=2',
     ]) {
       expect([query, (await call('get', `${BASE}?${query}`)).status]).toEqual([query, 400]);

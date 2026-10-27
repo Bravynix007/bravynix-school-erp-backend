@@ -140,10 +140,10 @@ class FixtureController {
   @Policy({
     roles: [RoleCode.SuperAdmin, RoleCode.SocietyOwner],
     scope: 'society',
-    allowWhenPaused: true,
+    allowWhenBlocked: true,
   })
-  @Get('owner-read-when-paused')
-  ownerReadWhenPaused(): { ok: true } {
+  @Get('owner-read-when-blocked')
+  ownerReadWhenBlocked(): { ok: true } {
     return { ok: true };
   }
 

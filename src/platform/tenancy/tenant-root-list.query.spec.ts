@@ -8,18 +8,18 @@ const query = <T>(metatype: new () => T, value: unknown) =>
   pipe.transform(value, { type: 'query', metatype }) as Promise<T>;
 
 describe('the Society and Institution list queries', () => {
-  it('read repeated or single status values as numbers, and paused as a boolean', async () => {
+  it('read repeated or single status values as numbers, and blocked as a boolean', async () => {
     expect(
-      await query(ListSocietiesQueryDto, { status: ['0', '1'], paused: 'true' }),
+      await query(ListSocietiesQueryDto, { status: ['0', '1'], blocked: 'true' }),
     ).toMatchObject({
       status: [0, 1],
-      paused: true,
+      blocked: true,
     });
     expect(
-      await query(ListInstitutionsQueryDto, { status: '0', paused: 'false', page: '2' }),
+      await query(ListInstitutionsQueryDto, { status: '0', blocked: 'false', page: '2' }),
     ).toMatchObject({
       status: [0],
-      paused: false,
+      blocked: false,
       page: 2,
     });
   });
@@ -32,7 +32,7 @@ describe('the Society and Institution list queries', () => {
     { status: '2' },
     { status: 'x' },
     { status: '' },
-    { paused: 'maybe' },
+    { blocked: 'maybe' },
     { societyId: 'nope' },
   ])('refuse %j', async (value) => {
     await expect(query(ListInstitutionsQueryDto, value)).rejects.toBeInstanceOf(AppException);

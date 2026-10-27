@@ -18,10 +18,6 @@ export async function writeTenancySeed(db: Kysely<unknown>): Promise<void> {
 async function write(db: Kysely<unknown>): Promise<void> {
   await sql`select set_config('app.role_code', '1', true)`.execute(db);
   for (const society of societies) {
-    if (society.isPaused) {
-      // A pause needs the Super Admin who set it; tests pause through the API.
-      throw new Error('The seed writes unpaused tenants only');
-    }
     await sql`
       insert into societies (id, name, code)
       values (${society.id}, ${society.name}, ${society.key})
@@ -29,7 +25,6 @@ async function write(db: Kysely<unknown>): Promise<void> {
     `.execute(db);
   }
   for (const institution of institutions) {
-    if (institution.isPaused) throw new Error('The seed writes unpaused tenants only');
     const society = societies.find((s) => s.key === institution.society);
     if (!society) throw new Error(`Institution ${institution.key} names an unknown Society`);
     await sql`

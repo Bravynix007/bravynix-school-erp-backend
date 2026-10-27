@@ -1,11 +1,12 @@
 // QA for Phase 1 B7: the tenant scope check under changes during a session,
-// ID spellings, and writes to paused or deactivated Institutions.
+// ID spellings, and writes to blocked or deactivated Institutions.
 import { Kysely, PostgresDialect, sql } from 'kysely';
 import request from 'supertest';
 import { createPool } from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { institutions, personaByKey, societies } from '../../src/seeds/two-worlds.js';
+import * as blocks from '../support/blocks.js';
 import { FixtureModule } from '../support/fixture.module.js';
 import { clearLoginState } from '../support/login-state.js';
 import { signInAs } from '../support/sessions.js';
@@ -65,11 +66,8 @@ describe('QA: tenant scope (B7)', () => {
     await sql`delete from role_assignments where user_id = ${admin.id} and role_code = 3`.execute(
       db,
     );
-    await asSuperAdmin((tx) =>
-      sql`update institutions set status = 1, access_paused_at = null, access_paused_by = null, access_pause_reason = null`.execute(
-        tx,
-      ),
-    );
+    await asSuperAdmin((tx) => sql`update institutions set status = 1`.execute(tx));
+    await blocks.clearBlocks(db);
     await db.destroy();
   });
 
@@ -93,14 +91,10 @@ describe('QA: tenant scope (B7)', () => {
     );
   });
 
-  it('a paused or deactivated Institution cannot be renamed, and nothing changes', async () => {
-    const token = await signInAs(t, owner.email, { roleCode: 2, societyId: socA.id });
+  it('an Institution with its staff blocked, or deactivated, cannot be renamed by its admin, and nothing changes', async () => {
+    const token = await signInAs(t, admin.email, { roleCode: 3, societyId: socA.id });
     const before = await nameOf(a1.id);
-    await asSuperAdmin((tx) =>
-      sql`update institutions set access_paused_at = now(), access_paused_by = ${personaByKey('SA1').id}, access_pause_reason = 'Dues' where id = ${a1.id}`.execute(
-        tx,
-      ),
-    );
+    await blocks.setBlock(db, socA.id, a1.id, 2, true);
     expect((await rename(a1.id, token, 'X1')).status).toBe(423);
     await asSuperAdmin((tx) =>
       sql`update institutions set status = 0 where id = ${a1.id}`.execute(tx),
@@ -108,10 +102,9 @@ describe('QA: tenant scope (B7)', () => {
     expect((await rename(a1.id, token, 'X2')).status).toBe(404);
     expect(await nameOf(a1.id)).toBe(before);
     await asSuperAdmin((tx) =>
-      sql`update institutions set status = 1, access_paused_at = null, access_paused_by = null, access_pause_reason = null where id = ${a1.id}`.execute(
-        tx,
-      ),
+      sql`update institutions set status = 1 where id = ${a1.id}`.execute(tx),
     );
+    await blocks.clearBlocks(db);
   });
 
   it('an ID written in capitals or with spaces is the same Institution, or the same 404 as a missing one', async () => {

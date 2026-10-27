@@ -15,7 +15,6 @@ export interface SeedSociety {
   key: 'A' | 'B';
   id: string;
   name: string;
-  isPaused: boolean;
 }
 
 export interface SeedInstitution {
@@ -24,7 +23,6 @@ export interface SeedInstitution {
   society: SeedSociety['key'];
   name: string;
   code: string;
-  isPaused: boolean;
 }
 
 export type AccountStatus = 'pending' | 'active' | 'blocked' | 'inactive';
@@ -63,14 +61,14 @@ const id = (n: number): string => `00000000-0000-7000-8000-${n.toString().padSta
 const email = (key: string): string => `${key.toLowerCase()}@two-worlds.test`;
 
 export const societies: SeedSociety[] = [
-  { key: 'A', id: id(1001), name: 'Society A', isPaused: false },
-  { key: 'B', id: id(1002), name: 'Society B', isPaused: false },
+  { key: 'A', id: id(1001), name: 'Society A' },
+  { key: 'B', id: id(1002), name: 'Society B' },
 ];
 
 export const institutions: SeedInstitution[] = [
-  { key: 'A1', id: id(2001), society: 'A', name: 'Institution A1', code: 'A1', isPaused: false },
-  { key: 'A2', id: id(2002), society: 'A', name: 'Institution A2', code: 'A2', isPaused: false },
-  { key: 'B1', id: id(2003), society: 'B', name: 'Institution B1', code: 'B1', isPaused: false },
+  { key: 'A1', id: id(2001), society: 'A', name: 'Institution A1', code: 'A1' },
+  { key: 'A2', id: id(2002), society: 'A', name: 'Institution A2', code: 'A2' },
+  { key: 'B1', id: id(2003), society: 'B', name: 'Institution B1', code: 'B1' },
 ];
 
 export const children: SeedChild[] = [

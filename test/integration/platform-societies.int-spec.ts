@@ -129,7 +129,7 @@ describe('PLT-02 to PLT-08 Societies', () => {
         foundedDate: '1998-06-01',
         address: { line1: '1 Temple Road', line2: null, pincode: '560001' },
         status: 1,
-        accessPause: null,
+        blockedSections: [],
         institutionCount: 0,
         institutions: [],
         owners: [],
@@ -246,7 +246,11 @@ describe('PLT-02 to PLT-08 Societies', () => {
       const a = await create({ name: `Alpha ${tag}`, code: `a-${tag}` });
       const b = await create({ name: `beta ${tag}`, code: `B-${tag}` });
       const c = await create({ name: `Gamma ${tag}`, code: `c-${tag}` });
-      await call('post', `/v1/platform/societies/${c.id}/pause`, { version: 1, reason: 'Dues' });
+      await call('post', '/v1/platform/access-blocks', {
+        section: 'owners',
+        societyId: c.id,
+        reason: 'Dues',
+      });
       await call('delete', `/v1/platform/societies/${b.id}`);
 
       const found = await list(`q=${tag}`);
@@ -258,7 +262,7 @@ describe('PLT-02 to PLT-08 Societies', () => {
         code: `a-${tag}`,
         name: `Alpha ${tag}`,
         status: 1,
-        paused: false,
+        blocked: false,
         institutionCount: 0,
         createdBy: expect.objectContaining({ id: superAdmin.id }),
         createdAt: expect.any(String),
@@ -269,8 +273,8 @@ describe('PLT-02 to PLT-08 Societies', () => {
       expect(ids(await list(`q=${tag.toUpperCase()}`))).toHaveLength(3);
       expect(ids(await list(`q=${tag}&status=0`))).toEqual([b.id]);
       expect(ids(await list(`q=${tag}&status=0&status=1`))).toHaveLength(3);
-      expect(ids(await list(`q=${tag}&paused=true`))).toEqual([c.id]);
-      expect(ids(await list(`q=${tag}&paused=false&status=1`))).toEqual([a.id]);
+      expect(ids(await list(`q=${tag}&blocked=true`))).toEqual([c.id]);
+      expect(ids(await list(`q=${tag}&blocked=false&status=1`))).toEqual([a.id]);
       expect(ids(await list(`q=${tag}&sort=-name`))).toEqual([c.id, b.id, a.id]);
       expect(ids(await list(`q=${tag}&sort=code`))).toEqual([a.id, b.id, c.id]);
       expect(ids(await list(`q=${tag}&sort=-createdAt`))).toEqual([c.id, b.id, a.id]);
@@ -290,7 +294,7 @@ describe('PLT-02 to PLT-08 Societies', () => {
       expect((await list('sort=email')).body.code).toBe('INVALID_SORT');
       expect((await list('status=2')).body.code).toBe('VALIDATION_FAILED');
       expect((await list('status=x')).body.code).toBe('VALIDATION_FAILED');
-      expect((await list('paused=maybe')).body.code).toBe('VALIDATION_FAILED');
+      expect((await list('blocked=maybe')).body.code).toBe('VALIDATION_FAILED');
       expect((await list('page=10001')).body.errors).toContainEqual(
         expect.objectContaining({ field: 'page', code: 'OUT_OF_RANGE' }),
       );
@@ -315,8 +319,8 @@ describe('PLT-02 to PLT-08 Societies', () => {
       expect(res.status).toBe(200);
       expect(res.body.data).toMatchObject({ id: society.id, institutionCount: 1 });
       expect(res.body.data.institutions).toEqual([
-        { id: expect.any(String), code: 'A', name: 'Alpha School', status: 0, paused: false },
-        { id: first, code: 'Z', name: 'Zed School', status: 1, paused: false },
+        { id: expect.any(String), code: 'A', name: 'Alpha School', status: 0, blockedSections: [] },
+        { id: first, code: 'Z', name: 'Zed School', status: 1, blockedSections: [] },
       ]);
       expect(res.body.data.owners).toEqual([
         { id: owner.person, displayName: owner.email, email: owner.email, accountStatus: 1 },
@@ -410,9 +414,9 @@ describe('PLT-02 to PLT-08 Societies', () => {
       expect(res.body).toMatchObject({ code: 'VERSION_CONFLICT', data: { currentVersion: 2 } });
     });
 
-    it('refuses the code, status, pause and stamps as fields, and needs the version', async () => {
+    it('refuses the code, status, blocks and stamps as fields, and needs the version', async () => {
       const society = await create();
-      for (const field of ['code', 'status', 'accessPause', 'accessPausedAt', 'updatedBy', 'id']) {
+      for (const field of ['code', 'status', 'blockedSections', 'accessPause', 'updatedBy', 'id']) {
         const res = await call('patch', `/v1/platform/societies/${society.id}`, {
           version: 1,
           [field]: 'x',
@@ -448,83 +452,16 @@ describe('PLT-02 to PLT-08 Societies', () => {
     });
   });
 
-  describe('PLT-07 and PLT-08 pause and resume', () => {
-    it('stops the Society on its next call, keeps sign-in, and resumes', async () => {
+  describe('PLT-07 and PLT-08 are gone', () => {
+    it('has no pause or resume route: the Owners are blocked through PLT-42 instead', async () => {
       const society = await create();
-      const owner = await ownerOf(society.id);
-      expect((await call('post', '/v1/fixtures/owner-write', {}, owner.token)).status).toBe(200);
-
-      const paused = await call('post', `/v1/platform/societies/${society.id}/pause`, {
-        version: 1,
-        reason: 'Annual fee unpaid',
-      });
-      expect(paused.status).toBe(200);
-      expect(paused.body.data).toMatchObject({
-        version: 2,
-        accessPause: {
-          pausedAt: expect.stringMatching(/Z$/),
-          pausedBy: { id: superAdmin.id, roleName: 'Super Admin' },
-          reason: 'Annual fee unpaid',
-        },
-      });
-      const refused = await call('post', '/v1/fixtures/owner-write', {}, owner.token);
-      expect([refused.status, refused.body.code]).toEqual([423, 'ACCESS_PAUSED']);
-      expect((await call('get', '/v1/me', {}, owner.token)).status).toBe(200);
-
-      const resumed = await call('post', `/v1/platform/societies/${society.id}/resume`, {
-        version: 2,
-      });
-      expect(resumed.status).toBe(200);
-      expect(resumed.body.data).toMatchObject({ accessPause: null, version: 3 });
-      expect((await call('post', '/v1/fixtures/owner-write', {}, owner.token)).status).toBe(200);
-
-      const entries = await audit(society.id);
-      const pause = entries.find((entry) => entry.action === 'access.pause')!;
-      expect(pause).toMatchObject({ reason: 'Annual fee unpaid', actor_user_id: superAdmin.id });
-      expect(entries.map((entry) => entry.action)).toContain('access.resume');
-    });
-
-    it('refuses a second pause, a resume of a Society that is not paused, and a stale version', async () => {
-      const society = await create();
-      const base = `/v1/platform/societies/${society.id}`;
-      const resumeFirst = await call('post', `${base}/resume`, { version: 1 });
-      expect([resumeFirst.status, resumeFirst.body.code]).toEqual([409, 'INVALID_STATE']);
-
-      expect((await call('post', `${base}/pause`, { version: 1, reason: 'Dues' })).status).toBe(
-        200,
-      );
-      const again = await call('post', `${base}/pause`, { version: 2, reason: 'Again' });
-      expect([again.status, again.body.code]).toEqual([409, 'INVALID_STATE']);
-      const stale = await call('post', `${base}/resume`, { version: 1 });
-      expect(stale.body).toMatchObject({ code: 'VERSION_CONFLICT', data: { currentVersion: 2 } });
-    });
-
-    it('needs a reason of 1 to 500 characters and the version', async () => {
-      const society = await create();
-      const base = `/v1/platform/societies/${society.id}`;
-      for (const body of [
-        { version: 1 },
-        { version: 1, reason: '' },
-        { version: 1, reason: 'r'.repeat(501) },
-        { reason: 'x' },
-      ]) {
-        expect((await call('post', `${base}/pause`, body)).status).toBe(400);
+      for (const action of ['pause', 'resume']) {
+        const res = await call('post', `/v1/platform/societies/${society.id}/${action}`, {
+          version: 1,
+          reason: 'x',
+        });
+        expect(res.status).toBe(404);
       }
-      expect((await call('post', `${base}/resume`, {})).status).toBe(400);
-    });
-
-    it('does not pause a deactivated Society, and answers 404 for an unknown one', async () => {
-      const society = await create();
-      await call('delete', `/v1/platform/societies/${society.id}`);
-      const res = await call('post', `/v1/platform/societies/${society.id}/pause`, {
-        version: 2,
-        reason: 'x',
-      });
-      expect([res.status, res.body.code]).toEqual([409, 'INVALID_STATE']);
-      expect(
-        (await call('post', `/v1/platform/societies/${missing}/pause`, { version: 1, reason: 'x' }))
-          .status,
-      ).toBe(404);
     });
   });
 

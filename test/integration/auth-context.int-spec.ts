@@ -112,7 +112,7 @@ describe('AUTH-06 switch context and ME-01', () => {
     it('reads a Society name only through a function the public cannot call', async () => {
       const [fn] = await rows<{ owner_only: boolean; app_can: boolean }>(
         sql`select proacl::text !~ '(^|[{,])=' as owner_only,
-          has_function_privilege('erp_app', 'app_society_name(uuid)', 'execute') as app_can
+          has_function_privilege('erp_app', 'app_society_name(uuid, uuid)', 'execute') as app_can
           from pg_proc where proname = 'app_society_name'`,
       );
       expect(fn).toEqual({ owner_only: true, app_can: true });
@@ -122,7 +122,7 @@ describe('AUTH-06 switch context and ME-01', () => {
       const seen = await ownerDb.transaction().execute(async (tx) => {
         await sql`select set_config('app.role_code', '2', true)`.execute(tx);
         const name = await sql<{ name: string | null }>`
-          select app_society_name(${societyA.id}::uuid) as name`.execute(tx);
+          select app_society_name(${societyA.id}::uuid, ${owner.id}::uuid) as name`.execute(tx);
         const role = await sql<{
           role: string;
         }>`select current_setting('app.role_code') as role`.execute(tx);

@@ -28,9 +28,9 @@ export interface TestAppOptions {
   /** Replaces the access token verifier (phase 1 tests use the real one). */
   verifier?: AccessTokenVerifier;
   /**
-   * Replaces the pause check. With a fake `verifier` its Societies are not in
-   * the database, so the default is a gate that never pauses; a test of the
-   * pause passes its own. Without a `verifier` the real gate is used.
+   * Replaces the block check. With a fake `verifier` its Societies are not in
+   * the database, so the default is a gate that never blocks; a test of the
+   * block passes its own. Without a `verifier` the real gate is used.
    */
   tenantGate?: TenantAccessGate;
   clockStart?: string;
@@ -62,7 +62,9 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
   }
   const gate =
     options.tenantGate ??
-    (options.verifier ? ({ isPaused: () => Promise.resolve(false) } as TenantAccessGate) : null);
+    (options.verifier
+      ? ({ blockedSection: () => Promise.resolve(null) } as TenantAccessGate)
+      : null);
   if (gate) builder = builder.overrideProvider(TenantAccessGate).useValue(gate);
   const moduleRef = await builder.compile();
   const app = moduleRef.createNestApplication<NestExpressApplication>(

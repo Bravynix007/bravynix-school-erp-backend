@@ -13,14 +13,7 @@ interface Stamps {
   status: Generated<number>;
 }
 
-/** Access pause (PRD 9.4): all three set, or all three empty. */
-interface AccessPause {
-  access_paused_at: Date | null;
-  access_paused_by: string | null;
-  access_pause_reason: string | null;
-}
-
-export interface SocietiesTable extends Stamps, AccessPause {
+export interface SocietiesTable extends Stamps {
   name: string;
   code: string;
   description: string | null;
@@ -34,7 +27,7 @@ export interface SocietiesTable extends Stamps, AccessPause {
   pincode: string | null;
 }
 
-export interface InstitutionsTable extends Stamps, AccessPause {
+export interface InstitutionsTable extends Stamps {
   society_id: string;
   name: string;
   code: string;
@@ -52,4 +45,23 @@ export interface InstitutionsTable extends Stamps, AccessPause {
   /** numeric(9,6), kept as an exact decimal string. */
   latitude: string | null;
   longitude: string | null;
+}
+
+/**
+ * One block of a section of people (DDD 9.3): `section` 1 owners, 2 staff, 3
+ * students. `created_at` and `created_by` are when and by whom it was set.
+ * Active while `lifted_at` is empty; lifting keeps the row.
+ */
+export interface AccessBlocksTable {
+  id: Generated<string>;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  created_by: string;
+  updated_at: ColumnType<Date, never, Date>;
+  updated_by: string | null;
+  society_id: string;
+  institution_id: string | null;
+  section: number;
+  reason: string;
+  lifted_at: ColumnType<Date | null, never, Date>;
+  lifted_by: ColumnType<string | null, never, string>;
 }
