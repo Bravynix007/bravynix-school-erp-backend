@@ -296,6 +296,20 @@ describe('SocietyService', () => {
       ).rejects.toThrow('boom');
     });
 
+    it('names the Owner in the body who holds the other platform role', async () => {
+      const t = build();
+      t.addIn.mockRejectedValueOnce(AppException.conflict('ROLE_CONFLICT'));
+      const owners = [{ email: 'a@example.com' }];
+      const refused = await refusal(t.service.create(principal, { name: 'X', code: 'x', owners }));
+      expect(refused).toMatchObject({
+        status: 409,
+        code: 'ROLE_CONFLICT',
+        options: {
+          errors: [expect.objectContaining({ field: 'owners[0].email', code: 'ROLE_CONFLICT' })],
+        },
+      });
+    });
+
     it('adds no Owner when none are named', async () => {
       const t = build();
       await t.service.create(principal, { name: 'X', code: 'x' });
