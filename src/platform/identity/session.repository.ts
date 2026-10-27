@@ -6,6 +6,7 @@ import type { Db, Tx } from '../database/index.js';
 export interface Grant {
   roleCode: number;
   societyId: string | null;
+  societyName: string | null;
   institutionId: string | null;
 }
 
@@ -93,9 +94,16 @@ function toSession(row: {
 export class SessionRepository {
   /** The grants that let this person act as Super Admin, Owner or Institution Admin. */
   async activeGrants(tx: Db, userId: string): Promise<Grant[]> {
+    // Sign-in has no role set, so row-level security hides every Society; the function
+    // hands back the one name for a Society the person holds a grant in.
     const rows = await tx
       .selectFrom('role_assignments')
-      .select(['role_code', 'society_id', 'institution_id'])
+      .select([
+        'role_code',
+        'society_id',
+        'institution_id',
+        sql<string | null>`app_society_name(society_id)`.as('society_name'),
+      ])
       .where('user_id', '=', userId)
       .where('revoked_at', 'is', null)
       .orderBy('role_code')
@@ -104,6 +112,7 @@ export class SessionRepository {
     return rows.map((row) => ({
       roleCode: row.role_code,
       societyId: row.society_id,
+      societyName: row.society_name,
       institutionId: row.institution_id,
     }));
   }

@@ -7,7 +7,7 @@ import { Clock } from '../../common/time/clock.js';
 import { AuditService } from '../audit/index.js';
 import { DatabaseService } from '../database/index.js';
 import { AuthCode, endReasonName, reportedStatus, userTypeFor } from './auth-codes.js';
-import { canActAs, mobileContexts, type Context } from './contexts.js';
+import { CONSOLE_CONTEXT, findContext, mobileContexts, type ContextChoice } from './contexts.js';
 import { IdentityRepository } from './identity.repository.js';
 import { SessionRepository } from './session.repository.js';
 import type { SwitchContextDto } from './switch-context.dto.js';
@@ -16,7 +16,7 @@ import { TokenService } from './token.service.js';
 export interface MeResult {
   userType: number | null;
   userTypeName: string | null;
-  session: { id: string; activeContext: Context | null };
+  session: { id: string; activeContext: ContextChoice | null };
   person: {
     id: string;
     email: string;
@@ -25,14 +25,14 @@ export interface MeResult {
     preferredLanguage: string;
     accountStatus: number;
   };
-  contexts: Context[];
+  contexts: ContextChoice[];
   requiredNotices: never[];
 }
 
 export interface SwitchResult {
   accessToken: string;
   accessTokenExpiresAt: string;
-  activeContext: Context;
+  activeContext: ContextChoice;
   userType: number | null;
   userTypeName: string | null;
 }
@@ -59,11 +59,11 @@ export class ContextService {
       principal.clientType === 'mobile'
         ? mobileContexts(grants)
         : grants.some((grant) => grant.roleCode === 1)
-          ? [{ roleCode: 1, societyId: null }]
+          ? [CONSOLE_CONTEXT]
           : [];
     return {
       ...userTypeFor(principal.roleCode),
-      session: { id: principal.sessionId, activeContext: activeOf(principal) },
+      session: { id: principal.sessionId, activeContext: activeOf(principal, contexts) },
       person: {
         id: user.id,
         email: user.email,
@@ -84,9 +84,8 @@ export class ContextService {
 
     const { db } = this.database;
     const grants = await this.sessions.activeGrants(db, principal.personId);
-    if (!canActAs(mobileContexts(grants), request.roleCode, societyId)) {
-      throw AppException.forbidden(AuthCode.CONTEXT_NOT_AVAILABLE);
-    }
+    const chosen = findContext(mobileContexts(grants), request.roleCode, societyId);
+    if (!chosen) throw AppException.forbidden(AuthCode.CONTEXT_NOT_AVAILABLE);
 
     const now = this.clock.now();
     await this.database.transaction({}, async (tx) => {
@@ -128,7 +127,7 @@ export class ContextService {
       ...userTypeFor(request.roleCode),
       accessToken: signed.token,
       accessTokenExpiresAt: signed.expiresAt.toISOString(),
-      activeContext: { roleCode: request.roleCode, societyId },
+      activeContext: chosen,
     };
   }
 
@@ -147,8 +146,9 @@ export class ContextService {
   }
 }
 
-function activeOf(principal: Principal): Context | null {
+/** The listed context the session acts in; none when the role was taken away since. */
+function activeOf(principal: Principal, contexts: readonly ContextChoice[]): ContextChoice | null {
   return principal.roleCode === null
     ? null
-    : { roleCode: principal.roleCode, societyId: principal.societyId };
+    : (findContext(contexts, principal.roleCode, principal.societyId) ?? null);
 }

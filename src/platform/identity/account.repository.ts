@@ -61,6 +61,21 @@ export class AccountRepository {
     );
   }
 
+  /**
+   * One grant to an existing person at a time, platform-wide, so a Super Admin
+   * grant and an Owner grant for the same person cannot both pass the
+   * separation check (PRD 5.2). Taken after the seat lock and last of all. It is
+   * one lock, not one per person: onboarding grants several people in one
+   * transaction, and per-person locks taken in the operator's order deadlock
+   * when two onboardings name the same people in the opposite order. Grants are
+   * rare, so serialising them costs nothing. Released when the transaction ends.
+   */
+  async lockRoleSeparation(tx: Tx): Promise<void> {
+    await sql`select pg_advisory_xact_lock(hashtextextended(${'grants:role-separation'}, 0))`.execute(
+      tx,
+    );
+  }
+
   async takenSeats(tx: Tx, roleCode: number, societyId: string | null): Promise<number[]> {
     const rows = await tx
       .selectFrom('role_assignments')

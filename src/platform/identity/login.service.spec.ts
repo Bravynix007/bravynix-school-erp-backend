@@ -110,7 +110,12 @@ const request = (patch: Partial<VerifyRequest> = {}): VerifyRequest => ({
   device: { platform: 1, appVersion: '1.4.0', label: 'Pixel' },
   ...patch,
 });
-const owner: Grant = { roleCode: 2, societyId: 'soc-1', institutionId: null };
+const owner: Grant = {
+  roleCode: 2,
+  societyId: 'soc-1',
+  societyName: 'North Trust',
+  institutionId: null,
+};
 const fail = async (promise: Promise<unknown>) =>
   (await promise.then(
     () => undefined,
@@ -138,9 +143,16 @@ describe('LoginService.verify', () => {
     expect(result).toMatchObject({
       userType: 2,
       userTypeName: 'society_owner',
-      session: { activeContext: { roleCode: 2, societyId: 'soc-1' } },
+      session: {
+        activeContext: {
+          roleCode: 2,
+          societyId: 'soc-1',
+          societyName: 'North Trust',
+          isBlocked: false,
+        },
+      },
       person: { email: EMAIL, accountStatus: 1 },
-      contexts: [{ roleCode: 2, societyId: 'soc-1' }],
+      contexts: [{ roleCode: 2, societyId: 'soc-1', societyName: 'North Trust', isBlocked: false }],
     });
     expect(t.identity.consumeChallenge).toHaveBeenCalledOnce();
     expect(t.identity.recordLogin).toHaveBeenCalledOnce();
@@ -176,7 +188,10 @@ describe('LoginService.verify', () => {
     const two = build({
       user: user(),
       live: [live()],
-      grants: [owner, { roleCode: 3, societyId: 'soc-1', institutionId: 'ins-1' }],
+      grants: [
+        owner,
+        { roleCode: 3, societyId: 'soc-1', societyName: 'North Trust', institutionId: 'ins-1' },
+      ],
     });
     const several = await signedIn(two.service.verify(request()));
     expect(several.session.activeContext).toBeNull();
@@ -186,7 +201,7 @@ describe('LoginService.verify', () => {
     const sa = build({
       user: user(),
       live: [live()],
-      grants: [{ roleCode: 1, societyId: null, institutionId: null }],
+      grants: [{ roleCode: 1, societyId: null, societyName: null, institutionId: null }],
     });
     const onlyConsole = await signedIn(sa.service.verify(request()));
     expect(onlyConsole.contexts).toEqual([]);
@@ -392,7 +407,7 @@ describe('LoginService.verify', () => {
     const admin = build({
       user: user(),
       live: [live()],
-      grants: [{ roleCode: 1, societyId: null, institutionId: null }],
+      grants: [{ roleCode: 1, societyId: null, societyName: null, institutionId: null }],
     });
     expect(await admin.service.verify(consoleRequest)).toEqual({
       mfaRequired: true,
@@ -407,7 +422,7 @@ describe('LoginService.verify', () => {
     const locked = build({
       user: user(),
       live: [live()],
-      grants: [{ roleCode: 1, societyId: null, institutionId: null }],
+      grants: [{ roleCode: 1, societyId: null, societyName: null, institutionId: null }],
       mfaLock: new Date(admin.clock.now().getTime() + 7200_000),
     });
     expect(await fail(locked.service.verify(consoleRequest))).toMatchObject({
