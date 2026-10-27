@@ -10,7 +10,7 @@ import { superAdminToken } from '../support/admin-token.js';
 import { readAuditRows } from '../support/audit-rows.js';
 import { FixtureModule } from '../support/fixture.module.js';
 import { clearLoginState } from '../support/login-state.js';
-import { PlatformFixtures } from '../support/platform-fixtures.js';
+import { PlatformFixtures, type SignedInPerson } from '../support/platform-fixtures.js';
 import { removeScratchSocieties } from '../support/scratch-society.js';
 import { createTestApp, type TestApp } from '../support/test-app.js';
 
@@ -24,13 +24,26 @@ type Method = 'get' | 'post' | 'patch' | 'delete';
 const ids = (res: { body: Body }) =>
   (res.body.data as unknown as { id: string }[]).map((r) => r.id);
 
-describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
+describe('PLT-19 and INS-01 to INS-05 Institutions', () => {
   let ownerDb: Kysely<unknown>;
   let t: TestApp;
   let fixtures: PlatformFixtures;
   let admin: string;
   let api: ReturnType<typeof apiCaller>;
   const societies: string[] = [];
+  /** The Owner of each scratch Society, signed in once: only Owners add and change Institutions. */
+  const owners = new Map<string, SignedInPerson>();
+
+  const ownerOf = async (societyId: string) => {
+    let owner = owners.get(societyId);
+    if (!owner) {
+      owner = await fixtures.owner(societyId);
+      owners.set(societyId, owner);
+    }
+    return owner;
+  };
+  const asOwner = async (societyId: string, method: Method, path: string, body: object = {}) =>
+    api(method, path, (await ownerOf(societyId)).token, body);
 
   const asAdmin = (method: Method, path: string, body: object = {}) =>
     api(method, path, admin, body);
@@ -48,20 +61,15 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
     return res.body.data.id;
   };
 
-  /** Adds an Institution as Super Admin, or as `token` when given (an Owner adds to their own Society). */
-  const institution = async (
-    societyId: string,
-    fields: Record<string, unknown> = {},
-    token?: string,
-  ) => {
+  /** Adds an Institution as the Owner of that Society. */
+  const institution = async (societyId: string, fields: Record<string, unknown> = {}) => {
     const body = {
-      ...(token ? {} : { societyId }),
       name: 'Green Valley School',
       code: `I${newId().slice(-10)}`,
       address: { line1: '12 Lake Road' },
       ...fields,
     };
-    const res = await api('post', '/v1/institutions', token ?? admin, body);
+    const res = await asOwner(societyId, 'post', '/v1/institutions', body);
     expect(res.status).toBe(201);
     return res.body.data;
   };
@@ -101,40 +109,49 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
   afterEach(async () => {
     await clearLoginState(ownerDb);
     await removeScratchSocieties(ownerDb, societies.splice(0));
+    owners.clear();
     await fixtures.cleanup();
   });
 
   describe('who may call', () => {
-    it('keeps the platform routes and the owner-only changes from anyone else', async () => {
+    it('keeps the platform list from Owners and Admins, and the Institution changes from Super Admin and Admins', async () => {
       const societyId = await society();
       const inst = await institution(societyId);
-      const owner = await fixtures.owner(societyId);
+      const owner = await ownerOf(societyId);
       const adminOf = await fixtures.institutionAdmin(societyId, [inst.id]);
-      const base = `/v1/platform/institutions/${inst.id}`;
 
       for (const token of [owner.token, adminOf.token]) {
         expect((await api('get', '/v1/platform/institutions', token)).status).toBe(403);
-        expect(
-          (await api('post', `${base}/pause`, token, { version: 1, reason: 'x' })).status,
-        ).toBe(403);
-        expect((await api('post', `${base}/resume`, token, { version: 1 })).status).toBe(403);
       }
-      for (const [method, path] of [
-        ['post', '/v1/institutions'],
-        ['patch', `/v1/institutions/${inst.id}`],
-        ['delete', `/v1/institutions/${inst.id}`],
-      ] as const) {
-        const res = await api(method, path, adminOf.token);
-        expect([res.status, res.body.code]).toEqual([403, 'FORBIDDEN']);
+      for (const token of [admin, adminOf.token]) {
+        for (const [method, path] of [
+          ['post', '/v1/institutions'],
+          ['patch', `/v1/institutions/${inst.id}`],
+          ['delete', `/v1/institutions/${inst.id}`],
+        ] as const) {
+          const res = await api(method, path, token);
+          expect([res.status, res.body.code]).toEqual([403, 'FORBIDDEN']);
+        }
       }
       expect((await request(t.app.getHttpServer()).get('/v1/institutions')).status).toBe(401);
+    });
+
+    it('has no pause or resume route any more', async () => {
+      const inst = await institution(await society());
+      for (const action of ['pause', 'resume']) {
+        const res = await asAdmin('post', `/v1/platform/institutions/${inst.id}/${action}`, {
+          version: 1,
+          reason: 'x',
+        });
+        expect(res.status).toBe(404);
+      }
     });
   });
 
   describe('INS-02 add', () => {
     it('lets an Owner add to their own Society: 201, whole resource, their stamps', async () => {
       const societyId = await society();
-      const owner = await fixtures.owner(societyId);
+      const owner = await ownerOf(societyId);
       const res = await api('post', '/v1/institutions', owner.token, {
         name: 'Green Valley School',
         code: 'GVS',
@@ -169,7 +186,6 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
         address: { line1: '12 Lake Road', line2: null, pincode: '560001' },
         location: { latitude: 12.971599, longitude: 77.594566 },
         status: 1,
-        accessPause: null,
         version: 1,
         createdBy: person,
         createdAt: expect.stringMatching(/Z$/),
@@ -201,27 +217,20 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
       });
     });
 
-    it('lets Super Admin add to any Society, and needs the Society named', async () => {
+    it('does not let Super Admin add one: Societies and Owners are theirs, Institutions the Owner’s', async () => {
       const societyId = await society();
-      const inst = await institution(societyId);
-      expect(inst.societyId).toBe(societyId);
-      expect(inst.createdBy).toMatchObject({ id: superAdmin.id, roleName: 'Super Admin' });
-      const missingSociety = await asAdmin('post', '/v1/institutions', {
+      const res = await asAdmin('post', '/v1/institutions', {
+        societyId,
         name: 'X',
         code: 'X',
         address: { line1: 'a' },
       });
-      expect(missingSociety.status).toBe(400);
-      expect(missingSociety.body.errors).toContainEqual({
-        field: 'societyId',
-        code: 'REQUIRED',
-        message: expect.any(String),
-      });
+      expect([res.status, res.body.code]).toEqual([403, 'FORBIDDEN']);
     });
 
     it('does not let an Owner name a Society, even their own', async () => {
       const societyId = await society();
-      const owner = await fixtures.owner(societyId);
+      const owner = await ownerOf(societyId);
       const res = await api('post', '/v1/institutions', owner.token, {
         societyId,
         name: 'X',
@@ -234,22 +243,11 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
       );
     });
 
-    it('answers 404 for an unknown Society and 409 INVALID_STATE for a deactivated one', async () => {
-      const body = { name: 'X', code: 'X', address: { line1: 'a' } };
-      const unknown = await asAdmin('post', '/v1/institutions', { ...body, societyId: missing });
-      expect(unknown.status).toBe(404);
-      const societyId = await society();
-      await asAdmin('delete', `/v1/platform/societies/${societyId}`);
-      const gone = await asAdmin('post', '/v1/institutions', { ...body, societyId });
-      expect([gone.status, gone.body.code]).toEqual([409, 'INVALID_STATE']);
-    });
-
     it('answers 409 DUPLICATE on the code within a Society, in any letter case, but not across Societies', async () => {
       const societyId = await society();
       await institution(societyId, { code: 'Gvs' });
       for (const code of ['Gvs', 'GVS', 'gvs']) {
-        const res = await asAdmin('post', '/v1/institutions', {
-          societyId,
+        const res = await asOwner(societyId, 'post', '/v1/institutions', {
           name: 'Other',
           code,
           address: { line1: 'a' },
@@ -349,8 +347,7 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
         'INVALID_FORMAT',
       ],
     ])('answers 400 for %s', async (_what, body, field, code) => {
-      const societyId = await society();
-      const res = await asAdmin('post', '/v1/institutions', { societyId, ...body });
+      const res = await asOwner(await society(), 'post', '/v1/institutions', body);
       expect(res.status).toBe(400);
       expect(res.body.code).toBe('VALIDATION_FAILED');
       expect(res.body.errors).toContainEqual(expect.objectContaining({ field, code }));
@@ -358,19 +355,22 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
   });
 
   describe('INS-01 the Institutions a caller reaches', () => {
-    it('shows an Owner every active Institution of their Society by name, paused ones flagged', async () => {
+    it('shows an Owner every active Institution of their Society by name, stamped by whoever made it', async () => {
       const societyId = await society();
       const other = await society();
       const zed = await institution(societyId, { name: 'zed School' });
       const alpha = await institution(societyId, { name: 'Alpha School' });
       const gone = await institution(societyId, { name: 'Gone School' });
       await institution(other, { name: 'Elsewhere' });
-      await asAdmin('delete', `/v1/institutions/${gone.id}`);
-      await asAdmin('post', `/v1/platform/institutions/${zed.id}/pause`, {
-        version: 1,
+      const owner = await ownerOf(societyId);
+      await api('delete', `/v1/institutions/${gone.id}`, owner.token);
+      // A staff block does not hide the Institution from its Owner.
+      await asAdmin('post', '/v1/platform/access-blocks', {
+        section: 'staff',
+        societyId,
+        institutionId: zed.id,
         reason: 'Dues',
       });
-      const owner = await fixtures.owner(societyId);
 
       const res = await api('get', '/v1/institutions', owner.token);
       expect(res.status).toBe(200);
@@ -382,10 +382,9 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
         name: 'zed School',
         place: null,
         boardCode: null,
-        paused: true,
-        createdBy: expect.objectContaining({ id: superAdmin.id }),
+        createdBy: expect.objectContaining({ id: owner.person }),
         createdAt: expect.any(String),
-        updatedBy: expect.objectContaining({ id: superAdmin.id }),
+        updatedBy: expect.objectContaining({ id: owner.person }),
         updatedAt: expect.any(String),
       });
     });
@@ -393,9 +392,17 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
     it('shows an Institution Admin only the Institutions they hold', async () => {
       const societyId = await society();
       const a = await institution(societyId, { name: 'A School' });
-      await institution(societyId, { name: 'B School' });
-      const adminOf = await fixtures.institutionAdmin(societyId, [a.id]);
-      expect(ids(await api('get', '/v1/institutions', adminOf.token))).toEqual([a.id]);
+      const b = await institution(societyId, { name: 'B School' });
+      const adminOf = await fixtures.institutionAdmin(societyId, [a.id, b.id]);
+      expect(ids(await api('get', '/v1/institutions', adminOf.token))).toEqual([a.id, b.id]);
+      // Once the staff of one are blocked, the switcher no longer offers it to them.
+      await asAdmin('post', '/v1/platform/access-blocks', {
+        section: 'staff',
+        societyId,
+        institutionId: a.id,
+        reason: 'Dues',
+      });
+      expect(ids(await api('get', '/v1/institutions', adminOf.token))).toEqual([b.id]);
     });
   });
 
@@ -405,7 +412,7 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
       const mine = await institution(societyId);
       const notGranted = await institution(societyId);
       const foreign = await institution(await society());
-      const owner = await fixtures.owner(societyId);
+      const owner = await ownerOf(societyId);
       const adminOf = await fixtures.institutionAdmin(societyId, [mine.id]);
 
       expect((await read(owner.token, mine.id)).body.data).toEqual(mine);
@@ -421,19 +428,27 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
       }
     });
 
-    it('answers 404 for a deactivated Institution and 423 for a paused one', async () => {
+    it('answers 404 for a deactivated Institution, and 423 to its staff when their section is blocked, not to the Owner', async () => {
       const societyId = await society();
       const gone = await institution(societyId);
-      const paused = await institution(societyId);
-      const owner = await fixtures.owner(societyId);
-      await asAdmin('delete', `/v1/institutions/${gone.id}`);
-      await asAdmin('post', `/v1/platform/institutions/${paused.id}/pause`, {
-        version: 1,
+      const blocked = await institution(societyId);
+      const owner = await ownerOf(societyId);
+      const adminOf = await fixtures.institutionAdmin(societyId, [blocked.id]);
+      await api('delete', `/v1/institutions/${gone.id}`, owner.token);
+      await asAdmin('post', '/v1/platform/access-blocks', {
+        section: 'staff',
+        societyId,
+        institutionId: blocked.id,
         reason: 'Dues',
       });
-      expect((await api('get', `/v1/institutions/${gone.id}`, owner.token)).status).toBe(404);
-      const res = await api('get', `/v1/institutions/${paused.id}`, owner.token);
-      expect([res.status, res.body.code]).toEqual([423, 'ACCESS_PAUSED']);
+      expect((await read(owner.token, gone.id)).status).toBe(404);
+      const res = await read(adminOf.token, blocked.id);
+      expect([res.status, res.body.code, res.body.data]).toEqual([
+        423,
+        'SECTION_BLOCKED',
+        { section: 'staff' },
+      ]);
+      expect((await read(owner.token, blocked.id)).status).toBe(200);
     });
   });
 
@@ -441,7 +456,7 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
     it('lets an Owner change named fields: version moves, stamps move, before and after are audited', async () => {
       const societyId = await society();
       const inst = await institution(societyId, { place: 'Old Town', telephone: '1' });
-      const owner = await fixtures.owner(societyId);
+      const owner = await ownerOf(societyId);
       const res = await api('patch', `/v1/institutions/${inst.id}`, owner.token, {
         version: 1,
         name: 'Green Valley PU College',
@@ -459,7 +474,7 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
         version: 2,
         code: inst.code,
         updatedBy: { id: owner.person, roleName: 'Society Owner' },
-        createdBy: { id: superAdmin.id },
+        createdBy: { id: owner.person },
       });
       const entry = (await audit(inst.id)).find((row) => row.action === 'institution.update')!;
       expect(entry.old_values).toEqual({
@@ -477,33 +492,27 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
       });
     });
 
-    it('lets Super Admin edit any Institution', async () => {
-      const inst = await institution(await society());
-      const res = await asAdmin('patch', `/v1/institutions/${inst.id}`, {
-        version: 1,
-        name: 'Renamed',
-      });
-      expect([res.status, res.body.data.name]).toEqual([200, 'Renamed']);
-    });
-
     it('replaces the address and phone as a whole, clears the phone with null, never the first line', async () => {
-      const inst = await institution(await society(), {
+      const societyId = await society();
+      const inst = await institution(societyId, {
         phone: { countryCode: '91', number: '9876543210' },
         address: { line1: 'A', line2: 'B', pincode: '1' },
       });
       const path = `/v1/institutions/${inst.id}`;
-      const replaced = await asAdmin('patch', path, { version: 1, address: { line1: 'C' } });
+      const edit = (body: object) => asOwner(societyId, 'patch', path, body);
+      const replaced = await edit({ version: 1, address: { line1: 'C' } });
       expect(replaced.body.data.address).toEqual({ line1: 'C', line2: null, pincode: null });
-      const cleared = await asAdmin('patch', path, { version: 2, phone: null, location: null });
+      const cleared = await edit({ version: 2, phone: null, location: null });
       expect(cleared.body.data).toMatchObject({ phone: null, location: null, version: 3 });
       for (const address of [null, { line2: 'x' }, { line1: '' }]) {
-        expect((await asAdmin('patch', path, { version: 3, address })).status).toBe(400);
+        expect((await edit({ version: 3, address })).status).toBe(400);
       }
     });
 
     it('writes nothing when nothing changes', async () => {
-      const inst = await institution(await society());
-      const res = await asAdmin('patch', `/v1/institutions/${inst.id}`, {
+      const societyId = await society();
+      const inst = await institution(societyId);
+      const res = await asOwner(societyId, 'patch', `/v1/institutions/${inst.id}`, {
         version: 1,
         name: inst.name,
         address: { line1: '12 Lake Road' },
@@ -513,20 +522,20 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
     });
 
     it('answers 409 VERSION_CONFLICT with the current version for a stale screen', async () => {
-      const inst = await institution(await society());
-      await asAdmin('patch', `/v1/institutions/${inst.id}`, { version: 1, name: 'New' });
-      const res = await asAdmin('patch', `/v1/institutions/${inst.id}`, {
-        version: 1,
-        name: 'Late',
-      });
+      const societyId = await society();
+      const inst = await institution(societyId);
+      const path = `/v1/institutions/${inst.id}`;
+      await asOwner(societyId, 'patch', path, { version: 1, name: 'New' });
+      const res = await asOwner(societyId, 'patch', path, { version: 1, name: 'Late' });
       expect(res.status).toBe(409);
       expect(res.body).toMatchObject({ code: 'VERSION_CONFLICT', data: { currentVersion: 2 } });
     });
 
     it('refuses the code, Society, status, pause and stamps as fields, and a null name', async () => {
-      const inst = await institution(await society());
+      const societyId = await society();
+      const inst = await institution(societyId);
       for (const field of ['code', 'societyId', 'status', 'accessPause', 'updatedBy', 'id']) {
-        const res = await asAdmin('patch', `/v1/institutions/${inst.id}`, {
+        const res = await asOwner(societyId, 'patch', `/v1/institutions/${inst.id}`, {
           version: 1,
           [field]: 'x',
         });
@@ -536,29 +545,32 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
         );
       }
       expect(
-        (await asAdmin('patch', `/v1/institutions/${inst.id}`, { version: 1, name: null })).status,
+        (
+          await asOwner(societyId, 'patch', `/v1/institutions/${inst.id}`, {
+            version: 1,
+            name: null,
+          })
+        ).status,
       ).toBe(400);
     });
 
-    it('answers 404 to an Owner for another Society’s Institution and an unknown one, 409 to Super Admin for a deactivated one', async () => {
+    it('answers 404 to an Owner for another Society’s Institution and an unknown or deactivated one', async () => {
       const societyId = await society();
       const foreign = await institution(await society());
-      const owner = await fixtures.owner(societyId);
+      const own = await institution(societyId);
+      const owner = await ownerOf(societyId);
       for (const id of [foreign.id, missing]) {
         expect(
           (await api('patch', `/v1/institutions/${id}`, owner.token, { version: 1, name: 'x' }))
             .status,
         ).toBe(404);
       }
-      await asAdmin('delete', `/v1/institutions/${foreign.id}`);
-      const res = await asAdmin('patch', `/v1/institutions/${foreign.id}`, {
+      await api('delete', `/v1/institutions/${own.id}`, owner.token);
+      const res = await api('patch', `/v1/institutions/${own.id}`, owner.token, {
         version: 2,
         name: 'x',
       });
-      expect([res.status, res.body.code]).toEqual([409, 'INVALID_STATE']);
-      expect((await asAdmin('patch', `/v1/institutions/${missing}`, { version: 1 })).status).toBe(
-        404,
-      );
+      expect([res.status, res.body.code]).toEqual([404, 'NOT_FOUND']);
     });
   });
 
@@ -567,7 +579,7 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
       const societyId = await society();
       const first = await institution(societyId);
       const second = await institution(societyId);
-      const owner = await fixtures.owner(societyId);
+      const owner = await ownerOf(societyId);
       const onlyFirst = await fixtures.institutionAdmin(societyId, [first.id]);
       const both = await fixtures.institutionAdmin(societyId, [first.id, second.id]);
 
@@ -596,114 +608,24 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
       expect(entry.new_values).toEqual({ status: 0, grantsRevoked: 2 });
     });
 
-    it('lets Super Admin deactivate, and answers 409 INVALID_STATE the second time (404 to an Owner)', async () => {
+    it('answers 404 the second time, as for an unknown Institution', async () => {
       const societyId = await society();
       const inst = await institution(societyId);
-      const owner = await fixtures.owner(societyId);
-      expect((await asAdmin('delete', `/v1/institutions/${inst.id}`)).status).toBe(200);
-      const again = await asAdmin('delete', `/v1/institutions/${inst.id}`);
-      expect([again.status, again.body.code]).toEqual([409, 'INVALID_STATE']);
-      expect((await api('delete', `/v1/institutions/${inst.id}`, owner.token)).status).toBe(404);
-      expect((await asAdmin('delete', `/v1/institutions/${missing}`)).status).toBe(404);
-      expect((await asAdmin('delete', '/v1/institutions/nope')).status).toBe(404);
+      const owner = await ownerOf(societyId);
+      expect((await api('delete', `/v1/institutions/${inst.id}`, owner.token)).status).toBe(200);
+      const again = await api('delete', `/v1/institutions/${inst.id}`, owner.token);
+      expect([again.status, again.body.code]).toEqual([404, 'NOT_FOUND']);
+      expect((await api('delete', `/v1/institutions/${missing}`, owner.token)).status).toBe(404);
+      expect((await api('delete', '/v1/institutions/nope', owner.token)).status).toBe(404);
     });
 
     it('does not let an Owner deactivate another Society’s Institution', async () => {
-      const owner = await fixtures.owner(await society());
+      const owner = await ownerOf(await society());
       const foreign = await institution(await society());
       expect((await api('delete', `/v1/institutions/${foreign.id}`, owner.token)).status).toBe(404);
       expect(
         (await asAdmin('get', '/v1/platform/institutions?q=' + foreign.code)).body.meta,
       ).toMatchObject({ totalItems: 1 });
-    });
-  });
-
-  describe('PLT-20 and PLT-21 pause and resume', () => {
-    it('stops the Institution’s people on their next call, spares its Society, and resumes', async () => {
-      const societyId = await society();
-      const first = await institution(societyId);
-      const second = await institution(societyId);
-      const owner = await fixtures.owner(societyId);
-      const onlyFirst = await fixtures.institutionAdmin(societyId, [first.id]);
-      expect((await api('post', '/v1/fixtures/owner-write', owner.token)).status).toBe(200);
-
-      const paused = await asAdmin('post', `/v1/platform/institutions/${first.id}/pause`, {
-        version: 1,
-        reason: 'Annual fee unpaid',
-      });
-      expect(paused.status).toBe(200);
-      expect(paused.body.data).toMatchObject({
-        version: 2,
-        accessPause: {
-          pausedAt: expect.stringMatching(/Z$/),
-          pausedBy: { id: superAdmin.id, roleName: 'Super Admin' },
-          reason: 'Annual fee unpaid',
-        },
-      });
-      // Its only Admin is stopped; the Owner still works, in the other Institution.
-      const refused = await api('get', `/v1/institutions/${first.id}`, onlyFirst.token);
-      expect([refused.status, refused.body.code]).toEqual([423, 'ACCESS_PAUSED']);
-      expect((await api('get', `/v1/institutions/${second.id}`, owner.token)).status).toBe(200);
-      expect((await api('post', '/v1/fixtures/owner-write', owner.token)).status).toBe(200);
-
-      const resumed = await asAdmin('post', `/v1/platform/institutions/${first.id}/resume`, {
-        version: 2,
-      });
-      expect(resumed.body.data).toMatchObject({ accessPause: null, version: 3 });
-      expect((await api('get', `/v1/institutions/${first.id}`, onlyFirst.token)).status).toBe(200);
-
-      const entries = await audit(first.id);
-      expect(entries.find((row) => row.action === 'access.pause')).toMatchObject({
-        reason: 'Annual fee unpaid',
-        actor_user_id: superAdmin.id,
-        society_id: societyId,
-      });
-      expect(entries.map((row) => row.action)).toContain('access.resume');
-    });
-
-    it('refuses a second pause, a resume that is not paused, a stale version and a deactivated Institution', async () => {
-      const inst = await institution(await society());
-      const base = `/v1/platform/institutions/${inst.id}`;
-      const early = await asAdmin('post', `${base}/resume`, { version: 1 });
-      expect([early.status, early.body.code]).toEqual([409, 'INVALID_STATE']);
-      await asAdmin('post', `${base}/pause`, { version: 1, reason: 'Dues' });
-      const again = await asAdmin('post', `${base}/pause`, { version: 2, reason: 'Again' });
-      expect([again.status, again.body.code]).toEqual([409, 'INVALID_STATE']);
-      const stale = await asAdmin('post', `${base}/resume`, { version: 1 });
-      expect(stale.body).toMatchObject({ code: 'VERSION_CONFLICT', data: { currentVersion: 2 } });
-      await asAdmin('delete', `/v1/institutions/${inst.id}`);
-      for (const [path, body] of [
-        [`${base}/resume`, { version: 3 }],
-        [`${base}/pause`, { version: 3, reason: 'x' }],
-      ] as const) {
-        const res = await asAdmin('post', path, body);
-        expect([res.status, res.body.code]).toEqual([409, 'INVALID_STATE']);
-      }
-    });
-
-    it('needs a reason of 1 to 500 characters and the version, and answers 404 for an unknown one', async () => {
-      const inst = await institution(await society());
-      const base = `/v1/platform/institutions/${inst.id}`;
-      for (const body of [
-        { version: 1 },
-        { version: 1, reason: '' },
-        { version: 1, reason: 'r'.repeat(501) },
-        { reason: 'x' },
-      ]) {
-        expect((await asAdmin('post', `${base}/pause`, body)).status).toBe(400);
-      }
-      expect((await asAdmin('post', `${base}/resume`, {})).status).toBe(400);
-      expect(
-        (
-          await asAdmin('post', `/v1/platform/institutions/${missing}/pause`, {
-            version: 1,
-            reason: 'x',
-          })
-        ).status,
-      ).toBe(404);
-      expect(
-        (await asAdmin('post', '/v1/platform/institutions/nope/resume', { version: 1 })).status,
-      ).toBe(404);
     });
   });
 
@@ -715,11 +637,13 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
       const a = await institution(s1, { name: `Alpha ${tag}`, code: `a-${tag}` });
       const b = await institution(s2, { name: `beta ${tag}`, code: `B-${tag}` });
       const c = await institution(s1, { name: `Gamma ${tag}`, code: `c-${tag}` });
-      await asAdmin('post', `/v1/platform/institutions/${c.id}/pause`, {
-        version: 1,
+      await asAdmin('post', '/v1/platform/access-blocks', {
+        section: 'students',
+        societyId: s1,
+        institutionId: c.id,
         reason: 'Dues',
       });
-      await asAdmin('delete', `/v1/institutions/${b.id}`);
+      await asOwner(s2, 'delete', `/v1/institutions/${b.id}`);
 
       const found = await listAll(`q=${tag}`);
       expect(found.status).toBe(200);
@@ -734,17 +658,21 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
         place: null,
         boardCode: null,
         status: 1,
-        paused: false,
-        createdBy: expect.objectContaining({ id: superAdmin.id }),
+        blockedSections: [],
+        createdBy: expect.objectContaining({ id: (await ownerOf(s1)).person }),
         createdAt: expect.any(String),
-        updatedBy: expect.objectContaining({ id: superAdmin.id }),
+        updatedBy: expect.objectContaining({ id: (await ownerOf(s1)).person }),
         updatedAt: expect.any(String),
       });
       expect(ids(await listAll(`q=${tag}&societyId=${s2}`))).toEqual([b.id]);
       expect(ids(await listAll(`q=${tag}&status=0`))).toEqual([b.id]);
       expect(ids(await listAll(`q=${tag}&status=0&status=1`))).toHaveLength(3);
-      expect(ids(await listAll(`q=${tag}&paused=true`))).toEqual([c.id]);
-      expect(ids(await listAll(`q=${tag}&paused=false&status=1`))).toEqual([a.id]);
+      expect(ids(await listAll(`q=${tag}&blocked=true`))).toEqual([c.id]);
+      expect(ids(await listAll(`q=${tag}&blocked=false&status=1`))).toEqual([a.id]);
+      const blocked = (await listAll(`q=${tag}&blocked=true`)).body.data as unknown as {
+        blockedSections: string[];
+      }[];
+      expect(blocked[0]!.blockedSections).toEqual(['students']);
       expect(ids(await listAll(`q=${tag}&sort=-name`))).toEqual([c.id, b.id, a.id]);
       expect(ids(await listAll(`q=${tag}&sort=code`))).toEqual([a.id, b.id, c.id]);
       expect(ids(await listAll(`q=${tag}&sort=-createdAt`))).toEqual([c.id, b.id, a.id]);
@@ -755,7 +683,7 @@ describe('PLT-19 to PLT-21 and INS-01 to INS-05 Institutions', () => {
 
     it('answers 400 for an unknown sort, a bad status, a bad Society ID and a short search', async () => {
       expect((await listAll('sort=gstin')).body.code).toBe('INVALID_SORT');
-      for (const query of ['status=2', 'paused=maybe', 'societyId=nope']) {
+      for (const query of ['status=2', 'blocked=maybe', 'societyId=nope']) {
         expect((await listAll(query)).body.code).toBe('VALIDATION_FAILED');
       }
       expect((await listAll('q=a')).body.errors).toContainEqual(

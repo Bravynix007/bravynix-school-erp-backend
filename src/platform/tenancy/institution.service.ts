@@ -1,14 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { requireVersion } from '../../common/http/require-version.js';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
-import { RoleCode } from '../../common/auth/roles.js';
 import { ApiResult } from '../../common/http/api-result.js';
 import { AppException } from '../../common/http/app-exception.js';
-import { FieldErrorCode } from '../../common/http/error-codes.js';
 import { newId } from '../../common/ids/ids.js';
 import { pageMeta, pageOffset, parseSort } from '../../common/pagination/pagination.js';
-import { fieldError } from '../../common/validation/field-error.js';
-import type { VersionDto } from '../../common/validation/version.dto.js';
 import { Clock } from '../../common/time/clock.js';
 import { AuditService, type AuditValues } from '../audit/index.js';
 import {
@@ -43,15 +39,8 @@ import {
   type InstitutionSummary,
 } from './institution.resource.js';
 import { addressColumns, contactColumns } from './profile-columns.js';
-import {
-  pauseColumns,
-  requireActive,
-  requirePausable,
-  requireResumable,
-  RESUME_COLUMNS,
-} from './record-rules.js';
+import { requireActive } from './record-rules.js';
 import { ScopeService } from './scope.service.js';
-import type { VersionedReasonDto } from '../../common/validation/reason.dto.js';
 import { SocietyRepository } from './society.repository.js';
 
 /** Why the Admin grants of a deactivated Institution were revoked. */
@@ -99,13 +88,11 @@ function auditView(row: InstitutionRow): AuditValues {
   };
 }
 
-const isSuperAdmin = (principal: Principal): boolean => principal.roleCode === RoleCode.SuperAdmin;
-
 /**
- * INS-01 to INS-05 and PLT-19 to PLT-21 (API design 10.4c). A Society Owner
- * works inside their own Society; Super Admin names any. Every change runs in
- * one transaction with its audit entry, and the row is locked for the check of
- * `version` and state.
+ * INS-01 to INS-05 and PLT-19 (API design 10.4c). A Society Owner adds and
+ * changes the Institutions of their own Society; Super Admin only looks across
+ * Societies (PLT-19). Every change runs in one transaction with its audit
+ * entry, and the row is locked for the check of `version` and state.
  */
 @Injectable()
 export class InstitutionService {
@@ -127,11 +114,7 @@ export class InstitutionService {
       scope.societyId === null
         ? []
         : await this.database.transaction(scope.tenant, (tx) =>
-            this.institutions.activeAmong(
-              tx,
-              scope.societyId!,
-              scope.institutions.map((institution) => institution.id),
-            ),
+            this.institutions.activeAmong(tx, scope.societyId!, scope.tenant.institutionIds ?? []),
           );
     const people = await this.people.describe(peopleOfInstitutions(rows));
     return ApiResult.list(
@@ -151,7 +134,7 @@ export class InstitutionService {
     const { rows, total } = await this.database.transaction(platformTenant(principal), (tx) =>
       this.institutions.page(
         tx,
-        { q: query.q, societyId: query.societyId, statuses: query.status, paused: query.paused },
+        { q: query.q, societyId: query.societyId, statuses: query.status, blocked: query.blocked },
         sort,
         query.limit,
         pageOffset(query.page, query.limit),
@@ -164,7 +147,7 @@ export class InstitutionService {
     );
   }
 
-  /** INS-03: inside the caller's scope only; a paused Institution answers 423. */
+  /** INS-03: inside the caller's scope only; an Institution whose staff are blocked answers 423 to its staff. */
   async get(principal: Principal, id: string): Promise<InstitutionResource> {
     const { tenant } = await this.scope.requireInstitution(principal, id);
     const row = await this.database.transaction(tenant, (tx) => this.mustFind(tx, id));
@@ -172,16 +155,15 @@ export class InstitutionService {
   }
 
   async create(principal: Principal, body: CreateInstitutionDto): Promise<InstitutionResource> {
-    const societyId = this.societyOf(principal, body);
+    const societyId = principal.societyId;
+    if (societyId === null) throw AppException.forbidden();
     const id = newId();
-    const tenant: TenantContext = isSuperAdmin(principal)
-      ? platformTenant(principal, societyId, [id])
-      : {
-          personId: principal.personId,
-          roleCode: principal.roleCode,
-          societyId,
-          institutionIds: [id],
-        };
+    const tenant: TenantContext = {
+      personId: principal.personId,
+      roleCode: principal.roleCode,
+      societyId,
+      institutionIds: [id],
+    };
     const row = await this.database
       .transaction(tenant, async (tx) => {
         const society = await this.societies.find(tx, societyId);
@@ -211,7 +193,7 @@ export class InstitutionService {
     id: string,
     body: UpdateInstitutionDto,
   ): Promise<InstitutionResource> {
-    const tenant = await this.tenantFor(principal, id);
+    const { tenant } = await this.scope.requireInstitution(principal, id);
     const row = await this.database.transaction(tenant, async (tx) => {
       const current = await this.lockedAt(tx, id, body.version);
       requireActive(current);
@@ -239,7 +221,7 @@ export class InstitutionService {
 
   /** Deactivates; the Admin grants for it end, so an Admin with no other Institution loses the role. */
   async deactivate(principal: Principal, id: string): Promise<{ id: string; status: 0 }> {
-    const tenant = await this.tenantFor(principal, id);
+    const { tenant } = await this.scope.requireInstitution(principal, id);
     await this.database.transaction(tenant, async (tx) => {
       const current = await this.institutions.find(tx, id, true);
       if (!current) throw AppException.notFound();
@@ -258,81 +240,6 @@ export class InstitutionService {
       });
     });
     return { id, status: 0 };
-  }
-
-  /** PLT-20. */
-  async pause(
-    principal: Principal,
-    id: string,
-    body: VersionedReasonDto,
-  ): Promise<InstitutionResource> {
-    const tenant = await this.tenantFor(principal, id);
-    const row = await this.database.transaction(tenant, async (tx) => {
-      const current = await this.lockedAt(tx, id, body.version);
-      requirePausable(current);
-      await this.institutions.update(tx, id, {
-        ...pauseColumns(principal.personId, this.clock.now(), body.reason),
-        ...updateStamp(principal.personId),
-      });
-      const paused = await this.mustFind(tx, id);
-      await this.record(tx, 'access.pause', paused, {
-        reason: body.reason,
-        before: { access_paused: false },
-        after: { access_paused: true },
-      });
-      return paused;
-    });
-    return this.resource(row);
-  }
-
-  /** PLT-21. */
-  async resume(principal: Principal, id: string, body: VersionDto): Promise<InstitutionResource> {
-    const tenant = await this.tenantFor(principal, id);
-    const row = await this.database.transaction(tenant, async (tx) => {
-      const current = await this.lockedAt(tx, id, body.version);
-      requireResumable(current);
-      await this.institutions.update(tx, id, {
-        ...RESUME_COLUMNS,
-        ...updateStamp(principal.personId),
-      });
-      const resumed = await this.mustFind(tx, id);
-      await this.record(tx, 'access.resume', resumed, {
-        before: { access_paused: true },
-        after: { access_paused: false },
-      });
-      return resumed;
-    });
-    return this.resource(row);
-  }
-
-  /** Super Admin names the Society; an Owner adds to their own and may not name one. */
-  private societyOf(principal: Principal, body: CreateInstitutionDto): string {
-    if (isSuperAdmin(principal)) {
-      if (!body.societyId) {
-        throw AppException.validation([fieldError('societyId', FieldErrorCode.REQUIRED)]);
-      }
-      return body.societyId;
-    }
-    if (body.societyId !== undefined) {
-      throw AppException.validation([fieldError('societyId', FieldErrorCode.FIELD_NOT_ALLOWED)]);
-    }
-    if (principal.societyId === null) throw AppException.forbidden();
-    return principal.societyId;
-  }
-
-  /**
-   * The tenant a change to one Institution runs in. An Owner reaches only
-   * their own active, unpaused Institutions (404 and 423 as everywhere); Super
-   * Admin reaches any, in the Society it belongs to.
-   */
-  private async tenantFor(principal: Principal, id: string): Promise<TenantContext> {
-    if (!isSuperAdmin(principal))
-      return (await this.scope.requireInstitution(principal, id)).tenant;
-    const found = await this.database.transaction(platformTenant(principal), (tx) =>
-      this.institutions.find(tx, id),
-    );
-    if (!found) throw AppException.notFound();
-    return platformTenant(principal, found.society_id, [id]);
   }
 
   /** The row, locked, for a change that names the `version` the client read. */

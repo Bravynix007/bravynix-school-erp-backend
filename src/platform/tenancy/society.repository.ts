@@ -7,12 +7,16 @@ import {
   type Updateable,
 } from 'kysely';
 import { containsPattern, type SortKey } from '../../common/pagination/pagination.js';
+import { BlockSection } from '../../common/auth/block-section.js';
 import type { Database, Tx } from '../database/index.js';
+import { institutionHasBlock, societyHasBlock } from './block-columns.js';
 import type { InstitutionsTable, SocietiesTable } from './tenancy.tables.js';
 
 export type SocietyRow = Selectable<SocietiesTable> & {
   /** Active Institutions, derived. */
   institution_count: number;
+  /** The Owners of the Society are blocked (section `owners`), derived. */
+  owners_blocked: boolean;
 };
 
 export type NewSociety = Insertable<SocietiesTable>;
@@ -22,7 +26,8 @@ export type SocietyChanges = Updateable<SocietiesTable>;
 export interface SocietyFilter {
   q?: string;
   statuses?: readonly number[];
-  paused?: boolean;
+  /** The Owners blocked, or not. */
+  blocked?: boolean;
 }
 
 export type SocietySortField = 'name' | 'code' | 'createdAt';
@@ -31,7 +36,8 @@ export type SocietyInstitution = Pick<
   Selectable<InstitutionsTable>,
   'id' | 'code' | 'name' | 'status'
 > & {
-  paused: boolean;
+  staff_blocked: boolean;
+  students_blocked: boolean;
 };
 
 const SORT_COLUMN = {
@@ -54,7 +60,8 @@ export class SocietyRepository {
           .whereRef('institutions.society_id', '=', 'societies.id')
           .where('institutions.status', '=', 1)
           .as('institution_count'),
-      );
+      )
+      .select(societyHasBlock(BlockSection.Owners).as('owners_blocked'));
   }
 
   private matching(filter: SocietyFilter) {
@@ -65,8 +72,9 @@ export class SocietyRepository {
         conditions.push(eb.or([eb('name', 'ilike', pattern), eb('code', 'ilike', pattern)]));
       }
       if (filter.statuses?.length) conditions.push(eb('status', 'in', filter.statuses));
-      if (filter.paused !== undefined) {
-        conditions.push(eb('access_paused_at', filter.paused ? 'is not' : 'is', null));
+      if (filter.blocked !== undefined) {
+        const owners = societyHasBlock(BlockSection.Owners);
+        conditions.push(filter.blocked ? owners : sql<boolean>`not ${owners}`);
       }
       return eb.and(conditions);
     };
@@ -122,14 +130,18 @@ export class SocietyRepository {
   async institutions(tx: Tx, societyId: string): Promise<SocietyInstitution[]> {
     const rows = await tx
       .selectFrom('institutions')
-      .select(['id', 'code', 'name', 'status', 'access_paused_at'])
+      .select([
+        'id',
+        'code',
+        'name',
+        'status',
+        institutionHasBlock(BlockSection.Staff).as('staff_blocked'),
+        institutionHasBlock(BlockSection.Students).as('students_blocked'),
+      ])
       .where('society_id', '=', societyId)
       .orderBy(sql`lower(name)`)
       .orderBy('id')
       .execute();
-    return rows.map(({ access_paused_at: pausedAt, ...row }) => ({
-      ...row,
-      paused: pausedAt !== null,
-    }));
+    return rows;
   }
 }

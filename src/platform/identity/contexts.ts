@@ -1,3 +1,4 @@
+import { RoleCode } from '../../common/auth/roles.js';
 import type { Grant } from './session.repository.js';
 
 /** The role a session acts in (API design 6.3). */
@@ -9,7 +10,8 @@ export interface Context {
 /**
  * One role the person can choose from the list in AUTH-02 and ME-01 (API
  * design 6.3). Staff and children arrive with the People module. `isBlocked`
- * is false until section blocks (PLT-42).
+ * says a section block stops the role there (PLT-42): the Owners of the Society
+ * are blocked, or every Institution the person reaches has its staff blocked.
  */
 export interface ContextChoice extends Context {
   societyName: string | null;
@@ -31,21 +33,26 @@ export const CONSOLE_CONTEXT: ContextChoice = {
  * a mobile context), so the role 1 grant is not one of them.
  */
 export function mobileContexts(grants: readonly Grant[]): ContextChoice[] {
-  const seen = new Set<string>();
-  const contexts: ContextChoice[] = [];
+  const contexts = new Map<string, ContextChoice>();
   for (const grant of grants) {
     if (grant.roleCode === 1) continue;
     const key = `${String(grant.roleCode)}:${grant.societyId ?? ''}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    contexts.push({
-      roleCode: grant.roleCode,
-      societyId: grant.societyId,
-      societyName: grant.societyName,
-      isBlocked: false,
-    });
+    const blocked =
+      grant.roleCode === RoleCode.SocietyOwner ? grant.ownersBlocked : grant.staffBlocked;
+    const listed = contexts.get(key);
+    if (listed) {
+      // One context for several Institutions: blocked only when none is left open.
+      listed.isBlocked &&= blocked;
+    } else {
+      contexts.set(key, {
+        roleCode: grant.roleCode,
+        societyId: grant.societyId,
+        societyName: grant.societyName,
+        isBlocked: blocked,
+      });
+    }
   }
-  return contexts;
+  return [...contexts.values()];
 }
 
 /** The one context a session starts in; with none or several the person chooses (AUTH-06). */

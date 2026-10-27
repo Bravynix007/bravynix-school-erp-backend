@@ -10,5 +10,5 @@ export class ReasonDto {
   reason!: string;
 }
 
-/** The version read and why: a pause (PLT-07, PLT-20) or a block (PLT-15). */
+/** The version read and why: an account block (PLT-15). */
 export class VersionedReasonDto extends IntersectionType(VersionDto, ReasonDto) {}

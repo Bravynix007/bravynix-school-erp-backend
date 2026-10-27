@@ -4,7 +4,15 @@ import { RoleCode } from '../../common/auth/roles.js';
 import { AppException } from '../../common/http/app-exception.js';
 import type { TenantContext } from '../database/index.js';
 import { GrantDirectory } from '../identity/index.js';
-import { TenancyRepository, type ScopedInstitution } from './tenancy.repository.js';
+import { BlockSection } from '../../common/auth/block-section.js';
+import { isStaffRole, staffBlockedIds, type ActiveBlock } from './access-block.rules.js';
+import { TenancyRepository } from './tenancy.repository.js';
+
+/** An active Institution the caller's role reaches, and whether its staff are blocked. */
+export interface ScopedInstitution {
+  id: string;
+  staffBlocked: boolean;
+}
 
 /**
  * Where the caller may act, resolved once per request (SDD 10.3 step 2): their
@@ -17,8 +25,9 @@ export interface RequestScope {
   institutions: readonly ScopedInstitution[];
   /**
    * For Society-wide work: the Society and the Institutions in scope. A Society
-   * Owner keeps paused ones (audit and dues stay readable); an Institution
-   * Admin does not, so the database hides a paused Institution from them too.
+   * Owner keeps staff-blocked ones (audit and dues stay readable); an
+   * Institution Admin does not, so the database hides a blocked Institution
+   * from them too.
    */
   tenant: TenantContext;
 }
@@ -39,7 +48,8 @@ export interface InstitutionContext {
 /**
  * Tenant scope, check 2 of 3 (API design 6.4). A record in another Society, or
  * in an Institution the caller does not reach, answers 404 and never admits it
- * exists (SDD 12.4); a paused Institution answers 423.
+ * exists (SDD 12.4); an Institution whose staff are blocked answers 423 to
+ * its staff, and not to the Owner.
  *
  * Roles 2 and 3 only for now: a Society Owner reaches every active Institution
  * of their Society, an Institution Admin those they hold a grant for. Roles 4
@@ -50,8 +60,9 @@ export interface InstitutionContext {
  */
 @Injectable()
 export class ScopeService {
-  /** One principal object lives for one request, so this memoises per request. */
+  /** One principal object lives for one request, so these memoise per request. */
   private readonly resolved = new WeakMap<Principal, Promise<RequestScope>>();
+  private readonly blocks = new WeakMap<Principal, Promise<readonly ActiveBlock[]>>();
 
   constructor(
     private readonly repository: TenancyRepository,
@@ -65,6 +76,19 @@ export class ScopeService {
       this.resolved.set(principal, scope);
     }
     return scope;
+  }
+
+  /** The blocks in force in the caller's Society, read once per request. */
+  activeBlocks(principal: Principal): Promise<readonly ActiveBlock[]> {
+    let blocks = this.blocks.get(principal);
+    if (!blocks) {
+      blocks =
+        principal.societyId === null
+          ? Promise.resolve([])
+          : this.repository.activeBlocks(principal.societyId, principal.personId);
+      this.blocks.set(principal, blocks);
+    }
+    return blocks;
   }
 
   /** The caller's Society must be `societyId`; anything else is 404. */
@@ -82,7 +106,9 @@ export class ScopeService {
     const scope = await this.forPrincipal(principal);
     const found = scope.institutions.find((institution) => institution.id === institutionId);
     if (!found || scope.societyId === null) throw AppException.notFound();
-    if (found.paused) throw AppException.paused();
+    if (found.staffBlocked && isStaffRole(scope.roleCode)) {
+      throw AppException.sectionBlocked(BlockSection.Staff);
+    }
     return {
       institutionId,
       societyId: scope.societyId,
@@ -92,7 +118,12 @@ export class ScopeService {
 
   private async resolve(principal: Principal): Promise<RequestScope> {
     const { personId, roleCode, societyId } = principal;
-    const institutions = await this.institutionsFor(principal);
+    const [ids, blocks] = await Promise.all([
+      this.institutionIdsFor(principal),
+      this.activeBlocks(principal),
+    ]);
+    const blocked = staffBlockedIds(blocks);
+    const institutions = ids.map((id) => ({ id, staffBlocked: blocked.has(id) }));
     return {
       personId,
       roleCode,
@@ -103,24 +134,20 @@ export class ScopeService {
         roleCode,
         societyId,
         institutionIds: institutions
-          .filter((institution) => roleCode !== RoleCode.InstitutionAdmin || !institution.paused)
+          .filter((institution) => !isStaffRole(roleCode) || !institution.staffBlocked)
           .map((institution) => institution.id),
       },
     };
   }
 
-  private async institutionsFor({
-    personId,
-    roleCode,
-    societyId,
-  }: Principal): Promise<ScopedInstitution[]> {
+  private async institutionIdsFor({ personId, roleCode, societyId }: Principal): Promise<string[]> {
     if (societyId === null) return [];
     const tenant: TenantContext = { personId, roleCode, societyId };
     switch (roleCode) {
       case RoleCode.SocietyOwner:
-        return this.repository.activeInstitutions(tenant, societyId, null);
+        return this.repository.activeInstitutionIds(tenant, societyId, null);
       case RoleCode.InstitutionAdmin:
-        return this.repository.activeInstitutions(
+        return this.repository.activeInstitutionIds(
           tenant,
           societyId,
           await this.grants.adminInstitutionIds(personId, societyId),

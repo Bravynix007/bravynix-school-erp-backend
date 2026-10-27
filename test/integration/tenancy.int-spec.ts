@@ -8,6 +8,7 @@ import { runMigrations } from '../../src/platform/database/migrator.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { institutions, personaByKey, societies } from '../../src/seeds/two-worlds.js';
 import { superAdminToken } from '../support/admin-token.js';
+import * as blocks from '../support/blocks.js';
 import { FixtureModule } from '../support/fixture.module.js';
 import { signInAs, signInMobile } from '../support/sessions.js';
 import { clearLoginState } from '../support/login-state.js';
@@ -31,7 +32,7 @@ const asOwnerOf = (society: { id: string }): TenantContext => ({
   roleCode: RoleCode.SocietyOwner,
   societyId: society.id,
 });
-const caller = (society: { id: string } | null, roleCode: 1 | 2 = 2) => ({
+const caller = (society: { id: string } | null, roleCode: 1 | 2 | 3 = 2) => ({
   personId: owner.id,
   sessionId: owner.id,
   roleCode,
@@ -53,16 +54,22 @@ const edit = (id: string) => (tx: Tx) =>
     .where('id', '=', id)
     .executeTakeFirst();
 
-const pause = (table: 'societies' | 'institutions', id: string, by: string) => (tx: Tx) =>
-  sql`
-    update ${sql.table(table)} set access_paused_at = now(), access_paused_by = ${by},
-      access_pause_reason = 'Dues unpaid' where id = ${id}
-  `.execute(tx);
-const resume = (table: 'societies' | 'institutions', id: string) => (tx: Tx) =>
-  sql`
-    update ${sql.table(table)} set access_paused_at = null, access_paused_by = null,
-      access_pause_reason = null where id = ${id}
-  `.execute(tx);
+const owners = (society: { id: string }, by: string) => (tx: Tx) =>
+  tx
+    .insertInto('access_blocks')
+    .values({ society_id: society.id, section: 1, reason: 'Dues unpaid', created_by: by })
+    .execute();
+const staffOf = (society: { id: string }, institution: { id: string }, by: string) => (tx: Tx) =>
+  tx
+    .insertInto('access_blocks')
+    .values({
+      society_id: society.id,
+      institution_id: institution.id,
+      section: 2,
+      reason: 'Dues unpaid',
+      created_by: by,
+    })
+    .execute();
 
 const accepted = (promise: Promise<unknown>) =>
   promise.catch((error: unknown) => {
@@ -92,17 +99,12 @@ const names = (tenant: TenantContext, table: 'societies' | 'institutions') =>
     .transaction(tenant, (tx) => tx.selectFrom(table).select('name').orderBy('name').execute())
     .then((rows) => rows.map((row) => row.name));
 
-const setPause = (id: string, paused: boolean, table: 'societies' | 'institutions') =>
-  ownerDb.transaction().execute(async (tx) => {
-    await sql`select set_config('app.role_code', '1', true)`.execute(tx);
-    await sql`
-      update ${sql.table(table)} set
-        access_paused_at = ${paused ? sql`now()` : null},
-        access_paused_by = ${paused ? superAdmin.id : null},
-        access_pause_reason = ${paused ? 'Dues unpaid' : null}
-      where id = ${id}
-    `.execute(tx);
-  });
+const setBlock = (
+  societyId: string,
+  institutionId: string | null,
+  section: 1 | 2 | 3,
+  on: boolean,
+) => blocks.setBlock(ownerDb, societyId, institutionId, section, on);
 
 const insertInstitution = (societyId: string, code: string, extra: Record<string, unknown> = {}) =>
   inRolledBack(asSuperAdmin, (tx) =>
@@ -132,6 +134,22 @@ const adminToken = () => superAdminToken(t, ownerDb, superAdmin.id);
 const call = (method: 'get' | 'post', path: string, bearer: string) =>
   request(t.app.getHttpServer())[method](path).set('Authorization', `Bearer ${bearer}`).send({});
 
+const readBlocks = (tenant: TenantContext) =>
+  database.transaction(tenant, (tx) =>
+    tx.selectFrom('access_blocks').select(['society_id', 'section']).execute(),
+  );
+
+const insertBlock = (values: Record<string, unknown>) =>
+  inRolledBack(asSuperAdmin, (tx) =>
+    sql`
+        insert into access_blocks (society_id, institution_id, section, reason, created_by)
+        values (${values.society ?? societyA.id}, ${values.institution ?? null},
+          ${values.section ?? 1}, ${values.reason ?? 'Dues'}, ${superAdmin.id})
+      `.execute(tx),
+  );
+
+const gate = () => t.app.get(TenantAccessGate);
+
 describe('Societies and Institutions (DDD 9.3, 15.3)', () => {
   beforeAll(async () => {
     await runMigrations(migrationUrl, 'latest');
@@ -149,8 +167,7 @@ describe('Societies and Institutions (DDD 9.3, 15.3)', () => {
   });
 
   afterEach(async () => {
-    for (const id of [societyA.id, societyB.id]) await setPause(id, false, 'societies');
-    for (const { id } of [instA1, instA2, instB1]) await setPause(id, false, 'institutions');
+    await blocks.clearBlocks(ownerDb);
   });
 
   describe('row-level security', () => {
@@ -284,31 +301,56 @@ describe('Societies and Institutions (DDD 9.3, 15.3)', () => {
     });
   });
 
-  describe('who may pause or resume access (PRD 9.4)', () => {
-    it('lets Super Admin pause a Society and an Institution', async () => {
-      await inRolledBack(asSuperAdmin, pause('societies', societyA.id, superAdmin.id));
-      await inRolledBack(asSuperAdmin, pause('institutions', instA1.id, superAdmin.id));
+  describe('who may block or unblock access (PRD 9.4)', () => {
+    it('lets Super Admin block the Owners of a Society and the staff of an Institution', async () => {
+      await inRolledBack(asSuperAdmin, owners(societyA, superAdmin.id));
+      await inRolledBack(asSuperAdmin, staffOf(societyA, instA1, superAdmin.id));
     });
 
-    it('does not let an owner pause their own Society or Institution, or lift a pause', async () => {
-      for (const [table, id] of [
-        ['societies', societyA.id],
-        ['institutions', instA1.id],
-      ] as const) {
-        await expect(inRolledBack(asOwnerOf(societyA), pause(table, id, owner.id))).rejects.toThrow(
-          /Only Super Admin may change/,
-        );
-      }
-      await setPause(societyA.id, true, 'societies');
-      await setPause(instA1.id, true, 'institutions');
-      for (const [table, id] of [
-        ['societies', societyA.id],
-        ['institutions', instA1.id],
-      ] as const) {
-        await expect(inRolledBack(asOwnerOf(societyA), resume(table, id))).rejects.toThrow(
-          /Only Super Admin may change/,
-        );
-      }
+    it('does not let an owner block anyone, their own Society included', async () => {
+      await expect(inRolledBack(asOwnerOf(societyA), owners(societyA, owner.id))).rejects.toThrow(
+        /row-level security/,
+      );
+      await expect(
+        inRolledBack(asOwnerOf(societyA), staffOf(societyA, instA1, owner.id)),
+      ).rejects.toThrow(/row-level security/);
+    });
+
+    it('does not let an owner lift a block, and lets Super Admin', async () => {
+      await setBlock(societyA.id, null, 1, true);
+      const lift = (tx: Tx) =>
+        tx
+          .updateTable('access_blocks')
+          .set({ lifted_at: new Date(), lifted_by: owner.id })
+          .where('society_id', '=', societyA.id)
+          .executeTakeFirst();
+      expect((await inRolledBack(asOwnerOf(societyA), lift)).numUpdatedRows).toBe(0n);
+      const liftAsAdmin = (tx: Tx) =>
+        tx
+          .updateTable('access_blocks')
+          .set({ lifted_at: new Date(), lifted_by: superAdmin.id })
+          .where('society_id', '=', societyA.id)
+          .executeTakeFirst();
+      expect((await inRolledBack(asSuperAdmin, liftAsAdmin)).numUpdatedRows).toBe(1n);
+    });
+
+    it('never rewrites a block’s section or reason, and never deletes one: the history stays', async () => {
+      await setBlock(societyA.id, null, 1, true);
+      await expect(
+        inRolledBack(asSuperAdmin, (tx) =>
+          sql`update access_blocks set reason = 'Other' where society_id = ${societyA.id}`.execute(
+            tx,
+          ),
+        ),
+      ).rejects.toThrow(/permission denied/);
+      await expect(
+        inRolledBack(asSuperAdmin, (tx) =>
+          sql`update access_blocks set section = 2 where society_id = ${societyA.id}`.execute(tx),
+        ),
+      ).rejects.toThrow(/permission denied/);
+      await expect(
+        inRolledBack(asSuperAdmin, (tx) => tx.deleteFrom('access_blocks').execute()),
+      ).rejects.toThrow(/permission denied/);
     });
 
     it('does not let an owner change the Society code, and lets Super Admin', async () => {
@@ -351,19 +393,74 @@ describe('Societies and Institutions (DDD 9.3, 15.3)', () => {
       expect(done.numUpdatedRows).toBe(1n);
     });
 
-    it('needs a person, a time and a reason together, or none', async () => {
+    it('needs a lift time and a lifting person together, or none', async () => {
+      await setBlock(societyA.id, null, 1, true);
       await expect(
         inRolledBack(asSuperAdmin, (tx) =>
-          sql`update societies set access_paused_at = now() where id = ${societyA.id}`.execute(tx),
-        ),
-      ).rejects.toThrow(/ck_societies_pause/);
-      await expect(
-        inRolledBack(asSuperAdmin, (tx) =>
-          sql`update institutions set access_pause_reason = 'x' where id = ${instA1.id}`.execute(
+          sql`update access_blocks set lifted_at = now() where society_id = ${societyA.id}`.execute(
             tx,
           ),
         ),
-      ).rejects.toThrow(/ck_institutions_pause/);
+      ).rejects.toThrow(/ck_access_blocks_lift/);
+    });
+  });
+
+  describe('who sees which blocks', () => {
+    beforeEach(async () => {
+      await setBlock(societyA.id, null, 1, true);
+      await setBlock(societyA.id, instA1.id, 2, true);
+      await setBlock(societyB.id, null, 1, true);
+    });
+
+    it('shows Super Admin every block', async () => {
+      expect(await readBlocks(asSuperAdmin)).toHaveLength(3);
+    });
+
+    it('shows an Owner the blocks of their own Society only', async () => {
+      const own = await readBlocks(asOwnerOf(societyA));
+      expect(own.map((row) => row.society_id)).toEqual([societyA.id, societyA.id]);
+      expect((await readBlocks(asOwnerOf(societyB))).map((row) => row.society_id)).toEqual([
+        societyB.id,
+      ]);
+    });
+
+    it('shows an Institution Admin, a teacher, a parent and a request with no tenant none', async () => {
+      for (const roleCode of [3, 4, 5]) {
+        expect(
+          await readBlocks({ ...asOwnerOf(societyA), roleCode, institutionIds: [instA1.id] }),
+        ).toEqual([]);
+      }
+      expect(await readBlocks({})).toEqual([]);
+    });
+  });
+
+  describe('block constraints', () => {
+    it('keeps an Institution on staff and students blocks and off the Owners block', async () => {
+      await expect(insertBlock({ institution: instA1.id, section: 1 })).rejects.toThrow(
+        /ck_access_blocks_scope/,
+      );
+      await expect(insertBlock({ section: 2 })).rejects.toThrow(/ck_access_blocks_scope/);
+      await expect(insertBlock({ section: 3 })).rejects.toThrow(/ck_access_blocks_scope/);
+      await insertBlock({ institution: instA1.id, section: 3 });
+    });
+
+    it('refuses an unknown section, a blank reason, and an Institution of another Society', async () => {
+      await expect(insertBlock({ institution: instA1.id, section: 4 })).rejects.toThrow(
+        /ck_access_blocks_section/,
+      );
+      await expect(insertBlock({ reason: '  ' })).rejects.toThrow(/ck_access_blocks_reason/);
+      await expect(insertBlock({ institution: instB1.id, section: 2 })).rejects.toThrow(
+        /fk_access_blocks_institution/,
+      );
+    });
+
+    it('allows one active block per section and Institution, and a new one after the lift', async () => {
+      await setBlock(societyA.id, null, 1, true);
+      await expect(setBlock(societyA.id, null, 1, true)).rejects.toThrow(/uq_access_blocks_active/);
+      await setBlock(societyA.id, instA1.id, 2, true);
+      await setBlock(societyA.id, instA2.id, 2, true);
+      await setBlock(societyA.id, null, 1, false);
+      await setBlock(societyA.id, null, 1, true);
     });
   });
 
@@ -467,21 +564,28 @@ describe('Societies and Institutions (DDD 9.3, 15.3)', () => {
     });
   });
 
-  describe('the pause check', () => {
-    it('reports a Society paused while it is, and open again after the resume', async () => {
-      const gate = t.app.get(TenantAccessGate);
-      expect(await gate.isPaused(caller(societyA))).toBe(false);
-      await setPause(societyA.id, true, 'societies');
-      expect(await gate.isPaused(caller(societyA))).toBe(true);
-      expect(await gate.isPaused(caller(societyB))).toBe(false);
-      await setPause(societyA.id, false, 'societies');
-      expect(await gate.isPaused(caller(societyA))).toBe(false);
+  describe('the block check', () => {
+    it('stops an Owner while the Society’s Owners are blocked, and is open again after the lift', async () => {
+      expect(await gate().blockedSection(caller(societyA))).toBeNull();
+      await setBlock(societyA.id, null, 1, true);
+      expect(await gate().blockedSection(caller(societyA))).toBe(1);
+      expect(await gate().blockedSection(caller(societyB))).toBeNull();
+      await setBlock(societyA.id, null, 1, false);
+      expect(await gate().blockedSection(caller(societyA))).toBeNull();
     });
 
-    it('treats a caller with no Society as not paused, and a Society nobody can see as paused', async () => {
-      const gate = t.app.get(TenantAccessGate);
-      expect(await gate.isPaused(caller(null, 1))).toBe(false);
-      expect(await gate.isPaused(caller({ id: missingId }))).toBe(true);
+    it('does not stop an Owner for a staff block, and never stops Super Admin or a caller with no Society', async () => {
+      await setBlock(societyA.id, instA1.id, 2, true);
+      expect(await gate().blockedSection(caller(societyA))).toBeNull();
+      await setBlock(societyA.id, null, 1, true);
+      expect(await gate().blockedSection(caller(null, 1))).toBeNull();
+      expect(await gate().blockedSection({ ...caller(societyA), roleCode: 1 })).toBeNull();
+    });
+
+    it('stops nobody for a Society they hold no grant in, and so tells nothing about it', async () => {
+      await setBlock(societyB.id, null, 1, true);
+      expect(await gate().blockedSection(caller(societyB))).toBeNull();
+      expect(await gate().blockedSection(caller({ id: missingId }))).toBeNull();
     });
   });
 
@@ -490,26 +594,36 @@ describe('Societies and Institutions (DDD 9.3, 15.3)', () => {
       await clearLoginState(ownerDb);
     });
 
-    it('stops a paused Society on its next call, keeps sign-in, profile and sign-out, and resumes', async () => {
+    it('stops blocked Owners on their next call with 423, keeps sign-in, profile, sign-out and the allowed reads, and lifts', async () => {
       const token = await signInAs(t, owner.email, { roleCode: 2, societyId: societyA.id });
       await call('post', '/v1/fixtures/owner-write', token).expect(200);
 
-      await setPause(societyA.id, true, 'societies');
+      await setBlock(societyA.id, null, 1, true);
       const refused = await call('post', '/v1/fixtures/owner-write', token);
       expect(refused.status).toBe(423);
-      expect(refused.body).toMatchObject({ success: false, code: 'ACCESS_PAUSED' });
+      expect(refused.body).toMatchObject({
+        success: false,
+        code: 'SECTION_BLOCKED',
+        data: { section: 'owners' },
+      });
       await call('get', '/v1/me', token).expect(200);
-      await call('get', '/v1/fixtures/owner-read-when-paused', token).expect(200);
+      await call('get', '/v1/fixtures/owner-read-when-blocked', token).expect(200);
 
-      await setPause(societyA.id, false, 'societies');
+      await setBlock(societyA.id, null, 1, false);
       await call('post', '/v1/fixtures/owner-write', token).expect(200);
       await call('post', '/v1/auth/logout', token).expect(200);
     });
 
-    it('lets a paused person sign in, and never stops Super Admin', async () => {
-      await setPause(societyA.id, true, 'societies');
+    it('lets a blocked person sign in, and never stops Super Admin', async () => {
+      await setBlock(societyA.id, null, 1, true);
       await call('get', '/v1/me', (await signInMobile(t, owner.email)).accessToken).expect(200);
       await call('get', '/v1/fixtures/admin-only', await adminToken()).expect(200);
+    });
+
+    it('keeps the Owner working while only the staff of an Institution are blocked', async () => {
+      const token = await signInAs(t, owner.email, { roleCode: 2, societyId: societyA.id });
+      await setBlock(societyA.id, instA1.id, 2, true);
+      await call('post', '/v1/fixtures/owner-write', token).expect(200);
     });
   });
 });

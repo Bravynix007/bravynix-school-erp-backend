@@ -1,46 +1,34 @@
 import { Injectable } from '@nestjs/common';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
-import { RoleCode } from '../../common/auth/roles.js';
+import type { BlockSection } from '../../common/auth/block-section.js';
 import { TenantAccessGate } from '../../common/auth/tenant-access-gate.js';
+import { isStaffRole, stoppingSection } from './access-block.rules.js';
 import { ScopeService } from './scope.service.js';
-import { TenancyRepository } from './tenancy.repository.js';
 
 /**
- * Reads the pause on the Society of the caller's active context, once per
- * request, through row-level security.
+ * Reads the blocks of the Society of the caller's active context, once per
+ * request, and decides whether one of them stops the caller's role
+ * (`stoppingSection`). The read does not go through row-level security, so a
+ * caller whose tenant would hide the block is stopped all the same.
  *
- * It fails closed: a Society the caller cannot see counts as paused, so a
- * dangling or foreign `active_society_id` never opens the door.
- *
- * An Institution Admin is also stopped when every Institution they reach is
- * paused (PRD 9.4), because nothing is left for them to work in. With one still
- * open they pass, and a call naming a paused Institution gets 423 from the
- * tenant scope check (`ScopeService.requireInstitution`). The Society Owner
- * runs the whole Society and is stopped only by a Society pause.
+ * Staff roles also need the Institutions they reach; the Owner needs only the
+ * blocks, so the Owner's calls cost one read.
  */
 @Injectable()
 export class TenancyAccessGate extends TenantAccessGate {
-  constructor(
-    private readonly repository: TenancyRepository,
-    private readonly scope: ScopeService,
-  ) {
+  constructor(private readonly scope: ScopeService) {
     super();
   }
 
-  async isPaused(principal: Principal): Promise<boolean> {
-    if (principal.societyId === null) return false;
-    const paused = await this.repository.societyPauseState(
-      {
-        personId: principal.personId,
-        societyId: principal.societyId,
-        roleCode: principal.roleCode,
-        viaSupportAccess: principal.viaSupportAccess,
-      },
-      principal.societyId,
-    );
-    if (paused ?? true) return true;
-    if (principal.roleCode !== RoleCode.InstitutionAdmin) return false;
+  async blockedSection(principal: Principal): Promise<BlockSection | null> {
+    if (principal.societyId === null) return null;
+    const blocks = await this.scope.activeBlocks(principal);
+    if (!isStaffRole(principal.roleCode)) return stoppingSection(principal.roleCode, blocks, []);
     const { institutions } = await this.scope.forPrincipal(principal);
-    return institutions.length > 0 && institutions.every((institution) => institution.paused);
+    return stoppingSection(
+      principal.roleCode,
+      blocks,
+      institutions.map((institution) => institution.id),
+    );
   }
 }

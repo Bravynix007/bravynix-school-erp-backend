@@ -11,7 +11,11 @@ import type {
   UserTotpFactorsTable,
   UsersTable,
 } from '../identity/identity.tables.js';
-import type { InstitutionsTable, SocietiesTable } from '../tenancy/tenancy.tables.js';
+import type {
+  AccessBlocksTable,
+  InstitutionsTable,
+  SocietiesTable,
+} from '../tenancy/tenancy.tables.js';
 
 /**
  * Kysely table types, one interface per table, added by the module that owns
@@ -32,4 +36,5 @@ export interface Database {
   mfa_challenges: MfaChallengesTable;
   societies: SocietiesTable;
   institutions: InstitutionsTable;
+  access_blocks: AccessBlocksTable;
 }

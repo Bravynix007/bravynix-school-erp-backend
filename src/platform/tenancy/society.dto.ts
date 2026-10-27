@@ -94,7 +94,7 @@ export class CreateSocietyDto extends SocietyProfileDto {
 
 /**
  * PLT-05 body. An omitted field stays, `null` clears an optional one. `phone`
- * and `address` are replaced as a whole. `code`, `status` and the pause are
+ * and `address` are replaced as a whole. `code`, `status` and the blocks are
  * not fields here, so the global pipe answers FIELD_NOT_ALLOWED.
  */
 export class UpdateSocietyDto extends IntersectionType(VersionDto, SocietyProfileDto) {
