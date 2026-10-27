@@ -8,6 +8,7 @@ import * as m0006 from './2026_10_26_0006_tenancy_core.js';
 import * as m0007 from './2026_10_26_0007_identity_mfa.js';
 import * as m0008 from './2026_10_26_0008_tenancy_society_code_ci.js';
 import * as m0009 from './2026_10_26_0009_identity_login_unlocks.js';
+import * as m0010 from './2026_10_27_0010_identity_context_society_name.js';
 
 /**
  * Every migration, in order. Listed explicitly (not read from disk) so the
@@ -27,6 +28,7 @@ const migrations: Record<string, Migration> = {
   '2026_10_26_0007_identity_mfa': m0007,
   '2026_10_26_0008_tenancy_society_code_ci': m0008,
   '2026_10_26_0009_identity_login_unlocks': m0009,
+  '2026_10_27_0010_identity_context_society_name': m0010,
 };
 
 export const migrationProvider: MigrationProvider = {

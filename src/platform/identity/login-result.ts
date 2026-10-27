@@ -1,6 +1,6 @@
 import { personName } from './person-name.js';
 import { reportedStatus, userTypeFor } from './auth-codes.js';
-import type { Context } from './contexts.js';
+import type { ContextChoice } from './contexts.js';
 import type { LoginUser } from './identity.repository.js';
 import type { SignedAccessToken } from './token.service.js';
 
@@ -12,7 +12,7 @@ export interface LoginResult {
   accessTokenExpiresAt: string;
   /** Null on the console, which receives it as a cookie. */
   refreshToken: string | null;
-  session: { id: string; activeContext: Context | null };
+  session: { id: string; activeContext: ContextChoice | null };
   person: {
     id: string;
     email: string;
@@ -21,15 +21,15 @@ export interface LoginResult {
     preferredLanguage: string;
     accountStatus: number;
   };
-  contexts: Context[];
+  contexts: ContextChoice[];
   requiredNotices: never[];
 }
 
 export function buildLoginResult(input: {
   user: LoginUser;
   sessionId: string;
-  contexts: Context[];
-  active: Context | null;
+  contexts: ContextChoice[];
+  active: ContextChoice | null;
   accessToken: SignedAccessToken;
   refreshToken: string | null;
 }): LoginResult {
@@ -41,7 +41,7 @@ export function buildLoginResult(input: {
     refreshToken: input.refreshToken,
     session: {
       id: input.sessionId,
-      activeContext: active ? { roleCode: active.roleCode, societyId: active.societyId } : null,
+      activeContext: active,
     },
     person: {
       id: user.id,
