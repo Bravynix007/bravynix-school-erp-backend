@@ -66,6 +66,8 @@ const en: Catalogue = {
   // Accounts (API design 10.4d)
   SEAT_LIMIT_REACHED: 'The limit of three has been reached',
   LAST_OWNER: 'A Society must keep at least one Owner; add the new Owner first',
+  ROLE_CONFLICT:
+    'A Super Admin cannot also be a Society Owner, and a Society Owner cannot also be a Super Admin',
   EMAIL_IN_USE: 'This email already belongs to another person',
   CANNOT_ACT_ON_SELF: 'You cannot do this to your own account',
   NOT_LOCKED: 'This account is not locked',

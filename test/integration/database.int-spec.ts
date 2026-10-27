@@ -7,7 +7,8 @@ import {
   decodeCursor,
 } from '../../src/common/pagination/pagination.js';
 import request from 'supertest';
-import { DatabaseService } from '../../src/platform/database/database.service.js';
+import { Logger } from '@nestjs/common';
+import { createPool, DatabaseService } from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
 import { createTestApp, type TestApp } from '../support/test-app.js';
 
@@ -22,6 +23,55 @@ describe('migrations', () => {
     const again = await runMigrations(migrationUrl, 'latest');
     expect(again.error).toBeUndefined();
     expect(again.results).toEqual([]);
+  });
+});
+
+describe('the connection pool', () => {
+  it('logs the loss of an idle connection instead of ending the process, and the next query opens a new one', async () => {
+    const url = process.env.TEST_DATABASE_URL!;
+    const pool = createPool(url, 1, 5_000);
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    try {
+      const first = await pool.query<{ pid: number }>('select pg_backend_pid() as pid');
+      // The connection is idle in the pool now. Kill it from outside, as a failover or a proxy would.
+      const killer = new pg.Client({ connectionString: url });
+      await killer.connect();
+      await killer.query('select pg_terminate_backend($1)', [first.rows[0]!.pid]);
+      await killer.end();
+      await vi.waitFor(() =>
+        expect(warn).toHaveBeenCalledWith(
+          { err: expect.any(Error) },
+          'An idle database connection was lost',
+        ),
+      );
+      const next = await pool.query<{ pid: number }>('select pg_backend_pid() as pid');
+      expect(next.rows[0]!.pid).not.toBe(first.rows[0]!.pid);
+    } finally {
+      warn.mockRestore();
+      await pool.end();
+    }
+  });
+
+  it('survives the loss of a connection a request holds: the query fails, and the next one opens a new connection', async () => {
+    const url = process.env.TEST_DATABASE_URL!;
+    const pool = createPool(url, 1, 5_000);
+    try {
+      const held = await pool.connect();
+      const pid = (await held.query<{ pid: number }>('select pg_backend_pid() as pid')).rows[0]!
+        .pid;
+      await held.query('begin');
+      // Killed while checked out, as a failover or a restart would do to a request in flight.
+      const killer = new pg.Client({ connectionString: url });
+      await killer.connect();
+      await killer.query('select pg_terminate_backend($1)', [pid]);
+      await killer.end();
+      await expect(held.query('select 1')).rejects.toThrow();
+      held.release();
+      const next = await pool.query<{ pid: number }>('select pg_backend_pid() as pid');
+      expect(next.rows[0]!.pid).not.toBe(pid);
+    } finally {
+      await pool.end();
+    }
   });
 });
 

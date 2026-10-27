@@ -4,6 +4,7 @@ import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { ApiResult } from '../../common/http/api-result.js';
 import { AppException } from '../../common/http/app-exception.js';
 import { ErrorCode } from '../../common/http/error-codes.js';
+import { fieldError } from '../../common/validation/field-error.js';
 import { pageMeta, pageOffset, parseSort } from '../../common/pagination/pagination.js';
 import { newId } from '../../common/ids/ids.js';
 import { Clock } from '../../common/time/clock.js';
@@ -53,11 +54,14 @@ function profileColumns(profile: Profile): SocietyChanges {
   return columns;
 }
 
-/** A duplicate email among the new Owners names the one in the body that is taken (API design 8). */
+/** The Owners' refusals that belong to one email name the one in the body that is refused (API design 8). */
+const BY_OWNER: readonly string[] = [ErrorCode.DUPLICATE, ErrorCode.ROLE_CONFLICT];
+
 function atOwner(error: unknown, index: number): unknown {
-  return error instanceof AppException && error.code === ErrorCode.DUPLICATE
-    ? duplicateOn(`owners[${String(index)}].email`)
-    : error;
+  if (!(error instanceof AppException) || !BY_OWNER.includes(error.code)) return error;
+  return new AppException(error.status, error.code, {
+    errors: [fieldError(`owners[${String(index)}].email`, error.code)],
+  });
 }
 
 /** What the audit log keeps of a Society: its own fields, nothing derived. */
