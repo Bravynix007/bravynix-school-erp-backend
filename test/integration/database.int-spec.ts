@@ -51,6 +51,28 @@ describe('the connection pool', () => {
       await pool.end();
     }
   });
+
+  it('survives the loss of a connection a request holds: the query fails, and the next one opens a new connection', async () => {
+    const url = process.env.TEST_DATABASE_URL!;
+    const pool = createPool(url, 1, 5_000);
+    try {
+      const held = await pool.connect();
+      const pid = (await held.query<{ pid: number }>('select pg_backend_pid() as pid')).rows[0]!
+        .pid;
+      await held.query('begin');
+      // Killed while checked out, as a failover or a restart would do to a request in flight.
+      const killer = new pg.Client({ connectionString: url });
+      await killer.connect();
+      await killer.query('select pg_terminate_backend($1)', [pid]);
+      await killer.end();
+      await expect(held.query('select 1')).rejects.toThrow();
+      held.release();
+      const next = await pool.query<{ pid: number }>('select pg_backend_pid() as pid');
+      expect(next.rows[0]!.pid).not.toBe(pid);
+    } finally {
+      await pool.end();
+    }
+  });
 });
 
 /** Runs DDL as the migrator, which owns the schema (the app user cannot). */

@@ -58,6 +58,12 @@ export function createPool(
   pool.on('error', (error) => {
     poolLogger.warn({ err: error }, 'An idle database connection was lost');
   });
+  // A connection can also die while a request holds it. The pool's listener is off the client then, so the
+  // client's own 'error' would end the process. The request's query fails and is reported with it, and the pool
+  // drops the broken client on release, so this listener only keeps the process up.
+  pool.on('connect', (client) => {
+    client.on('error', () => undefined);
+  });
   return pool;
 }
 
