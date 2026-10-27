@@ -20,7 +20,7 @@ const user = (overrides: Partial<AccountRow> = {}): AccountRow =>
 
 function build(existing?: AccountRow, taken: number[] = []) {
   const lockSeats = vi.fn<AccountRepository['lockSeats']>().mockResolvedValue();
-  const lockPerson = vi.fn<AccountRepository['lockPerson']>().mockResolvedValue();
+  const lockRoleSeparation = vi.fn<AccountRepository['lockRoleSeparation']>().mockResolvedValue();
   const holdsActiveGrant = vi.fn<AccountRepository['holdsActiveGrant']>().mockResolvedValue(false);
   const findByEmail = vi.fn<AccountRepository['findByEmail']>().mockResolvedValue(existing);
   const insertPending = vi
@@ -35,7 +35,7 @@ function build(existing?: AccountRow, taken: number[] = []) {
   const directory = new AccountDirectory(
     {
       lockSeats,
-      lockPerson,
+      lockRoleSeparation,
       holdsActiveGrant,
       findByEmail,
       insertPending,
@@ -50,7 +50,7 @@ function build(existing?: AccountRow, taken: number[] = []) {
   return {
     directory,
     lockSeats,
-    lockPerson,
+    lockRoleSeparation,
     holdsActiveGrant,
     insertPending,
     activeGrant,
@@ -120,22 +120,22 @@ describe('AccountDirectory.grant', () => {
     expect(t.insertGrant).not.toHaveBeenCalled();
   });
 
-  it('checks the other role under the person lock, after the seat lock', async () => {
+  it('checks the other role under the separation lock, after the seat lock', async () => {
     const t = build(user());
     await t.directory.grant(tx, owner, { email: 'asha@example.com' }, 'admin-1', now);
-    expect(t.lockPerson).toHaveBeenCalledWith(tx, 'user-1');
+    expect(t.lockRoleSeparation).toHaveBeenCalledWith(tx);
     expect(t.lockSeats.mock.invocationCallOrder[0]).toBeLessThan(
-      t.lockPerson.mock.invocationCallOrder[0] ?? 0,
+      t.lockRoleSeparation.mock.invocationCallOrder[0] ?? 0,
     );
-    expect(t.lockPerson.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(t.lockRoleSeparation.mock.invocationCallOrder[0]).toBeLessThan(
       t.holdsActiveGrant.mock.invocationCallOrder[0] ?? 0,
     );
   });
 
-  it('takes no person lock for a new email, who holds nothing yet', async () => {
+  it('takes no separation lock for a new email, who holds nothing yet', async () => {
     const t = build(undefined);
     await t.directory.grant(tx, owner, { email: 'new@example.com' }, 'admin-1', now);
-    expect(t.lockPerson).not.toHaveBeenCalled();
+    expect(t.lockRoleSeparation).not.toHaveBeenCalled();
   });
 
   it('refuses a blocked person, a person who already holds the seat kind, and a full set of seats', async () => {

@@ -85,6 +85,10 @@ describe('Super Admin and Society Owner are kept separate', () => {
     await clearLoginState(ownerDb);
     await removeScratchSocieties(ownerDb, societies.splice(0));
     await removeScratchPeople(ownerDb, emails.splice(0));
+    // A failing run must not leave a seeded person with both roles behind for the next run.
+    await sql`delete from role_assignments
+      where (user_id = ${superAdmin.id} and role_code = 2)
+        or (user_id = ${seededOwner.id} and role_code = 1)`.execute(ownerDb);
   });
 
   it('refuses a Super Admin as the Owner of a Society (PLT-09), and adds nothing', async () => {
@@ -106,7 +110,14 @@ describe('Super Admin and Society Owner are kept separate', () => {
     });
     expect(res.status).toBe(409);
     expect(res.body.code).toBe('ROLE_CONFLICT');
-    const left = await sql`select 1 from societies where code = ${code}`.execute(ownerDb);
+    expect(res.body.errors).toContainEqual(
+      expect.objectContaining({ field: 'owners[0].email', code: 'ROLE_CONFLICT' }),
+    );
+    // Societies force row security on their owner too: read as the platform role, or this finds nothing anyway.
+    const left = await ownerDb.transaction().execute(async (tx) => {
+      await sql`select set_config('app.role_code', '1', true)`.execute(tx);
+      return sql`select 1 from societies where code = ${code}`.execute(tx);
+    });
     expect(left.rows).toEqual([]);
     expect(await activeGrants(superAdmin.id)).toEqual([1]);
   });

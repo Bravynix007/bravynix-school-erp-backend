@@ -92,13 +92,13 @@ export class AccountDirectory {
     };
   }
 
-  /** Under the person lock, so a concurrent grant of the other role sees this one or is seen by it. */
+  /** Under the separation lock, so a concurrent grant of the other role sees this one or is seen by it. */
   private async requireSeparateRoles(
     tx: Tx,
     userId: string,
     roleCode: SeatKind['roleCode'],
   ): Promise<void> {
-    await this.accounts.lockPerson(tx, userId);
+    await this.accounts.lockRoleSeparation(tx);
     const other = roleCode === RoleCode.SuperAdmin ? RoleCode.SocietyOwner : RoleCode.SuperAdmin;
     if (await this.accounts.holdsActiveGrant(tx, userId, [other])) {
       throw AppException.conflict(ErrorCode.ROLE_CONFLICT);
