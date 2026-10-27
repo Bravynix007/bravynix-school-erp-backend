@@ -1,5 +1,4 @@
 import {
-  authorOf,
   authorStamps,
   type AuthorRef,
   type AuthorStamps,
@@ -19,7 +18,8 @@ export interface SocietyResource extends AuthorStamps {
   foundedDate: string | null;
   address: { line1: string | null; line2: string | null; pincode: string | null };
   status: number;
-  accessPause: { pausedAt: string; pausedBy: AuthorRef; reason: string } | null;
+  /** `['owners']` while the Society's Owners are blocked, else empty. */
+  blockedSections: 'owners'[];
   institutionCount: number;
   version: number;
 }
@@ -30,12 +30,19 @@ export interface SocietySummary extends AuthorStamps {
   code: string;
   name: string;
   status: number;
-  paused: boolean;
+  /** The Society's Owners are blocked. */
+  blocked: boolean;
   institutionCount: number;
 }
 
 export interface SocietyDetail extends SocietyResource {
-  institutions: { id: string; code: string; name: string; status: number; paused: boolean }[];
+  institutions: {
+    id: string;
+    code: string;
+    name: string;
+    status: number;
+    blockedSections: ('staff' | 'students')[];
+  }[];
   owners: { id: string; displayName: string; email: string; accountStatus: number }[];
 }
 
@@ -44,7 +51,7 @@ export type People = ReadonlyMap<string, AuthorRef>;
 /** Everyone a Society row names, for one lookup. */
 export function peopleOf(rows: readonly SocietyRow[]): string[] {
   return rows
-    .flatMap((row) => [row.created_by, row.updated_by, row.access_paused_by])
+    .flatMap((row) => [row.created_by, row.updated_by])
     .filter((id): id is string => id !== null);
 }
 
@@ -63,14 +70,7 @@ export function societyResource(row: SocietyRow, people: People): SocietyResourc
     foundedDate: row.founded_date,
     address: { line1: row.address_line_1, line2: row.address_line_2, pincode: row.pincode },
     status: row.status,
-    accessPause:
-      row.access_paused_at !== null && row.access_pause_reason !== null
-        ? {
-            pausedAt: row.access_paused_at.toISOString(),
-            pausedBy: authorOf(row.access_paused_by, people),
-            reason: row.access_pause_reason,
-          }
-        : null,
+    blockedSections: row.owners_blocked ? ['owners'] : [],
     institutionCount: row.institution_count,
     version: row.version,
     ...authorStamps(row, people),
@@ -83,7 +83,7 @@ export function societySummary(row: SocietyRow, people: People): SocietySummary 
     code: row.code,
     name: row.name,
     status: row.status,
-    paused: row.access_paused_at !== null,
+    blocked: row.owners_blocked,
     institutionCount: row.institution_count,
     ...authorStamps(row, people),
   };
@@ -92,11 +92,14 @@ export function societySummary(row: SocietyRow, people: People): SocietySummary 
 export function institutionsOf(
   institutions: readonly SocietyInstitution[],
 ): SocietyDetail['institutions'] {
-  return institutions.map(({ id, code, name, status, paused }) => ({
+  return institutions.map(({ id, code, name, status, staff_blocked, students_blocked }) => ({
     id,
     code,
     name,
     status,
-    paused,
+    blockedSections: [
+      ...(staff_blocked ? (['staff'] as const) : []),
+      ...(students_blocked ? (['students'] as const) : []),
+    ],
   }));
 }

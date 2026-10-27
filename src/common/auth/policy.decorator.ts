@@ -33,11 +33,12 @@ export interface RoutePolicy {
    */
   allowNoContext?: boolean;
   /**
-   * Still answered while the caller's Society is paused (API design 6.5):
-   * sign-in and sign-out, the caller's own profile, notifications, and for
-   * Society Owners the platform dues. Every other call gets 423 `ACCESS_PAUSED`.
+   * Still answered while a block stops the caller's section (API design 6.5):
+   * sign-in and sign-out, the caller's own profile, notifications, the blocks
+   * of an Owner's own Society, and for Society Owners the platform dues. Every
+   * other call gets 423 `SECTION_BLOCKED`.
    */
-  allowWhenPaused?: boolean;
+  allowWhenBlocked?: boolean;
   /** Catalogue operation ID, e.g. `STU-01`. */
   operationId?: string;
 }
@@ -50,7 +51,7 @@ function policyDecorator(policy: RoutePolicy) {
       roles: policy.roles.map((role) => RoleShortName[role]),
       scope: policy.scope,
       allowNoContext: policy.allowNoContext ?? false,
-      allowWhenPaused: policy.allowWhenPaused ?? false,
+      allowWhenBlocked: policy.allowWhenBlocked ?? false,
       rule: policy.rule ?? null,
       operationId: policy.operationId ?? null,
     }),

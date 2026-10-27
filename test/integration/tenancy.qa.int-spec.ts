@@ -6,6 +6,7 @@ import { createPool } from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { institutions, personaByKey, societies } from '../../src/seeds/two-worlds.js';
+import { clearBlocks, setBlock } from '../support/blocks.js';
 import { FixtureModule } from '../support/fixture.module.js';
 import { createTestApp, type TestApp } from '../support/test-app.js';
 
@@ -58,18 +59,6 @@ const inRolledBack = async <T>(tenant: TenantContext, work: (tx: Tx) => Promise<
     });
   return result;
 };
-
-const setPause = (id: string, paused: boolean, table: 'societies' | 'institutions') =>
-  ownerDb.transaction().execute(async (tx) => {
-    await sql`select set_config('app.role_code', '1', true)`.execute(tx);
-    await sql`
-      update ${sql.table(table)} set
-        access_paused_at = ${paused ? sql`now()` : null},
-        access_paused_by = ${paused ? superAdmin.id : null},
-        access_pause_reason = ${paused ? 'Dues unpaid' : null}
-      where id = ${id}
-    `.execute(tx);
-  });
 
 const probe = async (tenant: TenantContext, statement: (tx: Tx) => Promise<unknown>) => {
   try {
@@ -127,17 +116,15 @@ describe('QA: tenancy (B6)', () => {
     report['owner: change own Society id'] = await probe(ownerA, (tx) =>
       sql`update societies set id = gen_random_uuid() where id = ${societyA.id}`.execute(tx),
     );
-    report['owner: insert an Institution already paused'] = await probe(ownerA, (tx) =>
+    report['owner: block the staff of an Institution'] = await probe(ownerA, (tx) =>
       tx
-        .insertInto('institutions')
+        .insertInto('access_blocks')
         .values({
           society_id: societyA.id,
-          name: 'X',
-          code: 'QA-P',
-          address_line_1: '1 Road',
-          access_paused_at: new Date(),
-          access_paused_by: owner.id,
-          access_pause_reason: 'x',
+          institution_id: instA1.id,
+          section: 2,
+          reason: 'x',
+          created_by: owner.id,
         })
         .executeTakeFirst(),
     );
@@ -177,8 +164,8 @@ describe('QA: tenancy (B6)', () => {
     expect(report['owner of A: edit Society B']).toBe('ok 0');
     expect(report['owner of A: rename B1']).toBe('ok 0');
     expect(report['owner: change own Society id']).toMatch(/^refused/);
-    // Only Super Admin sets a pause (PRD 9.4), on insert as well as on update.
-    expect(report['owner: insert an Institution already paused']).toMatch(/^refused/);
+    // Only Super Admin sets a block (PRD 9.4).
+    expect(report['owner: block the staff of an Institution']).toMatch(/^refused/);
   });
 
   it('a version cannot be set back by the owner', async () => {
@@ -208,12 +195,13 @@ describe('QA: tenancy (B6)', () => {
     expect(version).toBe(before + 1);
   });
 
-  it('pausing Society A does not touch an owner acting in Society B, and stops role 3 in A', async () => {
-    await setPause(societyA.id, true, 'societies');
+  it('blocking the Owners of Society A does not touch an owner acting in Society B, nor role 3 or 5', async () => {
+    await setBlock(ownerDb, societyA.id, null, 1, true);
     const gate = t.app.get(TenantAccessGate);
-    expect(await gate.isPaused({ ...caller(societyA), roleCode: 3 })).toBe(true);
-    expect(await gate.isPaused(caller(societyB))).toBe(false);
-    expect(await gate.isPaused({ ...caller(societyA), roleCode: 5 })).toBe(true);
-    await setPause(societyA.id, false, 'societies');
+    expect(await gate.blockedSection(caller(societyA))).toBe(1);
+    expect(await gate.blockedSection(caller(societyB))).toBeNull();
+    // Staff and parents are stopped by their own sections, never by the Owners'.
+    expect(await gate.blockedSection({ ...caller(societyA), roleCode: 5 })).toBeNull();
+    await clearBlocks(ownerDb);
   });
 });

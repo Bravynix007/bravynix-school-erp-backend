@@ -1,5 +1,5 @@
 import type { SocietyRow } from './society.repository.js';
-import { peopleOf, societyResource, societySummary } from './society.resource.js';
+import { institutionsOf, peopleOf, societyResource, societySummary } from './society.resource.js';
 
 const row = (overrides: Partial<SocietyRow> = {}): SocietyRow => ({
   id: 's1',
@@ -20,10 +20,8 @@ const row = (overrides: Partial<SocietyRow> = {}): SocietyRow => ({
   address_line_1: null,
   address_line_2: null,
   pincode: null,
-  access_paused_at: null,
-  access_paused_by: null,
-  access_pause_reason: null,
   institution_count: 2,
+  owners_blocked: false,
   ...overrides,
 });
 
@@ -41,43 +39,28 @@ describe('Society resource (API design 10.4b)', () => {
       website: null,
       foundedDate: null,
       address: { line1: null, line2: null, pincode: null },
-      accessPause: null,
+      blockedSections: [],
       institutionCount: 2,
       version: 3,
     });
   });
 
-  it('puts the phone parts together, and shows who paused and why', () => {
+  it('puts the phone parts together, and names the blocked section', () => {
     const resource = societyResource(
-      row({
-        country_code: '91',
-        phone_number: '9876543210',
-        access_paused_at: new Date('2026-10-05T10:00:00.000Z'),
-        access_paused_by: 'p2',
-        access_pause_reason: 'Dues',
-      }),
+      row({ country_code: '91', phone_number: '9876543210', owners_blocked: true }),
       people,
     );
     expect(resource.phone).toEqual({ countryCode: '91', number: '9876543210' });
-    expect(resource.accessPause).toEqual({
-      pausedAt: '2026-10-05T10:00:00.000Z',
-      pausedBy: people.get('p2'),
-      reason: 'Dues',
-    });
+    expect(resource.blockedSections).toEqual(['owners']);
   });
 
   it('summarises a row for the list, with its stamps', () => {
-    expect(
-      societySummary(
-        row({ access_paused_at: new Date(), access_paused_by: 'p1', access_pause_reason: 'x' }),
-        people,
-      ),
-    ).toEqual({
+    expect(societySummary(row({ owners_blocked: true }), people)).toEqual({
       id: 's1',
       code: 'SUN',
       name: 'Sunrise',
       status: 1,
-      paused: true,
+      blocked: true,
       institutionCount: 2,
       createdBy: people.get('p1'),
       createdAt: '2026-10-01T00:00:00.000Z',
@@ -87,12 +70,22 @@ describe('Society resource (API design 10.4b)', () => {
   });
 
   it('lists the people a row names, once each is for the lookup to fold', () => {
-    expect(peopleOf([row(), row({ access_paused_by: 'p3' })]).toSorted()).toEqual([
+    expect(peopleOf([row(), row({ updated_by: 'p3' })]).toSorted()).toEqual([
       'p1',
       'p1',
-      'p2',
       'p2',
       'p3',
     ]);
+  });
+
+  it('names the blocked sections of each Institution in the detail', () => {
+    const base = { id: 'i', code: 'C', name: 'N', status: 1 };
+    expect(
+      institutionsOf([
+        { ...base, staff_blocked: false, students_blocked: false },
+        { ...base, staff_blocked: true, students_blocked: true },
+        { ...base, staff_blocked: false, students_blocked: true },
+      ]).map((institution) => institution.blockedSections),
+    ).toEqual([[], ['staff', 'students'], ['students']]);
   });
 });

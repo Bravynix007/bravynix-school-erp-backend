@@ -6,6 +6,7 @@ import { createPool } from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { institutions, personaByKey, societies } from '../../src/seeds/two-worlds.js';
+import * as blocks from '../support/blocks.js';
 import { FixtureModule } from '../support/fixture.module.js';
 import { clearLoginState } from '../support/login-state.js';
 import { signInAs } from '../support/sessions.js';
@@ -49,18 +50,15 @@ const rename = (institutionId: string, key: CallerKey, name: string) =>
     .set('Authorization', `Bearer ${tokens[key]}`)
     .send({ name });
 
-const setInstitution = (id: string, fields: 'paused' | 'inactive' | 'active') =>
+const setInstitution = (id: string, fields: 'inactive' | 'active') =>
   ownerDb.transaction().execute(async (tx) => {
     await sql`select set_config('app.role_code', '1', true)`.execute(tx);
-    await sql`
-      update institutions set
-        status = ${fields === 'inactive' ? 0 : 1},
-        access_paused_at = ${fields === 'paused' ? sql`now()` : null},
-        access_paused_by = ${fields === 'paused' ? personaByKey('SA1').id : null},
-        access_pause_reason = ${fields === 'paused' ? 'Dues unpaid' : null}
-      where id = ${id}
-    `.execute(tx);
+    await sql`update institutions set status = ${fields === 'inactive' ? 0 : 1} where id = ${id}`.execute(
+      tx,
+    );
   });
+const blockStaff = (institution: { id: string }) =>
+  blocks.setBlock(ownerDb, socA.id, institution.id, 2, true);
 
 const tenantTables = async () => {
   const { rows } = await sql<{ name: string; hasSociety: boolean; hasInstitution: boolean }>`
@@ -71,7 +69,7 @@ const tenantTables = async () => {
         and a.attname = 'institution_id' and not a.attisdropped) as "hasInstitution"
     from pg_class c join pg_namespace n on n.oid = c.relnamespace
     where n.nspname = 'public' and c.relkind in ('r', 'p') and not c.relispartition
-      and c.relname <> all (array['role_assignments', 'auth_sessions'])
+      and c.relname <> all (array['role_assignments', 'auth_sessions', 'access_blocks'])
       and (c.relname = 'societies' or exists (
         select 1 from pg_attribute a where a.attrelid = c.oid
           and a.attname ~ '(^|_)(society|institution)_id$' and not a.attisdropped))
@@ -86,6 +84,9 @@ const visible = async (table: string, tenant: TenantContext) => {
   );
   return rows;
 };
+
+const seenBy = async (tenant: TenantContext) =>
+  (await visible('access_blocks', tenant)).map((row) => row.society_id);
 
 const strip = ({ body }: { body: Record<string, unknown> }) => ({
   ...body,
@@ -149,6 +150,7 @@ describe('tenant isolation', () => {
 
   afterEach(async () => {
     for (const { id } of institutions) await setInstitution(id, 'active');
+    await blocks.clearBlocks(ownerDb);
   });
 
   describe('every tenant table, read as the app role', () => {
@@ -187,6 +189,20 @@ describe('tenant isolation', () => {
         }
       },
     );
+
+    // Blocks are read by Owners only (an Institution Admin sees none by design),
+    // so the generic check above, which wants rows for every role, leaves them out.
+    it('shows an Owner the blocks of their own Society, and an admin or a request with no tenant none', async () => {
+      await blocks.setBlock(ownerDb, socA.id, null, 1, true);
+      await blocks.setBlock(ownerDb, socB.id, null, 1, true);
+      expect(await seenBy({ societyId: socA.id, roleCode: 2 })).toEqual([socA.id]);
+      expect(await seenBy({ societyId: socB.id, roleCode: 2 })).toEqual([socB.id]);
+      expect(await seenBy({ societyId: socA.id, roleCode: 3, institutionIds: [a1.id] })).toEqual(
+        [],
+      );
+      expect(await seenBy({ societyId: missing, roleCode: 2 })).toEqual([]);
+      expect(await seenBy({})).toEqual([]);
+    });
 
     it('shows a request that set no tenant nothing, from every table', async () => {
       for (const table of await tenantTables()) expect(await visible(table.name, {})).toEqual([]);
@@ -255,15 +271,16 @@ describe('tenant isolation', () => {
       await rename(a1.id, 'ownerA', a1.name).expect(200);
     });
 
-    it('answers 423 for a paused Institution and keeps the others in its Society open', async () => {
-      await setInstitution(a2.id, 'paused');
-      expect((await get(`/v1/fixtures/tenant/institutions/${a2.id}`, 'ownerA')).status).toBe(423);
+    it('answers 423 for an Institution whose staff are blocked and keeps the others open', async () => {
+      await blockStaff(a2);
       expect((await get(`/v1/fixtures/tenant/institutions/${a2.id}`, 'adminA12')).status).toBe(423);
-      expect((await get(`/v1/fixtures/tenant/institutions/${a1.id}`, 'ownerA')).status).toBe(200);
+      expect((await get(`/v1/fixtures/tenant/institutions/${a1.id}`, 'adminA12')).status).toBe(200);
+      // The staff block stops staff, not the Owner who runs the Institution.
+      expect((await get(`/v1/fixtures/tenant/institutions/${a2.id}`, 'ownerA')).status).toBe(200);
     });
 
-    it('stops an Institution Admin whose only Institution is paused on every Society call too', async () => {
-      await setInstitution(a1.id, 'paused');
+    it('stops an Institution Admin whose only Institution has its staff blocked on every Society call too', async () => {
+      await blockStaff(a1);
       expect((await get(`/v1/fixtures/tenant/societies/${socA.id}`, 'adminA1')).status).toBe(423);
       expect((await get(`/v1/fixtures/tenant/institutions/${a1.id}`, 'adminA1')).status).toBe(423);
       // The Owner runs the whole Society and keeps working, and so does an admin with another Institution open.
@@ -273,6 +290,13 @@ describe('tenant isolation', () => {
       expect((await get(`/v1/fixtures/tenant/institutions/${a1.id}`, 'adminA12')).status).toBe(423);
       // Sign-in related calls stay open for the stopped admin.
       expect((await get('/v1/me', 'adminA1')).status).toBe(200);
+    });
+
+    it('stops an Owner on every call while the Owners are blocked, and nobody else', async () => {
+      await blocks.setBlock(ownerDb, socA.id, null, 1, true);
+      expect((await get(`/v1/fixtures/tenant/institutions/${a1.id}`, 'ownerA')).status).toBe(423);
+      expect((await get(`/v1/fixtures/tenant/institutions/${a1.id}`, 'adminA1')).status).toBe(200);
+      expect((await get(`/v1/fixtures/tenant/institutions/${b1.id}`, 'ownerB')).status).toBe(200);
     });
 
     it('answers 404 for a deactivated Institution', async () => {

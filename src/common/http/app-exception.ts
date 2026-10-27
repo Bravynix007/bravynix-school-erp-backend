@@ -1,4 +1,5 @@
 import { HttpStatus } from '@nestjs/common';
+import { BlockSectionName, type BlockSection } from '../auth/block-section.js';
 import { ErrorCode } from './error-codes.js';
 
 export interface FieldError {
@@ -54,9 +55,11 @@ export class AppException extends Error {
     return new AppException(HttpStatus.UNAUTHORIZED, code, { details });
   }
 
-  /** The caller's Society or Institution is paused (PRD 9.4); no data was changed. */
-  static paused(): AppException {
-    return new AppException(HttpStatus.LOCKED, ErrorCode.ACCESS_PAUSED);
+  /** A block stops the caller's section (API design 6.5); `data.section` says which, the reason is not sent. */
+  static sectionBlocked(section: BlockSection): AppException {
+    return new AppException(HttpStatus.LOCKED, ErrorCode.SECTION_BLOCKED, {
+      details: { section: BlockSectionName[section] },
+    });
   }
 
   static conflict(code: string, message?: string): AppException {

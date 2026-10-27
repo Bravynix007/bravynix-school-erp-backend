@@ -10,6 +10,8 @@ const grant = (
   societyId,
   societyName: societyId === null ? null : `Name of ${societyId}`,
   institutionId,
+  ownersBlocked: false,
+  staffBlocked: false,
 });
 
 const choice = (roleCode: number, societyId: string | null) => ({
@@ -38,6 +40,28 @@ describe('mobileContexts', () => {
     expect(
       mobileContexts([grant(2, 'soc-1'), grant(2, 'soc-2')]).map((c) => c.societyName),
     ).toEqual(['Name of soc-1', 'Name of soc-2']);
+  });
+
+  it("flags an Owner context while the Society's Owners are blocked", () => {
+    const blocked = { ...grant(2, 'soc-1'), ownersBlocked: true };
+    expect(mobileContexts([blocked, grant(2, 'soc-2')]).map((c) => c.isBlocked)).toEqual([
+      true,
+      false,
+    ]);
+  });
+
+  it('flags an Institution Admin context only when every Institution it reaches has its staff blocked', () => {
+    const open = grant(3, 'soc-1', 'ins-1');
+    const shut = { ...grant(3, 'soc-1', 'ins-2'), staffBlocked: true };
+    expect(mobileContexts([shut])[0]?.isBlocked).toBe(true);
+    expect(mobileContexts([open, shut])[0]?.isBlocked).toBe(false);
+    expect(mobileContexts([shut, { ...shut, institutionId: 'ins-3' }])[0]?.isBlocked).toBe(true);
+  });
+
+  it('does not let a staff block flag an Owner context, or an owners block an Admin context', () => {
+    const owner = { ...grant(2, 'soc-1'), staffBlocked: true };
+    const admin = { ...grant(3, 'soc-1', 'ins-1'), ownersBlocked: true };
+    expect(mobileContexts([owner, admin]).map((c) => c.isBlocked)).toEqual([false, false]);
   });
 
   it('keeps a Society Owner and an Institution Admin of the same Society apart', () => {

@@ -25,7 +25,7 @@ describe('CreateInstitutionDto', () => {
     [{ ...valid, boardCode: 1.5 }, 'boardCode', 'INVALID_TYPE'],
     [{ ...valid, gstin: '29ABCDE1234F1Z' }, 'gstin', 'INVALID_FORMAT'],
     [{ ...valid, email: 'not-an-email' }, 'email', 'INVALID_FORMAT'],
-    [{ ...valid, societyId: 'nope' }, 'societyId', 'INVALID_FORMAT'],
+    [{ ...valid, societyId: 'nope' }, 'societyId', 'FIELD_NOT_ALLOWED'],
     [{ ...valid, telephone: 't'.repeat(21) }, 'telephone', 'TOO_LONG'],
     [{ ...valid, location: { latitude: 0, longitude: 181 } }, 'location.longitude', 'OUT_OF_RANGE'],
     [
@@ -66,7 +66,7 @@ describe('UpdateInstitutionDto', () => {
     );
   });
 
-  it.each(['code', 'societyId', 'status', 'accessPause', 'createdBy'])(
+  it.each(['code', 'societyId', 'status', 'blockedSections', 'createdBy'])(
     'refuses %s as a field',
     async (field) => {
       expect(

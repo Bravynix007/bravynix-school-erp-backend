@@ -74,12 +74,16 @@ const owner: Grant = {
   societyId: SOCIETY,
   societyName: 'North Trust',
   institutionId: null,
+  ownersBlocked: false,
+  staffBlocked: false,
 };
 const admin: Grant = {
   roleCode: 3,
   societyId: OTHER,
   societyName: 'South Trust',
   institutionId: 'ins-1',
+  ownersBlocked: false,
+  staffBlocked: false,
 };
 
 describe('ContextService.me', () => {
@@ -103,13 +107,29 @@ describe('ContextService.me', () => {
     });
   });
 
+  it('flags the active context while a block stops the role there', async () => {
+    const blocked: Grant = { ...owner, ownersBlocked: true };
+    const me = await build([blocked, admin]).service.me(
+      principal({ roleCode: 2, societyId: SOCIETY }),
+    );
+    expect(me.session.activeContext).toMatchObject({ roleCode: 2, isBlocked: true });
+    expect(me.contexts.map((context) => context.isBlocked)).toEqual([true, false]);
+  });
+
   it('has no active context before one is chosen', async () => {
     const me = await build([owner, admin]).service.me(principal());
     expect(me).toMatchObject({ userType: null, session: { activeContext: null } });
   });
 
   it('shows the console its one Super Admin context only', async () => {
-    const sa: Grant = { roleCode: 1, societyId: null, societyName: null, institutionId: null };
+    const sa: Grant = {
+      roleCode: 1,
+      societyId: null,
+      societyName: null,
+      institutionId: null,
+      ownersBlocked: false,
+      staffBlocked: false,
+    };
     const consoleView = await build([sa, owner]).service.me(
       principal({ clientType: 'console', roleCode: 1 }),
     );
@@ -165,7 +185,14 @@ describe('ContextService.switchContext', () => {
   });
 
   it('refuses a role without a grant, the Super Admin grant on mobile, and roles 4 and 5 for now', async () => {
-    const sa: Grant = { roleCode: 1, societyId: null, societyName: null, institutionId: null };
+    const sa: Grant = {
+      roleCode: 1,
+      societyId: null,
+      societyName: null,
+      institutionId: null,
+      ownersBlocked: false,
+      staffBlocked: false,
+    };
     const t = build([owner, sa]);
     for (const body of [
       { roleCode: 3, societyId: SOCIETY },

@@ -38,9 +38,7 @@ const society = (overrides: Partial<SocietyRow> = {}): SocietyRow => ({
   address_line_1: null,
   address_line_2: null,
   pincode: null,
-  access_paused_at: null,
-  access_paused_by: null,
-  access_pause_reason: null,
+  owners_blocked: false,
   institution_count: 0,
   ...overrides,
 });
@@ -52,6 +50,7 @@ function build(current: SocietyRow | null = society()) {
   const update = vi.fn<SocietyRepository['update']>().mockResolvedValue();
   const insert = vi.fn<SocietyRepository['insert']>().mockResolvedValue();
   const page = vi.fn<SocietyRepository['page']>().mockResolvedValue({ rows: [], total: 0 });
+  const institutions = vi.fn<SocietyRepository['institutions']>().mockResolvedValue([]);
   const record = vi.fn<AuditService['record']>().mockResolvedValue('audit-1');
   const endAccessInSociety = vi
     .fn<GrantDirectory['endAccessInSociety']>()
@@ -68,7 +67,7 @@ function build(current: SocietyRow | null = society()) {
   const societyOwners = vi.fn<GrantDirectory['societyOwners']>().mockResolvedValue([]);
   const service = new SocietyService(
     { transaction } as unknown as DatabaseService,
-    { find, update, insert, page } as unknown as SocietyRepository,
+    { find, update, insert, page, institutions } as unknown as SocietyRepository,
     {
       describe: vi.fn<PersonDirectory['describe']>().mockResolvedValue(new Map()),
     } as unknown as PersonDirectory,
@@ -84,6 +83,8 @@ function build(current: SocietyRow | null = society()) {
     update,
     insert,
     page,
+    institutions,
+    societyOwners,
     record,
     endAccessInSociety,
     addIn,
@@ -354,84 +355,13 @@ describe('SocietyService', () => {
     });
   });
 
-  describe('pause and resume', () => {
-    it('pauses with the time, the person and the reason, and audits the reason', async () => {
-      const t = build();
-      await t.service.pause(principal, 'society-1', { version: 2, reason: 'Dues' });
-      expect(t.update).toHaveBeenCalledWith(t.tx, 'society-1', {
-        access_paused_at: new Date('2026-10-26T10:00:00.000Z'),
-        access_paused_by: 'admin-1',
-        access_pause_reason: 'Dues',
-        updated_by: 'admin-1',
-      });
-      expect(t.record).toHaveBeenCalledWith(
-        t.tx,
-        expect.objectContaining({ action: 'access.pause', reason: 'Dues' }),
-      );
-    });
-
-    it('refuses to pause a Society that is paused or deactivated', async () => {
-      const paused = society({
-        access_paused_at: new Date(),
-        access_paused_by: 'a',
-        access_pause_reason: 'x',
-      });
-      for (const current of [paused, society({ status: 0 })]) {
-        const t = build(current);
-        const error = await refusal(
-          t.service.pause(principal, 'society-1', { version: 2, reason: 'r' }),
-        );
-        expect(error.code).toBe('INVALID_STATE');
-        expect(t.update).not.toHaveBeenCalled();
-      }
-    });
-
-    it('does not resume a Society that was deactivated while paused', async () => {
-      const t = build(
-        society({
-          status: 0,
-          access_paused_at: new Date(),
-          access_paused_by: 'a',
-          access_pause_reason: 'x',
-        }),
-      );
-      const error = await refusal(t.service.resume(principal, 'society-1', { version: 2 }));
-      expect(error.code).toBe('INVALID_STATE');
-      expect(t.update).not.toHaveBeenCalled();
-    });
-
-    it('resumes a paused Society and refuses one that is not paused', async () => {
-      const paused = society({
-        access_paused_at: new Date(),
-        access_paused_by: 'a',
-        access_pause_reason: 'x',
-      });
-      const t = build(paused);
-      await t.service.resume(principal, 'society-1', { version: 2 });
-      expect(t.update).toHaveBeenCalledWith(t.tx, 'society-1', {
-        access_paused_at: null,
-        access_paused_by: null,
-        access_pause_reason: null,
-        updated_by: 'admin-1',
-      });
-      expect(t.record).toHaveBeenCalledWith(
-        t.tx,
-        expect.objectContaining({ action: 'access.resume' }),
-      );
-
-      const idle = build();
-      const error = await refusal(idle.service.resume(principal, 'society-1', { version: 2 }));
-      expect(error.code).toBe('INVALID_STATE');
-    });
-  });
-
   describe('list', () => {
     it('sorts by name unless asked, and pages by offset', async () => {
       const t = build();
       await t.service.list(principal, query());
       expect(t.page).toHaveBeenCalledWith(
         t.tx,
-        { q: undefined, statuses: undefined, paused: undefined },
+        { q: undefined, statuses: undefined, blocked: undefined },
         [{ field: 'name', direction: 'asc' }],
         10,
         10,
@@ -442,6 +372,37 @@ describe('SocietyService', () => {
       const t = build();
       const error = await refusal(t.service.list(principal, query({ sort: 'email' })));
       expect(error).toMatchObject({ status: 400, code: 'INVALID_SORT' });
+    });
+  });
+
+  describe('get (PLT-04)', () => {
+    it('shows the Society with its Institutions and their blocked sections, and its Owners', async () => {
+      const t = build(society({ owners_blocked: true }));
+      t.institutions.mockResolvedValueOnce([
+        {
+          id: 'i1',
+          code: 'A',
+          name: 'Alpha',
+          status: 1,
+          staff_blocked: true,
+          students_blocked: false,
+        },
+      ]);
+      t.societyOwners.mockResolvedValueOnce([
+        { id: 'owner-1', displayName: 'Asha', email: 'asha@example.com', accountStatus: 1 },
+      ]);
+      const detail = await t.service.get(principal, 'society-1');
+      expect(detail).toMatchObject({
+        id: 'society-1',
+        blockedSections: ['owners'],
+        institutions: [{ id: 'i1', blockedSections: ['staff'] }],
+        owners: [{ id: 'owner-1' }],
+      });
+    });
+
+    it('answers 404 for an unknown Society', async () => {
+      const t = build(null);
+      expect((await refusal(t.service.get(principal, 'society-1'))).status).toBe(404);
     });
   });
 });

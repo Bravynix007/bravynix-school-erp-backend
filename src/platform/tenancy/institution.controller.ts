@@ -28,10 +28,10 @@ export class InstitutionController {
   }
 
   @Policy({
-    roles: [RoleCode.SocietyOwner, RoleCode.SuperAdmin],
+    roles: [RoleCode.SocietyOwner],
     scope: 'society',
     operationId: 'INS-02',
-    rule: 'An Owner adds to their own Society; Super Admin names the Society',
+    rule: 'An Owner adds to their own Society; the Super Admin makes Societies and Owners, not Institutions',
   })
   @Post()
   async create(
@@ -56,10 +56,10 @@ export class InstitutionController {
   }
 
   @Policy({
-    roles: [RoleCode.SocietyOwner, RoleCode.SuperAdmin],
+    roles: [RoleCode.SocietyOwner],
     scope: 'institution',
     operationId: 'INS-04',
-    rule: 'Edits the profile; the code, Society, status and pause are not editable here',
+    rule: 'Edits the profile; the code, Society and status are not editable here',
   })
   @Patch(':institutionId')
   update(
@@ -71,7 +71,7 @@ export class InstitutionController {
   }
 
   @Policy({
-    roles: [RoleCode.SocietyOwner, RoleCode.SuperAdmin],
+    roles: [RoleCode.SocietyOwner],
     scope: 'institution',
     operationId: 'INS-05',
     rule: 'Deactivates an Institution and ends its Admins’ grants; nothing is deleted',

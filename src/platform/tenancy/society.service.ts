@@ -19,13 +19,7 @@ import {
 } from '../database/index.js';
 import { GrantDirectory, PersonDirectory } from '../identity/index.js';
 import { addressColumns, contactColumns } from './profile-columns.js';
-import {
-  pauseColumns,
-  requireActive,
-  requirePausable,
-  requireResumable,
-  RESUME_COLUMNS,
-} from './record-rules.js';
+import { requireActive } from './record-rules.js';
 import {
   SOCIETY_SORT_FIELDS,
   type CreateSocietyDto,
@@ -43,8 +37,6 @@ import {
   type SocietyResource,
   type SocietySummary,
 } from './society.resource.js';
-import type { VersionedReasonDto } from '../../common/validation/reason.dto.js';
-import type { VersionDto } from '../../common/validation/version.dto.js';
 
 /** Why the grants of a deactivated Society were revoked; a reactivation can find them by it. */
 export const SOCIETY_DEACTIVATED = 'society_deactivated';
@@ -87,7 +79,7 @@ function auditView(row: SocietyRow): AuditValues {
 }
 
 /**
- * PLT-02 to PLT-08 (API design 10.4b): Super Admin looks after Societies. Every
+ * PLT-02 to PLT-06 (API design 10.4b): Super Admin looks after Societies. Every
  * change runs in one transaction with its audit entry, and the row is locked
  * for the check of `version` and state, so two admins cannot both win.
  */
@@ -111,7 +103,7 @@ export class SocietyService {
     const { rows, total } = await this.database.transaction(platformTenant(principal), (tx) =>
       this.societies.page(
         tx,
-        { q: query.q, statuses: query.status, paused: query.paused },
+        { q: query.q, statuses: query.status, blocked: query.blocked },
         sort,
         query.limit,
         pageOffset(query.page, query.limit),
@@ -221,47 +213,6 @@ export class SocietyService {
       });
     });
     return { id, status: 0 };
-  }
-
-  async pause(
-    principal: Principal,
-    id: string,
-    body: VersionedReasonDto,
-  ): Promise<SocietyResource> {
-    const row = await this.database.transaction(platformTenant(principal, id), async (tx) => {
-      const current = await this.lockedAt(tx, id, body.version);
-      requirePausable(current);
-      await this.societies.update(tx, id, {
-        ...pauseColumns(principal.personId, this.clock.now(), body.reason),
-        ...updateStamp(principal.personId),
-      });
-      const paused = await this.mustFind(tx, id);
-      await this.record(tx, 'access.pause', paused, {
-        reason: body.reason,
-        before: { access_paused: false },
-        after: { access_paused: true },
-      });
-      return paused;
-    });
-    return this.resource(row);
-  }
-
-  async resume(principal: Principal, id: string, body: VersionDto): Promise<SocietyResource> {
-    const row = await this.database.transaction(platformTenant(principal, id), async (tx) => {
-      const current = await this.lockedAt(tx, id, body.version);
-      requireResumable(current);
-      await this.societies.update(tx, id, {
-        ...RESUME_COLUMNS,
-        ...updateStamp(principal.personId),
-      });
-      const resumed = await this.mustFind(tx, id);
-      await this.record(tx, 'access.resume', resumed, {
-        before: { access_paused: true },
-        after: { access_paused: false },
-      });
-      return resumed;
-    });
-    return this.resource(row);
   }
 
   /** The row, locked, for a change that names the `version` the client read. */

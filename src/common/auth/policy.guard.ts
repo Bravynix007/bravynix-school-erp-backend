@@ -59,14 +59,11 @@ export class PolicyGuard implements CanActivate {
       throw AppException.forbidden(ErrorCode.SUPPORT_READ_ONLY);
     }
 
-    // A paused Society stops its users after sign-in. Super Admin belongs to no
-    // Society, so a pause never reaches the platform console.
-    if (
-      !policy.allowWhenPaused &&
-      principal.roleCode !== RoleCode.SuperAdmin &&
-      (await this.tenantGate.isPaused(principal))
-    ) {
-      throw AppException.paused();
+    // A block stops one section of a Society's people after sign-in. Super Admin
+    // belongs to no Society, so a block never reaches the platform console.
+    if (!policy.allowWhenBlocked && principal.roleCode !== RoleCode.SuperAdmin) {
+      const section = await this.tenantGate.blockedSection(principal);
+      if (section !== null) throw AppException.sectionBlocked(section);
     }
 
     request.principal = principal;
