@@ -8,7 +8,7 @@ import { Clock } from '../../common/time/clock.js';
 import { AuditOutcome, AuditService } from '../audit/index.js';
 import { DatabaseService, type Tx } from '../database/index.js';
 import { AccountStatus, AuthCode, ClientType } from './auth-codes.js';
-import { mobileContexts, onlyContext, type Context } from './contexts.js';
+import { mobileContexts, onlyContext, type ContextChoice } from './contexts.js';
 import { BackgroundMailer } from './background-mailer.js';
 import {
   canReceiveCode,
@@ -52,8 +52,8 @@ type Outcome =
       kind: 'signedIn';
       user: LoginUser;
       sessionId: string;
-      contexts: Context[];
-      active: Context | null;
+      contexts: ContextChoice[];
+      active: ContextChoice | null;
     }
   | { kind: 'mfaRequired'; mfa: MfaStart };
 

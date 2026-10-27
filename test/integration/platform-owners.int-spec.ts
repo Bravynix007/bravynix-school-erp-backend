@@ -160,7 +160,14 @@ describe('PLT-03, PLT-09 to PLT-11 Society Owners', () => {
       const address = email();
       await addOwner(society, { email: address });
       const login = await signInMobile(t, address);
-      expect(login.contexts).toEqual([{ roleCode: 2, societyId: society }]);
+      expect(login.contexts).toEqual([
+        {
+          roleCode: 2,
+          societyId: society,
+          societyName: 'Sunrise Education Trust',
+          isBlocked: false,
+        },
+      ]);
       const detail = await api('get', `/v1/platform/societies/${society}`, admin);
       expect(detail.body.data.owners).toEqual([
         expect.objectContaining({ email: address, accountStatus: 1 }),
@@ -191,7 +198,15 @@ describe('PLT-03, PLT-09 to PLT-11 Society Owners', () => {
       expect(res.status).toBe(201);
       expect(res.body.data.id).toBe(seededOwner.id);
       const login = await signInMobile(t, seededOwner.email);
-      expect(login.contexts).toEqual(expect.arrayContaining([{ roleCode: 2, societyId: society }]));
+      expect(login.contexts).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            roleCode: 2,
+            societyId: society,
+            societyName: 'Sunrise Education Trust',
+          }),
+        ]),
+      );
       await sql`delete from role_assignments where user_id = ${seededOwner.id} and society_id = ${society}`.execute(
         ownerDb,
       );

@@ -9,7 +9,7 @@ import { DatabaseService, type Tx } from '../database/index.js';
 import { AccountStatus, AuthCode, ClientType } from './auth-codes.js';
 import { BackgroundMailer } from './background-mailer.js';
 import type { RefreshCookie } from './console-cookie.js';
-import type { Context } from './contexts.js';
+import { CONSOLE_CONTEXT } from './contexts.js';
 import { authenticatorLockoutEmail } from './lockout-email.js';
 import { IdentityRepository, type LoginUser } from './identity.repository.js';
 import { buildLoginResult, displayName, type LoginResult } from './login-result.js';
@@ -32,8 +32,6 @@ export const MFA_LIMITS = {
   triesPerToken: 5,
   issuer: 'BravyNix School ERP',
 } as const;
-
-const CONSOLE_CONTEXT: Context = { roleCode: 1, societyId: null };
 
 export interface MfaStart {
   mfaToken: string;

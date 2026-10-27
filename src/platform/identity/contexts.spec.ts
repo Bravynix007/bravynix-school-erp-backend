@@ -1,4 +1,4 @@
-import { canActAs, mobileContexts, onlyContext } from './contexts.js';
+import { findContext, mobileContexts, onlyContext } from './contexts.js';
 import type { Grant } from './session.repository.js';
 
 const grant = (
@@ -8,14 +8,20 @@ const grant = (
 ): Grant => ({
   roleCode,
   societyId,
+  societyName: societyId === null ? null : `Name of ${societyId}`,
   institutionId,
+});
+
+const choice = (roleCode: number, societyId: string | null) => ({
+  roleCode,
+  societyId,
+  societyName: societyId === null ? null : `Name of ${societyId}`,
+  isBlocked: false,
 });
 
 describe('mobileContexts', () => {
   it('drops the Super Admin grant, which acts on the console only', () => {
-    expect(mobileContexts([grant(1, null), grant(2, 'soc-1')])).toEqual([
-      { roleCode: 2, societyId: 'soc-1' },
-    ]);
+    expect(mobileContexts([grant(1, null), grant(2, 'soc-1')])).toEqual([choice(2, 'soc-1')]);
   });
 
   it('makes one context for an Institution Admin of several Institutions in one Society', () => {
@@ -25,10 +31,13 @@ describe('mobileContexts', () => {
         grant(3, 'soc-1', 'ins-2'),
         grant(3, 'soc-2', 'ins-3'),
       ]),
-    ).toEqual([
-      { roleCode: 3, societyId: 'soc-1' },
-      { roleCode: 3, societyId: 'soc-2' },
-    ]);
+    ).toEqual([choice(3, 'soc-1'), choice(3, 'soc-2')]);
+  });
+
+  it('names the Society of each context, so two Owner seats can be told apart', () => {
+    expect(
+      mobileContexts([grant(2, 'soc-1'), grant(2, 'soc-2')]).map((c) => c.societyName),
+    ).toEqual(['Name of soc-1', 'Name of soc-2']);
   });
 
   it('keeps a Society Owner and an Institution Admin of the same Society apart', () => {
@@ -36,19 +45,19 @@ describe('mobileContexts', () => {
   });
 });
 
-describe('onlyContext and canActAs', () => {
-  const contexts = [{ roleCode: 2, societyId: 'soc-1' }];
+describe('onlyContext and findContext', () => {
+  const contexts = [choice(2, 'soc-1')];
 
   it('starts a session only when there is exactly one context', () => {
     expect(onlyContext(contexts)).toEqual(contexts[0]);
     expect(onlyContext([])).toBeNull();
-    expect(onlyContext([...contexts, { roleCode: 3, societyId: 'soc-2' }])).toBeNull();
+    expect(onlyContext([...contexts, choice(3, 'soc-2')])).toBeNull();
   });
 
   it('matches the role and the Society exactly', () => {
-    expect(canActAs(contexts, 2, 'soc-1')).toBe(true);
-    expect(canActAs(contexts, 2, 'soc-2')).toBe(false);
-    expect(canActAs(contexts, 3, 'soc-1')).toBe(false);
-    expect(canActAs(contexts, 5, null)).toBe(false);
+    expect(findContext(contexts, 2, 'soc-1')).toBe(contexts[0]);
+    expect(findContext(contexts, 2, 'soc-2')).toBeUndefined();
+    expect(findContext(contexts, 3, 'soc-1')).toBeUndefined();
+    expect(findContext(contexts, 5, null)).toBeUndefined();
   });
 });

@@ -69,8 +69,18 @@ const fail = async (promise: Promise<unknown>) =>
     (e: unknown) => e,
   )) as { status: number; code: string; options: { errors?: { field: string; code: string }[] } };
 
-const owner: Grant = { roleCode: 2, societyId: SOCIETY, institutionId: null };
-const admin: Grant = { roleCode: 3, societyId: OTHER, institutionId: 'ins-1' };
+const owner: Grant = {
+  roleCode: 2,
+  societyId: SOCIETY,
+  societyName: 'North Trust',
+  institutionId: null,
+};
+const admin: Grant = {
+  roleCode: 3,
+  societyId: OTHER,
+  societyName: 'South Trust',
+  institutionId: 'ins-1',
+};
 
 describe('ContextService.me', () => {
   it('reports the person, the active context and the mobile contexts', async () => {
@@ -79,12 +89,15 @@ describe('ContextService.me', () => {
     expect(me).toMatchObject({
       userType: 2,
       userTypeName: 'society_owner',
-      session: { id: 'session-1', activeContext: { roleCode: 2, societyId: SOCIETY } },
+      session: {
+        id: 'session-1',
+        activeContext: { roleCode: 2, societyId: SOCIETY, societyName: 'North Trust' },
+      },
       // A Pending account is shown as Active, as at login.
       person: { id: 'user-1', email: user.email, accountStatus: 1 },
       contexts: [
-        { roleCode: 2, societyId: SOCIETY },
-        { roleCode: 3, societyId: OTHER },
+        { roleCode: 2, societyId: SOCIETY, societyName: 'North Trust', isBlocked: false },
+        { roleCode: 3, societyId: OTHER, societyName: 'South Trust', isBlocked: false },
       ],
       requiredNotices: [],
     });
@@ -96,11 +109,13 @@ describe('ContextService.me', () => {
   });
 
   it('shows the console its one Super Admin context only', async () => {
-    const sa: Grant = { roleCode: 1, societyId: null, institutionId: null };
+    const sa: Grant = { roleCode: 1, societyId: null, societyName: null, institutionId: null };
     const consoleView = await build([sa, owner]).service.me(
       principal({ clientType: 'console', roleCode: 1 }),
     );
-    expect(consoleView.contexts).toEqual([{ roleCode: 1, societyId: null }]);
+    expect(consoleView.contexts).toEqual([
+      { roleCode: 1, societyId: null, societyName: null, isBlocked: false },
+    ]);
     const none = await build([owner]).service.me(principal({ clientType: 'console', roleCode: 1 }));
     expect(none.contexts).toEqual([]);
   });
@@ -136,7 +151,12 @@ describe('ContextService.switchContext', () => {
     expect(result).toMatchObject({
       userType: 3,
       userTypeName: 'institution_admin',
-      activeContext: { roleCode: 3, societyId: OTHER },
+      activeContext: {
+        roleCode: 3,
+        societyId: OTHER,
+        societyName: 'South Trust',
+        isBlocked: false,
+      },
     });
     const check = await tokens.checkAccessToken(result.accessToken, t.clock.now());
     expect(check).toMatchObject({
@@ -145,7 +165,7 @@ describe('ContextService.switchContext', () => {
   });
 
   it('refuses a role without a grant, the Super Admin grant on mobile, and roles 4 and 5 for now', async () => {
-    const sa: Grant = { roleCode: 1, societyId: null, institutionId: null };
+    const sa: Grant = { roleCode: 1, societyId: null, societyName: null, institutionId: null };
     const t = build([owner, sa]);
     for (const body of [
       { roleCode: 3, societyId: SOCIETY },

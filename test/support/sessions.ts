@@ -4,12 +4,19 @@ import type { TestApp } from './test-app.js';
 
 const device = { platform: 1, label: 'Pixel 8', appVersion: '1.4.0' };
 
+export interface LoginContext {
+  roleCode: number;
+  societyId: string | null;
+  societyName: string | null;
+  isBlocked: boolean;
+}
+
 export interface LoginData {
   accessToken: string;
   refreshToken: string;
   userType: number | null;
-  session: { id: string; activeContext: { roleCode: number; societyId: string | null } | null };
-  contexts: { roleCode: number; societyId: string | null }[];
+  session: { id: string; activeContext: LoginContext | null };
+  contexts: LoginContext[];
 }
 
 /**

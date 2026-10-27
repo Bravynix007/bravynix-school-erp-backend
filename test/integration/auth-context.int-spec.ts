@@ -79,8 +79,8 @@ describe('AUTH-06 switch context and ME-01', () => {
       expect(login.session.activeContext).toBeNull();
       expect(login.userType).toBeNull();
       expect(login.contexts).toEqual([
-        { roleCode: 2, societyId: societyA.id },
-        { roleCode: 3, societyId: societyB.id },
+        { roleCode: 2, societyId: societyA.id, societyName: societyA.name, isBlocked: false },
+        { roleCode: 3, societyId: societyB.id, societyName: societyB.name, isBlocked: false },
       ]);
 
       const res = await me(login.accessToken).expect(200);
@@ -94,6 +94,43 @@ describe('AUTH-06 switch context and ME-01', () => {
       });
     });
 
+    it('names each Society, so two Owner seats are told apart', async () => {
+      await sql`insert into role_assignments (user_id, role_code, society_id, seat_no, created_by)
+        values (${owner.id}, 2, ${societyB.id}, 3, ${owner.id})`.execute(ownerDb);
+      try {
+        const login = await signIn(owner.email);
+        expect(login.contexts.map((c) => c.societyName)).toEqual([societyA.name, societyB.name]);
+        const res = await switchTo(login.accessToken, { roleCode: 2, societyId: societyB.id });
+        expect(res.body.data.activeContext).toMatchObject({ societyName: societyB.name });
+      } finally {
+        await sql`delete from role_assignments where user_id = ${owner.id} and society_id = ${societyB.id} and role_code = 2`.execute(
+          ownerDb,
+        );
+      }
+    });
+
+    it('reads a Society name only through a function the public cannot call', async () => {
+      const [fn] = await rows<{ owner_only: boolean; app_can: boolean }>(
+        sql`select proacl::text !~ '(^|[{,])=' as owner_only,
+          has_function_privilege('erp_app', 'app_society_name(uuid)', 'execute') as app_can
+          from pg_proc where proname = 'app_society_name'`,
+      );
+      expect(fn).toEqual({ owner_only: true, app_can: true });
+    });
+
+    it('puts the caller’s role setting back after reading a Society name', async () => {
+      const seen = await ownerDb.transaction().execute(async (tx) => {
+        await sql`select set_config('app.role_code', '2', true)`.execute(tx);
+        const name = await sql<{ name: string | null }>`
+          select app_society_name(${societyA.id}::uuid) as name`.execute(tx);
+        const role = await sql<{
+          role: string;
+        }>`select current_setting('app.role_code') as role`.execute(tx);
+        return { name: name.rows[0]?.name, role: role.rows[0]?.role };
+      });
+      expect(seen).toEqual({ name: societyA.name, role: '2' });
+    });
+
     it('is one context for an Institution Admin of two Institutions in one Society', async () => {
       for (const key of ['A1', 'A2']) {
         const institution = institutions.find((i) => i.key === key)!;
@@ -103,8 +140,14 @@ describe('AUTH-06 switch context and ME-01', () => {
         );
       }
       const login = await signIn(admin.email);
-      expect(login.contexts).toEqual([{ roleCode: 3, societyId: societyA.id }]);
-      expect(login.session.activeContext).toEqual({ roleCode: 3, societyId: societyA.id });
+      const expected = {
+        roleCode: 3,
+        societyId: societyA.id,
+        societyName: societyA.name,
+        isBlocked: false,
+      };
+      expect(login.contexts).toEqual([expected]);
+      expect(login.session.activeContext).toEqual(expected);
     });
 
     it('answers /me for a person with no context, and for a Super Admin on the console', async () => {
@@ -157,7 +200,12 @@ describe('AUTH-06 switch context and ME-01', () => {
         data: {
           userType: 3,
           userTypeName: 'institution_admin',
-          activeContext: { roleCode: 3, societyId: societyB.id },
+          activeContext: {
+            roleCode: 3,
+            societyId: societyB.id,
+            societyName: societyB.name,
+            isBlocked: false,
+          },
         },
       });
       const claims = await t.app
@@ -175,7 +223,9 @@ describe('AUTH-06 switch context and ME-01', () => {
       const now = await me(res.body.data.accessToken).expect(200);
       expect(now.body.data).toMatchObject({
         userType: 3,
-        session: { activeContext: { roleCode: 3, societyId: societyB.id } },
+        session: {
+          activeContext: { roleCode: 3, societyId: societyB.id, societyName: societyB.name },
+        },
       });
     });
 
