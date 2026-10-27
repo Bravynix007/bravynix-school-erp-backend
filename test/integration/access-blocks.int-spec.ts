@@ -556,6 +556,24 @@ describe('PLT-42 to PLT-44 and SOC-02 section blocks (API design 6.5, 10.4e)', (
         (await api('get', `/v1/institutions/${secondInst.id}`, inSecond.accessToken)).status,
       ).toBe(200);
     });
+
+    it('counts a block only against the Institution it names: an Admin of two Institutions is stopped only when both are blocked', async () => {
+      const societyId = await society();
+      const first = await institution(societyId);
+      const second = await institution(societyId);
+      const { id, email } = await person();
+      for (const institutionId of [first.id, second.id]) {
+        await sql`insert into role_assignments (user_id, role_code, society_id, institution_id, staff_member_id)
+          values (${id}, 3, ${societyId}, ${institutionId}, gen_random_uuid())`.execute(ownerDb);
+      }
+      const blockedInChooser = async () =>
+        (await signInMobile(t, email)).contexts.find((c) => c.societyId === societyId)?.isBlocked;
+
+      await block('staff', societyId, second.id);
+      expect(await blockedInChooser()).toBe(false);
+      await block('staff', societyId, first.id);
+      expect(await blockedInChooser()).toBe(true);
+    });
   });
 
   describe('row-level security and the definer functions', () => {
@@ -583,6 +601,17 @@ describe('PLT-42 to PLT-44 and SOC-02 section blocks (API design 6.5, 10.4e)', (
           .executeTakeFirst(),
       );
       expect(lift.numUpdatedRows).toBe(0n);
+    });
+
+    it('lets the app role lift a block and rewrite nothing that says what was blocked or why', async () => {
+      const { rows } = await sql<{ column_name: string; can_update: boolean }>`
+        select column_name::text as column_name,
+          has_column_privilege('erp_app', 'access_blocks', column_name::text, 'update') as can_update
+        from information_schema.columns
+        where table_name = 'access_blocks' and table_schema = 'public'
+        order by column_name`.execute(ownerDb);
+      const updatable = rows.filter((row) => row.can_update).map((row) => row.column_name);
+      expect(updatable).toEqual(['lifted_at', 'lifted_by', 'updated_at', 'updated_by']);
     });
 
     it('shows an Owner nothing of another Society’s blocks', async () => {

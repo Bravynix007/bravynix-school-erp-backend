@@ -24,7 +24,7 @@ export class CreateAccessBlockDto {
   @ApiPropertyOptional({ format: 'uuid', description: 'Required for staff and students' })
   @IsOptional()
   @IsUUID()
-  institutionId?: string;
+  institutionId?: string | null;
 
   @ApiProperty({ minLength: 1, maxLength: 500, example: 'Annual fee unpaid' })
   @IsString()

@@ -171,7 +171,8 @@ export class AccessBlockService {
       }
       return undefined;
     }
-    if (body.institutionId === undefined) {
+    // `@IsOptional` lets null through as well as a missing field.
+    if (body.institutionId === undefined || body.institutionId === null) {
       throw AppException.validation([fieldError('institutionId', FieldErrorCode.REQUIRED)]);
     }
     return body.institutionId;

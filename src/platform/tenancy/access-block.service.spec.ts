@@ -141,6 +141,11 @@ describe('AccessBlockService.block (PLT-42)', () => {
       expect((await refusal(t.service.block(admin, dto({ section })))).options.errors).toEqual([
         expect.objectContaining({ field: 'institutionId', code: 'REQUIRED' }),
       ]);
+      // A JSON null passes `@IsOptional`, and must not reach the database's scope check.
+      expect(
+        (await refusal(t.service.block(admin, dto({ section, institutionId: null })))).options
+          .errors,
+      ).toEqual([expect.objectContaining({ field: 'institutionId', code: 'REQUIRED' })]);
     }
     expect(t.transaction).not.toHaveBeenCalled();
   });
