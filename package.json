@@ -27,6 +27,8 @@
     "db:migrate": "tsx src/cli/migrate.ts latest",
     "db:migrate:down": "tsx src/cli/migrate.ts down",
     "db:seed": "tsx src/cli/seed.ts",
+    "demo:reset": "tsx src/cli/demo-reset.ts",
+    "demo:api": "nest build && node --env-file=demo.env dist/main.js",
     "openapi": "nest build && node dist/cli/openapi.js",
     "policies": "nest build && node dist/cli/policies.js"
   },
