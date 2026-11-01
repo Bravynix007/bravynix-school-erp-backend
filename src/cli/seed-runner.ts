@@ -6,6 +6,7 @@ import {
   societies as demoSocieties,
   writeDemoSeed,
 } from '../seeds/demo.js';
+import { writeBillingSeed } from '../seeds/billing-seed.js';
 import { writeIdentitySeed } from '../seeds/identity-seed.js';
 import { children, institutions, personas, societies } from '../seeds/two-worlds.js';
 import { assertSeedable } from './seed-guard.js';
@@ -20,9 +21,9 @@ interface Scenario {
 
 export const SCENARIOS: Record<string, Scenario> = {
   'two-worlds': {
-    // Writes the Societies and Institutions first, then the people and their grants.
-    // Staff and role 3 grants join with the People module.
-    writers: [writeIdentitySeed],
+    // Writes the Societies and Institutions first, then the people and their grants, then
+    // each Institution's rate. Staff and role 3 grants join with the People module.
+    writers: [writeIdentitySeed, writeBillingSeed],
     summary: () => [
       `Scenario two-worlds: ${societies.length} Societies, ${institutions.length} Institutions,`,
       `${personas.length} personas, ${children.length} children.`,

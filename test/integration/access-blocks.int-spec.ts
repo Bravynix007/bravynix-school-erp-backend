@@ -9,6 +9,7 @@ import { personaByKey } from '../../src/seeds/two-worlds.js';
 import { apiCaller, type Body } from '../support/api.js';
 import { superAdminToken } from '../support/admin-token.js';
 import { readAuditRows } from '../support/audit-rows.js';
+import { rollBackTo } from '../support/migrations.js';
 import { FixtureModule } from '../support/fixture.module.js';
 import { clearLoginState } from '../support/login-state.js';
 import { PlatformFixtures, type SignedInPerson } from '../support/platform-fixtures.js';
@@ -18,6 +19,8 @@ import { createTestApp, type TestApp } from '../support/test-app.js';
 
 const migrationUrl = process.env.TEST_DATABASE_MIGRATION_URL!;
 const superAdmin = personaByKey('SA1');
+/** The migration before section blocks: rolling back to it undoes them and nothing earlier. */
+const BEFORE_BLOCKS = '2026_10_27_0010_identity_context_society_name';
 const missing = '00000000-0000-7000-8000-00000000ffff';
 const BLOCKS = '/v1/platform/access-blocks';
 
@@ -668,7 +671,7 @@ describe('PLT-42 to PLT-44 and SOC-02 section blocks (API design 6.5, 10.4e)', (
 
   describe('the migration', () => {
     it('rolls back and forward again, and Society and Institution writes still work after', async () => {
-      const result = await runMigrations(migrationUrl, 'down');
+      const result = await rollBackTo(migrationUrl, BEFORE_BLOCKS);
       expect(result.error).toBeUndefined();
       const afterDown = await sql<{ n: number }>`
         select count(*)::int as n from information_schema.columns

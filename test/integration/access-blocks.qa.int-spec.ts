@@ -7,6 +7,7 @@ import { personaByKey } from '../../src/seeds/two-worlds.js';
 import { apiCaller } from '../support/api.js';
 import { superAdminToken } from '../support/admin-token.js';
 import { clearBlocks } from '../support/blocks.js';
+import { rollBackTo } from '../support/migrations.js';
 import { FixtureModule } from '../support/fixture.module.js';
 import { clearLoginState } from '../support/login-state.js';
 import { PlatformFixtures, type SignedInPerson } from '../support/platform-fixtures.js';
@@ -15,6 +16,8 @@ import { createTestApp, type TestApp } from '../support/test-app.js';
 
 const migrationUrl = process.env.TEST_DATABASE_MIGRATION_URL!;
 const superAdmin = personaByKey('SA1');
+/** The migration before section blocks: rolling back to it undoes them and nothing earlier. */
+const BEFORE_BLOCKS = '2026_10_27_0010_identity_context_society_name';
 const BLOCKS = '/v1/platform/access-blocks';
 
 interface Loose {
@@ -247,7 +250,7 @@ describe('QA: section blocks', () => {
   it('X8 the migration goes down with blocks in force and up again; a pause in force before it is dropped (observation)', async () => {
     const societyId = await society();
     await block({ section: 'owners', societyId, reason: 'Dues' });
-    expect((await runMigrations(migrationUrl, 'down')).error).toBeUndefined();
+    expect((await rollBackTo(migrationUrl, BEFORE_BLOCKS)).error).toBeUndefined();
     await ownerDb.transaction().execute(async (tx) => {
       await sql`select set_config('app.role_code', '1', true)`.execute(tx);
       await sql`update societies set access_paused_at = now(), access_paused_by = ${superAdmin.id},

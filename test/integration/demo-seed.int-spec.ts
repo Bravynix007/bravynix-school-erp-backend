@@ -8,6 +8,7 @@ import {
   meera,
   owners,
   people,
+  rates,
   societies,
   superAdmin,
   writeDemoSeed,
@@ -117,6 +118,23 @@ describe('the demo seed', () => {
           sql<{ n: number }>`select count(*)::int n from users where id in (${peopleIds})`,
         ),
       ).toBe(people.length);
+    });
+  });
+
+  it('gives every Institution a rate, and Sri Vidya High School a revised one, and writes each once', async () => {
+    await withDemo(2, async (tx) => {
+      const rows = await sql<{ code: string; amount: string; effective: string }>`
+        select i.code, r.rate_per_student_amount as amount, r.effective_from_date as effective
+        from institution_price_rates r join institutions i on i.id = r.institution_id
+        where r.id in (${sql.join(rates.map((r) => sql`${r.id}`))})
+        order by i.code, r.effective_from_date
+      `.execute(tx);
+      expect(rows.rows).toEqual([
+        { code: 'LPS', amount: '55.00', effective: '2026-04-01' },
+        { code: 'SVHS', amount: '60.00', effective: '2026-04-01' },
+        { code: 'SVHS', amount: '65.00', effective: '2026-10-01' },
+        { code: 'SVPS', amount: '45.00', effective: '2026-04-01' },
+      ]);
     });
   });
 
