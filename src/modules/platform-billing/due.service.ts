@@ -45,7 +45,9 @@ import {
   STUDENT_COUNT_AUTO,
   DueStatus,
   dueAmounts,
+  fromCents,
   rateAtPeriodStart,
+  toCents,
   requireDue,
   requireNotes,
   requirePaidByToday,
@@ -265,7 +267,11 @@ export class DueService {
         studentCount: body.studentCount ?? current.student_count,
         studentCountNote:
           body.studentCountNote === undefined ? current.student_count_note : body.studentCountNote,
-        adjustmentAmount: body.adjustmentAmount ?? current.adjustment_amount,
+        // One spelling per amount, so -0.00 or 010.00 is no change from 0.00 or 10.00.
+        adjustmentAmount:
+          body.adjustmentAmount === undefined
+            ? current.adjustment_amount
+            : fromCents(toCents(body.adjustmentAmount)),
         adjustmentNote:
           body.adjustmentNote === undefined ? current.adjustment_note : body.adjustmentNote,
         dueDate: body.dueDate === undefined ? current.due_date : body.dueDate,

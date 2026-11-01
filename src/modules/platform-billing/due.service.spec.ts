@@ -716,6 +716,16 @@ describe('DueService', () => {
         expect(t.record).not.toHaveBeenCalled();
       });
 
+      it.each(['-0.00', '000.00', '0.00'])(
+        'compares an amount by value: %s is no change from 0.00',
+        async (spelling) => {
+          const t = arrangeDue();
+          await t.service.edit(admin, 'due-1', edit({ adjustmentAmount: spelling }));
+          expect(t.update).not.toHaveBeenCalled();
+          expect(t.record).not.toHaveBeenCalled();
+        },
+      );
+
       it('writes nothing and keeps the version when the request changes nothing', async () => {
         const t = arrangeDue();
         const result = await t.service.edit(
