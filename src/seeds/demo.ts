@@ -1,4 +1,5 @@
 import { sql, type Kysely } from 'kysely';
+import { dueAmounts } from '../modules/platform-billing/due.rules.js';
 
 /**
  * The "demo" scenario: a small, realistic set of Phase 1 data for showing the console and the app side by side
@@ -236,9 +237,6 @@ const institutionOf = (code: string): DemoInstitution => {
   return found;
 };
 
-/** Whole paise as a two-decimal amount. */
-const money = (cents: bigint): string => `${cents / 100n}.${String(cents % 100n).padStart(2, '0')}`;
-
 export async function writeDemoSeed(db: Kysely<unknown>): Promise<void> {
   // The tenant roots force row-level security even on their owner, so the seed writes as Super Admin.
   await sql`select set_config('app.role_code', '1', true)`.execute(db);
@@ -320,17 +318,16 @@ export async function writeDemoSeed(db: Kysely<unknown>): Promise<void> {
     const institution = institutionOf(d.institution);
     const rate = rates.find((r) => r.id === d.rateId);
     if (!rate) throw new Error(`Unknown demo rate ${d.rateId}`);
-    // Whole paise, so the amounts are exact: the count times the rate, then the signed adjustment.
-    const base = BigInt(d.studentCount) * BigInt(rate.amount.replace('.', ''));
-    const total = base + BigInt(d.adjustmentAmount.replace('.', ''));
+    // The amounts raising it would give: the count times the rate, then the signed adjustment.
+    const { baseAmount, totalAmount } = dueAmounts(d.studentCount, rate.amount, d.adjustmentAmount);
     await sql`
       insert into platform_dues
         (id, society_id, institution_id, invoice_no, period_start_date, period_end_date, student_count_auto,
          student_count, student_count_note, price_rate_id, rate_per_student_amount, base_amount, adjustment_amount,
-         adjustment_note, total_amount, due_date, created_by)
+         adjustment_note, total_amount, due_date, created_by, updated_by)
       values (${d.id}, ${societyOf(institution.society).id}, ${institution.id}, ${d.invoiceNo}, '2026-04-01',
-        '2027-03-31', 0, ${d.studentCount}, ${d.studentCountNote}, ${d.rateId}, ${rate.amount}, ${money(base)},
-        ${d.adjustmentAmount}, ${d.adjustmentNote}, ${money(total)}, ${d.dueDate}, ${superAdmin.id})
+        '2027-03-31', 0, ${d.studentCount}, ${d.studentCountNote}, ${d.rateId}, ${rate.amount}, ${baseAmount},
+        ${d.adjustmentAmount}, ${d.adjustmentNote}, ${totalAmount}, ${d.dueDate}, ${superAdmin.id}, ${superAdmin.id})
       on conflict (id) do nothing
     `.execute(db);
   }

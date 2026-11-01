@@ -29,7 +29,6 @@ export const PgErrorCode = {
   exclusionViolation: '23P01',
   serializationFailure: '40001',
   deadlockDetected: '40P01',
-  lockNotAvailable: '55P03',
 } as const;
 
 /** How long a statement waits for a row or table lock before giving up (API design 14.4). */

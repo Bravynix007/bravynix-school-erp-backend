@@ -175,6 +175,7 @@ export class DueService {
           total_amount: amounts.totalAmount,
           due_date: body.dueDate ?? null,
           created_by: principal.personId,
+          updated_by: principal.personId,
         });
         await this.audit.record(tx, {
           action: 'platform_due.raise',

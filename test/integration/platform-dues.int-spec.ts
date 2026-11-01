@@ -334,7 +334,7 @@ describe('PLT-24 to PLT-27 platform dues (PRD 9.3, API design 10.22)', () => {
         createdAt: expect.stringMatching(/Z$/),
         createdBy: { id: superAdmin.id, displayName: expect.any(String), roleName: 'Super Admin' },
         updatedAt: expect.stringMatching(/Z$/),
-        updatedBy: { id: null, displayName: 'System', roleName: null },
+        updatedBy: { id: superAdmin.id, displayName: expect.any(String), roleName: 'Super Admin' },
       });
     });
 
@@ -676,30 +676,29 @@ describe('PLT-24 to PLT-27 platform dues (PRD 9.3, API design 10.22)', () => {
       expect((await raised(institutionId)).invoiceNo).toBe(`BNX/${TEST_YEAR}/0001`);
 
       // Another transaction holds the invoice counter, as a slow raise would.
-      const held = await new Promise<{ release: () => void; done: Promise<void> }>((resolve) => {
-        let release!: () => void;
-        const hold = new Promise<void>((done) => {
-          release = done;
-        });
-        const done = ownerDb
-          .transaction()
-          .execute(async (tx) => {
-            await sql`select set_config('app.role_code', '1', true)`.execute(tx);
-            await sql`select 1 from number_sequences
-              where sequence_type = 3 and period_key = ${TEST_YEAR} for update`.execute(tx);
-            resolve({ release, done: Promise.resolve() });
-            await hold;
-          })
-          .then(() => undefined);
-        void done;
+      let release!: () => void;
+      let locked!: () => void;
+      const isLocked = new Promise<void>((resolve) => {
+        locked = resolve;
       });
+      const hold = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const holder = ownerDb.transaction().execute(async (tx) => {
+        await sql`select set_config('app.role_code', '1', true)`.execute(tx);
+        await sql`select 1 from number_sequences
+          where sequence_type = 3 and period_key = ${TEST_YEAR} for update`.execute(tx);
+        locked();
+        await hold;
+      });
+      await isLocked;
 
       const key = newId();
       const busy = await raise(dueBody(institutionId), key);
       expect([busy.status, busy.body.code]).toEqual([409, 'RESOURCE_BUSY']);
       expect(busy.headers['retry-after']).toBe('1');
-      held.release();
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      release();
+      await holder;
 
       const retry = await raise(dueBody(institutionId), key);
       expect(retry.status).toBe(201);
@@ -810,7 +809,9 @@ describe('PLT-24 to PLT-27 platform dues (PRD 9.3, API design 10.22)', () => {
       ids: { societyId: string; institutionId: string; rateId: string },
       overrides: Record<string, unknown> = {},
     ) => {
-      const row = {
+      const row: Record<string, unknown> = {
+        society_id: ids.societyId,
+        institution_id: ids.institutionId,
         invoice_no: `T/${newId().slice(-12)}`,
         period_start_date: '2026-04-01',
         period_end_date: '2027-03-31',
@@ -823,21 +824,14 @@ describe('PLT-24 to PLT-27 platform dues (PRD 9.3, API design 10.22)', () => {
         adjustment_amount: '0.00',
         adjustment_note: null,
         total_amount: '500.00',
+        created_by: superAdmin.id,
         ...overrides,
       };
       return database.transaction(
         { ...tenant, societyId: ids.societyId, institutionIds: [ids.institutionId] },
         (tx) =>
-          sql`insert into platform_dues
-            (society_id, institution_id, invoice_no, period_start_date, period_end_date,
-             student_count_auto, student_count, student_count_note, price_rate_id,
-             rate_per_student_amount, base_amount, adjustment_amount, adjustment_note,
-             total_amount, created_by)
-            values (${ids.societyId}, ${ids.institutionId}, ${row.invoice_no}, ${row.period_start_date},
-              ${row.period_end_date}, ${row.student_count_auto}, ${row.student_count},
-              ${row.student_count_note}, ${row.price_rate_id}, ${row.rate_per_student_amount},
-              ${row.base_amount}, ${row.adjustment_amount}, ${row.adjustment_note},
-              ${row.total_amount}, ${superAdmin.id})`.execute(tx),
+          sql`insert into platform_dues (${sql.join(Object.keys(row).map((name) => sql.ref(name)))})
+            values (${sql.join(Object.values(row).map((value) => sql`${value}`))})`.execute(tx),
       );
     };
     const asSuperAdmin = { roleCode: 1, personId: superAdmin.id };
@@ -911,6 +905,56 @@ describe('PLT-24 to PLT-27 platform dues (PRD 9.3, API design 10.22)', () => {
         'a negative count',
         { student_count: -1, base_amount: '-50.00', total_amount: '-50.00' },
         /ck_platform_dues_(counts|total)/,
+      ],
+      [
+        'a negative count whose total still adds up',
+        {
+          student_count: -1,
+          base_amount: '-50.00',
+          adjustment_amount: '50.00',
+          adjustment_note: 'Offsets the count',
+          total_amount: '0.00',
+        },
+        /ck_platform_dues_counts/,
+      ],
+      ['a status that is not 0, 1 or 2', { due_status: 3 }, /ck_platform_dues_status/],
+      ['a payment mode that is not 1 to 4', { payment_mode: 5 }, /ck_platform_dues_mode/],
+      ['a Paid due with no paid date', { due_status: 2, payment_mode: 1 }, /ck_platform_dues_paid/],
+      [
+        'a Paid due with no payment mode',
+        { due_status: 2, paid_date: '2026-06-01' },
+        /ck_platform_dues_paid/,
+      ],
+      [
+        'a payment reference on a due that is not Paid',
+        { payment_reference: 'UTR123' },
+        /ck_platform_dues_paid/,
+      ],
+      ['a Cancelled due that was never cancelled', { due_status: 0 }, /ck_platform_dues_cancelled/],
+      [
+        'a cancellation on a due that is not Cancelled',
+        { cancelled_at: '2026-06-01T00:00:00Z', cancelled_by: superAdmin.id, cancel_reason: 'x' },
+        /ck_platform_dues_cancelled/,
+      ],
+      [
+        'a cancel reason of spaces',
+        {
+          due_status: 0,
+          cancelled_at: '2026-06-01T00:00:00Z',
+          cancelled_by: superAdmin.id,
+          cancel_reason: '   ',
+        },
+        /ck_platform_dues_cancelled/,
+      ],
+      [
+        'a count note of spaces when the count is the automatic one',
+        { student_count: 0, base_amount: '0.00', total_amount: '0.00', student_count_note: '  ' },
+        /ck_platform_dues_count_note/,
+      ],
+      [
+        'an adjustment note of spaces when there is no adjustment',
+        { adjustment_note: '  ' },
+        /ck_platform_dues_adjustment_note/,
       ],
     ])('refuses %s even when written directly', async (_what, overrides, constraint) => {
       const ids = await world();

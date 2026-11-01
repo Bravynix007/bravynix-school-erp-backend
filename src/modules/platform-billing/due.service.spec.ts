@@ -265,6 +265,7 @@ describe('DueService', () => {
         total_amount: '14500.00',
         due_date: null,
         created_by: 'admin-1',
+        updated_by: 'admin-1',
       });
       expect(result.options.status).toBe(201);
       expect(result.data).toMatchObject({
@@ -295,28 +296,30 @@ describe('DueService', () => {
       );
     });
 
-    it('takes the invoice number only after every rule has passed, so a refusal leaves no gap', async () => {
-      const { service, nextPlatformInvoice, insert, history } = build();
-      history.mockResolvedValue([rate({ effective_from_date: '2026-05-01' })]);
-      expect((await refusal(service.raise(admin, key, raise()))).code).toBe('NO_RATE_IN_FORCE');
-      expect(
-        (await refusal(build().service.raise(admin, key, raise({ studentCountNote: undefined }))))
-          .code,
-      ).toBe('NOTE_REQUIRED');
-      expect(
-        (
-          await refusal(
-            build().service.raise(
-              admin,
-              key,
-              raise({ adjustmentAmount: '-99999.00', adjustmentNote: 'x' }),
-            ),
-          )
-        ).code,
-      ).toBe('TOTAL_NEGATIVE');
-      expect(nextPlatformInvoice).not.toHaveBeenCalled();
-      expect(insert).not.toHaveBeenCalled();
-    });
+    it.each([
+      [
+        'NO_RATE_IN_FORCE',
+        raise(),
+        (t: ReturnType<typeof build>) =>
+          t.history.mockResolvedValue([rate({ effective_from_date: '2026-05-01' })]),
+      ],
+      ['NOTE_REQUIRED', raise({ studentCountNote: undefined }), () => undefined],
+      [
+        'TOTAL_NEGATIVE',
+        raise({ adjustmentAmount: '-99999.00', adjustmentNote: 'x' }),
+        () => undefined,
+      ],
+    ])(
+      'takes no invoice number and writes nothing when the answer is %s',
+      async (code, body, arrange) => {
+        const t = build();
+        arrange(t);
+        expect((await refusal(t.service.raise(admin, key, body))).code).toBe(code);
+        expect(t.nextPlatformInvoice).not.toHaveBeenCalled();
+        expect(t.insert).not.toHaveBeenCalled();
+        expect(t.record).not.toHaveBeenCalled();
+      },
+    );
 
     it('refuses an Institution or Society that is no longer active, 409 INVALID_STATE', async () => {
       const { service, insert } = build({ institution: { active: false } });

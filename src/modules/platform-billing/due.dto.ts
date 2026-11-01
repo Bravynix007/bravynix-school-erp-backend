@@ -14,6 +14,7 @@ import {
   Min,
 } from 'class-validator';
 import { PageQueryDto } from '../../common/pagination/pagination.js';
+import { DueStatus } from './due.rules.js';
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -122,7 +123,7 @@ export class ListDuesQueryDto extends PageQueryDto {
   institutionId?: string;
 
   @ApiPropertyOptional({
-    enum: [0, 1, 2],
+    enum: Object.values(DueStatus),
     isArray: true,
     description: '0 Cancelled, 1 Due, 2 Paid; repeat for several',
   })
@@ -133,6 +134,6 @@ export class ListDuesQueryDto extends PageQueryDto {
     ),
   )
   @IsArray()
-  @IsIn([0, 1, 2], { each: true })
+  @IsIn(Object.values(DueStatus), { each: true })
   dueStatus?: number[];
 }
