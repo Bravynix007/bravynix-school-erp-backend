@@ -7,6 +7,7 @@ import { LogDestination, LogDestinationModule } from './common/logging/log-desti
 import { requestLogProps, serializeRequest } from './common/logging/request-log.js';
 import { AppConfig, AppConfigModule } from './config/app-config.js';
 import { HealthModule } from './health/health.module.js';
+import { PlatformBillingModule } from './modules/platform-billing/index.js';
 import { AuditModule } from './platform/audit/audit.module.js';
 import { DatabaseModule } from './platform/database/database.module.js';
 import { EmailModule } from './platform/email/email.module.js';
@@ -67,8 +68,9 @@ import { TenancyModule } from './platform/tenancy/tenancy.module.js';
     IdempotencyModule,
     NumberingModule,
     HealthModule,
-    // Platform modules (Files, Notifications, Jobs)
-    // and business modules are registered here as they are built.
+    // Platform modules (Files, Notifications, Jobs) are registered here as they are built.
+    // Business modules are registered here as they are built.
+    PlatformBillingModule,
   ],
 })
 export class AppModule {}

@@ -2,6 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { TenantAccessGate } from '../../common/auth/tenant-access-gate.js';
 import { AccessBlockRepository } from './access-block.repository.js';
 import { AccessBlockService } from './access-block.service.js';
+import { InstitutionDirectory } from './institution-directory.js';
 import { InstitutionController } from './institution.controller.js';
 import { InstitutionRepository } from './institution.repository.js';
 import { InstitutionService } from './institution.service.js';
@@ -35,11 +36,12 @@ import { TenancyRepository } from './tenancy.repository.js';
     SocietyOwnerService,
     InstitutionRepository,
     InstitutionService,
+    InstitutionDirectory,
     AccessBlockRepository,
     AccessBlockService,
     ScopeService,
     { provide: TenantAccessGate, useClass: TenancyAccessGate },
   ],
-  exports: [ScopeService, TenantAccessGate],
+  exports: [ScopeService, TenantAccessGate, InstitutionDirectory],
 })
 export class TenancyModule {}

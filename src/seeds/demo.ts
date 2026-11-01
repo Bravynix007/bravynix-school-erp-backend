@@ -126,6 +126,48 @@ export const admins: {
   { person: suresh, institution: 'SVPS', staffMemberId: id(9402) },
 ];
 
+/**
+ * What BravyNix charges each Institution per student. Sri Vidya High School has
+ * two, so the pricing screen shows a history; the dates are fixed so the demo
+ * reads the same every day.
+ */
+export const rates: {
+  id: string;
+  institution: DemoInstitution['code'];
+  amount: string;
+  effectiveFrom: string;
+  note: string;
+}[] = [
+  {
+    id: id(9501),
+    institution: 'SVHS',
+    amount: '60.00',
+    effectiveFrom: '2026-04-01',
+    note: 'Agreed for 2026-27',
+  },
+  {
+    id: id(9502),
+    institution: 'SVHS',
+    amount: '65.00',
+    effectiveFrom: '2026-10-01',
+    note: 'Revised after the lab upgrade',
+  },
+  {
+    id: id(9503),
+    institution: 'SVPS',
+    amount: '45.00',
+    effectiveFrom: '2026-04-01',
+    note: 'Agreed for 2026-27',
+  },
+  {
+    id: id(9504),
+    institution: 'LPS',
+    amount: '55.00',
+    effectiveFrom: '2026-04-01',
+    note: 'Agreed for 2026-27',
+  },
+];
+
 export const people: DemoPerson[] = [superAdmin, asha, meera, kavita, suresh];
 
 const societyOf = (code: string): DemoSociety => {
@@ -203,6 +245,17 @@ export async function writeDemoSeed(db: Kysely<unknown>): Promise<void> {
         select 1 from role_assignments
         where user_id = ${p.id} and role_code = 3 and institution_id = ${institution.id} and revoked_at is null
       )
+    `.execute(db);
+  }
+
+  for (const r of rates) {
+    const institution = institutionOf(r.institution);
+    await sql`
+      insert into institution_price_rates
+        (id, society_id, institution_id, rate_per_student_amount, effective_from_date, note, created_by)
+      values (${r.id}, ${societyOf(institution.society).id}, ${institution.id}, ${r.amount},
+        ${r.effectiveFrom}, ${r.note}, ${superAdmin.id})
+      on conflict (id) do nothing
     `.execute(db);
   }
 }
