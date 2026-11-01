@@ -11,6 +11,9 @@ export const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 /** The header an operation reads its key from. */
 export const IDEMPOTENCY_HEADER = 'Idempotency-Key';
 
+/** Set on an answer that was stored earlier and is being sent again (API design 14.2). */
+export const REPLAYED_HEADER = 'Idempotent-Replayed';
+
 /** A missing key is 400 `IDEMPOTENCY_KEY_REQUIRED`; one that is not a UUID is a validation error on the header. */
 export function parseIdempotencyKey(raw: string | string[] | undefined): string {
   if (raw === undefined || (typeof raw === 'string' && raw.trim() === '')) {

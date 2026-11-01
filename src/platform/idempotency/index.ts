@@ -1,6 +1,7 @@
 export { IdempotencyModule } from './idempotency.module.js';
 export {
   IdempotencyService,
+  wasReplayed,
   type IdempotentCall,
   type IdempotentOutcome,
 } from './idempotency.service.js';

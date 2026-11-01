@@ -65,6 +65,7 @@ import { TokenService } from './token.service.js';
     },
   ],
   exports: [
+    BackgroundMailer,
     OtpService,
     PublicCallLimiter,
     TokenService,

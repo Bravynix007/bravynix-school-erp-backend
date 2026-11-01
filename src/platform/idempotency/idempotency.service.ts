@@ -6,6 +6,7 @@ import { Clock } from '../../common/time/clock.js';
 import { DatabaseService, type TenantContext, type Tx } from '../database/index.js';
 import {
   IDEMPOTENCY_TTL_MS,
+  REPLAYED_HEADER,
   fingerprintOf,
   isStorableRefusal,
   parseIdempotencyKey,
@@ -188,6 +189,11 @@ export class IdempotencyService {
   }
 }
 
+/** Whether this answer came from the store rather than from running the work now. */
+export function wasReplayed(result: ApiResult<unknown>): boolean {
+  return result.options.headers?.[REPLAYED_HEADER] !== undefined;
+}
+
 function inProgress(): AppException {
   return new AppException(HttpStatus.CONFLICT, ErrorCode.IDEMPOTENCY_IN_PROGRESS, {
     retryAfterSeconds: 1,
@@ -209,6 +215,6 @@ function replay<T>(stored: StoredAnswer): ApiResult<T> {
     code: body.code,
     message: body.message,
     meta: body.meta ?? null,
-    headers: { 'Idempotent-Replayed': 'true' },
+    headers: { [REPLAYED_HEADER]: 'true' },
   });
 }

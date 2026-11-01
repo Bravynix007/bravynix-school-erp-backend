@@ -35,6 +35,12 @@ const STATUS_TO_CODE: Partial<Record<number, string>> = {
   [HttpStatus.SERVICE_UNAVAILABLE]: ErrorCode.SERVICE_UNAVAILABLE,
 };
 
+/** Postgres gave up waiting for a lock (55P03), or chose this transaction to end a deadlock (40P01). */
+function isLockContention(exception: unknown): boolean {
+  const { code } = (exception ?? {}) as { code?: unknown };
+  return code === '55P03' || code === '40P01';
+}
+
 /**
  * Turns every thrown error into the standard error envelope (API design 8).
  * Unknown errors become 500 INTERNAL_ERROR with nothing internal in the body;
@@ -99,6 +105,15 @@ export class AllExceptionsFilter implements ExceptionFilter {
         code:
           STATUS_TO_CODE[status] ??
           (status >= 500 ? ErrorCode.INTERNAL_ERROR : ErrorCode.VALIDATION_FAILED),
+      };
+    }
+
+    // Safe to try again, with the same Idempotency-Key where the endpoint takes one (API design 14.4).
+    if (isLockContention(exception)) {
+      return {
+        status: HttpStatus.CONFLICT,
+        code: ErrorCode.RESOURCE_BUSY,
+        retryAfterSeconds: 1,
       };
     }
 

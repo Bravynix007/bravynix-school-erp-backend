@@ -4,6 +4,7 @@ import { runMigrations } from '../../src/platform/database/migrator.js';
 import {
   admins,
   asha,
+  dues,
   institutions,
   meera,
   owners,
@@ -42,6 +43,11 @@ describe('the demo seed', () => {
   const withDemo = async (times: number, check: (tx: Kysely<unknown>) => Promise<void>) => {
     await expect(
       db.transaction().execute(async (tx) => {
+        // Another test file may have left the invoice counter moved; this run starts it afresh.
+        await sql`select set_config('app.role_code', '1', true)`.execute(tx);
+        await sql`delete from number_sequences where sequence_type = 3 and period_key = 'FY2026-27'`.execute(
+          tx,
+        );
         for (let i = 0; i < times; i++) await writeDemoSeed(tx);
         await sql`select set_config('app.role_code', '1', true)`.execute(tx);
         await check(tx);
@@ -135,6 +141,26 @@ describe('the demo seed', () => {
         { code: 'SVHS', amount: '65.00', effective: '2026-10-01' },
         { code: 'SVPS', amount: '45.00', effective: '2026-04-01' },
       ]);
+    });
+  });
+
+  it('raises three dues, numbered from 1, with the amounts the rate gives, and the next live due is number 4', async () => {
+    await withDemo(2, async (tx) => {
+      const rows = await sql<{ invoice: string; code: string; total: string; rate: string }>`
+        select d.invoice_no as invoice, i.code, d.total_amount as total, d.rate_per_student_amount as rate
+        from platform_dues d join institutions i on i.id = d.institution_id
+        where d.id in (${sql.join(dues.map((d) => sql`${d.id}`))})
+        order by d.invoice_no
+      `.execute(tx);
+      expect(rows.rows).toEqual([
+        { invoice: 'BNX/FY2026-27/0001', code: 'SVHS', total: '18000.00', rate: '60.00' },
+        { invoice: 'BNX/FY2026-27/0002', code: 'SVPS', total: '8000.00', rate: '45.00' },
+        { invoice: 'BNX/FY2026-27/0003', code: 'LPS', total: '13750.00', rate: '55.00' },
+      ]);
+      const counter = await sql<{ next: number }>`
+        select next_value as next from number_sequences
+        where sequence_type = 3 and period_key = 'FY2026-27'`.execute(tx);
+      expect(counter.rows).toEqual([{ next: 4 }]);
     });
   });
 

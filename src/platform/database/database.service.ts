@@ -29,7 +29,11 @@ export const PgErrorCode = {
   exclusionViolation: '23P01',
   serializationFailure: '40001',
   deadlockDetected: '40P01',
+  lockNotAvailable: '55P03',
 } as const;
+
+/** How long a statement waits for a row or table lock before giving up (API design 14.4). */
+export const LOCK_TIMEOUT = '5s';
 
 const poolLogger = new Logger('DatabasePool');
 
@@ -121,6 +125,7 @@ export async function applyTenant(tx: Tx, tenant: TenantContext): Promise<void> 
       set_config('app.society_id', ${tenant.societyId ?? ''}, true),
       set_config('app.institution_ids', ${(tenant.institutionIds ?? []).join(',')}, true),
       set_config('app.role_code', ${tenant.roleCode?.toString() ?? ''}, true),
-      set_config('app.via_support', ${tenant.viaSupportAccess ? 'true' : 'false'}, true)
+      set_config('app.via_support', ${tenant.viaSupportAccess ? 'true' : 'false'}, true),
+      set_config('lock_timeout', ${LOCK_TIMEOUT}, true)
   `.execute(tx);
 }
