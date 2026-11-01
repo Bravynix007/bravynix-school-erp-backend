@@ -62,6 +62,17 @@ export function requirePaidByToday(paidDate: string, today: string): void {
   }
 }
 
+/** What a Society still owes BravyNix: the total of its dues that are still Due (PRD 9.3). */
+export function outstandingAmount(
+  dues: readonly { due_status: number; total_amount: string }[],
+): string {
+  return fromCents(
+    dues
+      .filter((due) => due.due_status === DueStatus.Due)
+      .reduce((sum, due) => sum + toCents(due.total_amount), 0n),
+  );
+}
+
 /** The rate a period starts under (PRD 9.2), or 422 `NO_RATE_IN_FORCE` when the first rate starts later. */
 export function rateAtPeriodStart<R extends DatedRate>(
   rates: readonly R[],

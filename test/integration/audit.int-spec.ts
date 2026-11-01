@@ -537,6 +537,10 @@ describe('rolling back', () => {
           await import('../../src/platform/database/migrations/2026_11_02_0015_billing_due_lifecycle.js'),
           /platform_dues lifecycle/,
         ],
+        [
+          await import('../../src/platform/database/migrations/2026_11_02_0016_billing_owner_view.js'),
+          /platform_dues owner read policy/,
+        ],
       ] as const;
       for (const [migration, name] of guarded) {
         await expect(migration.down(null as never)).rejects.toThrow(
