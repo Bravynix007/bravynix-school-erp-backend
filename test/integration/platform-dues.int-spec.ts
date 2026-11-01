@@ -27,6 +27,10 @@ const TEST_YEAR = 'FY2031-32';
 type Method = 'get' | 'post' | 'patch' | 'delete';
 
 const duesPath = '/v1/platform/dues';
+const dueAt = (id: string) => `${duesPath}/${id}`;
+
+const fieldsOf = (res: { body: { errors?: { field: string; code: string }[] } }) =>
+  res.body.errors?.map((e) => [e.field, e.code]);
 const quotePath = (institutionId: string) => `/v1/platform/institutions/${institutionId}/due-quote`;
 
 /** The number part of `BNX/FY2031-32/0007`. */
@@ -41,7 +45,7 @@ const dueBody = (institutionId: string, overrides: object = {}) => ({
   ...overrides,
 });
 
-describe('PLT-24 to PLT-27 platform dues (PRD 9.3, API design 10.22)', () => {
+describe('PLT-24 to PLT-30 platform dues (PRD 9.3, API design 10.22)', () => {
   let ownerDb: Kysely<unknown>;
   let t: TestApp;
   let database: DatabaseService;
@@ -133,8 +137,12 @@ describe('PLT-24 to PLT-27 platform dues (PRD 9.3, API design 10.22)', () => {
       actor_user_id: string;
       society_id: string;
       institution_id: string | null;
+      old_values: Record<string, unknown> | null;
       new_values: Record<string, unknown> | null;
     }>(ownerDb, sql`entity_id = ${entityId}`);
+
+  /** The audit entries after the raise, oldest first. */
+  const later = async (id: string) => (await audit(id)).slice(1);
 
   const dueRows = async (institutionId: string) =>
     (
@@ -145,14 +153,22 @@ describe('PLT-24 to PLT-27 platform dues (PRD 9.3, API design 10.22)', () => {
       })
     ).rows[0]!.n;
 
-  /** Marks a due paid as the table owner, until the mark-paid endpoint exists. */
-  const markPaidDirectly = (id: string) =>
-    ownerDb.transaction().execute(async (tx) => {
-      await sql`alter table platform_dues no force row level security`.execute(tx);
-      await sql`update platform_dues set due_status = 2, paid_date = '2026-06-01', payment_mode = 1
-        where id = ${id}`.execute(tx);
-      await sql`alter table platform_dues force row level security`.execute(tx);
+  /** PLT-28 with the version the due was read at. */
+  const edit = (id: string, body: object = {}, version = 1) =>
+    asAdmin('patch', dueAt(id), { version, ...body });
+
+  /** PLT-29: paid on 10 May 2026 by bank transfer unless told otherwise. */
+  const pay = (id: string, body: object = {}, version = 1) =>
+    asAdmin('post', `${dueAt(id)}/mark-paid`, {
+      version,
+      paidDate: '2026-05-10',
+      paymentMode: 2,
+      ...body,
     });
+
+  /** PLT-30. */
+  const cancel = (id: string, body: object = {}, version = 1) =>
+    asAdmin('post', `${dueAt(id)}/cancel`, { version, reason: 'Raised twice', ...body });
 
   /**
    * A Super Admin token for the moved clock. The session row is written with the database's own time,
@@ -329,6 +345,7 @@ describe('PLT-24 to PLT-27 platform dues (PRD 9.3, API design 10.22)', () => {
         paymentMode: null,
         paymentReference: null,
         cancelledAt: null,
+        cancelledBy: null,
         cancelReason: null,
         version: 1,
         createdAt: expect.stringMatching(/Z$/),
@@ -752,7 +769,7 @@ describe('PLT-24 to PLT-27 platform dues (PRD 9.3, API design 10.22)', () => {
       const a = await raised(one.institutionId);
       const b = await raised(one.institutionId);
       const c = await raised(two.institutionId);
-      await markPaidDirectly(b.id);
+      expect((await pay(b.id)).status).toBe(200);
 
       expect(await listedIds(`societyId=${one.societyId}`)).toEqual([a.id, b.id].toSorted());
       expect(await listedIds(`societyId=${two.societyId}`)).toEqual([c.id]);
@@ -795,11 +812,511 @@ describe('PLT-24 to PLT-27 platform dues (PRD 9.3, API design 10.22)', () => {
       expect((await asAdmin('get', `${duesPath}?societyId=x`)).status).toBe(400);
     });
 
+    it('puts a due with no due date last, whichever way the due dates are sorted', async () => {
+      const { institutionId } = await world();
+      const none = await raised(institutionId);
+      const early = await raised(institutionId, { dueDate: '2026-05-15' });
+      const late = await raised(institutionId, { dueDate: '2026-08-15' });
+      const order = async (sort: string) =>
+        (
+          (await asAdmin('get', `${duesPath}?institutionId=${institutionId}&sort=${sort}`)).body
+            .data as unknown as { id: string }[]
+        ).map((row) => row.id);
+
+      expect(await order('dueDate')).toEqual([early.id, late.id, none.id]);
+      expect(await order('-dueDate')).toEqual([late.id, early.id, none.id]);
+    });
+
     it('is empty when there are no dues', async () => {
       const { institutionId } = await world();
       const res = await asAdmin('get', `${duesPath}?institutionId=${institutionId}`);
       expect([res.status, res.body.data]).toEqual([200, []]);
       expect(res.body.meta).toMatchObject({ totalItems: 0 });
+    });
+  });
+
+  describe('PLT-28 to PLT-30 the life of a due', () => {
+    it('keeps all three from Owners and Admins and from callers with no token', async () => {
+      const { societyId, institutionId, owner } = await world();
+      const adminOf = await fixtures.institutionAdmin(societyId, [institutionId]);
+      const due = await raised(institutionId);
+
+      for (const token of [owner.token, adminOf.token]) {
+        const calls = [
+          api('patch', dueAt(due.id), token, { version: 1, studentCount: 5 }),
+          api('post', `${dueAt(due.id)}/mark-paid`, token, {
+            version: 1,
+            paidDate: '2026-05-10',
+            paymentMode: 1,
+          }),
+          api('post', `${dueAt(due.id)}/cancel`, token, { version: 1, reason: 'Raised twice' }),
+        ];
+        for (const res of await Promise.all(calls)) {
+          expect([res.status, res.body.code]).toEqual([403, 'FORBIDDEN']);
+        }
+      }
+      const http = request(t.app.getHttpServer());
+      expect((await http.patch(dueAt(due.id)).send({ version: 1 })).status).toBe(401);
+      expect((await http.post(`${dueAt(due.id)}/mark-paid`).send({})).status).toBe(401);
+      expect((await http.post(`${dueAt(due.id)}/cancel`).send({})).status).toBe(401);
+      expect((await asAdmin('get', dueAt(due.id))).body.data).toMatchObject({
+        dueStatus: 1,
+        studentCount: 300,
+        version: 1,
+      });
+    });
+
+    it('answers 404 for an unknown due and for an ID that is not a UUID', async () => {
+      for (const id of [missing, 'x']) {
+        expect((await edit(id)).status).toBe(404);
+        expect((await pay(id)).status).toBe(404);
+        expect((await cancel(id)).status).toBe(404);
+      }
+    });
+
+    describe('PLT-28 edit', () => {
+      it('works the amounts out again, moves the version and audits what it was and what it became', async () => {
+        const { societyId, institutionId } = await world();
+        const due = await raised(institutionId);
+        t.clock.set('2031-06-01T04:40:00.000Z');
+
+        const res = await edit(due.id, {
+          studentCount: 320,
+          studentCountNote: 'Recount in June',
+          adjustmentAmount: '-500.00',
+          adjustmentNote: 'Opening discount',
+          dueDate: '2031-06-30',
+        });
+        expect([res.status, res.body.code]).toEqual([200, 'OK']);
+        expect(res.body.data).toMatchObject({
+          id: due.id,
+          invoiceNo: due.invoiceNo,
+          studentCount: 320,
+          studentCountNote: 'Recount in June',
+          baseAmount: '16000.00',
+          adjustmentAmount: '-500.00',
+          adjustmentNote: 'Opening discount',
+          totalAmount: '15500.00',
+          dueDate: '2031-06-30',
+          dueStatus: 1,
+          version: 2,
+          updatedBy: { id: superAdmin.id },
+        });
+        expect(res.body.data.updatedAt).not.toBe(res.body.data.createdAt);
+        expect((await asAdmin('get', dueAt(due.id))).body.data).toEqual(res.body.data);
+
+        expect(await later(due.id)).toEqual([
+          expect.objectContaining({
+            action: 'platform_due.edit',
+            actor_user_id: superAdmin.id,
+            society_id: societyId,
+            institution_id: institutionId,
+            old_values: expect.objectContaining({
+              student_count: 300,
+              total_amount: '15000.00',
+              due_date: null,
+            }),
+            new_values: expect.objectContaining({
+              student_count: 320,
+              total_amount: '15500.00',
+              due_date: '2031-06-30',
+            }),
+          }),
+        ]);
+      });
+
+      it('leaves what is not named as it was, and clears a note or the due date named null', async () => {
+        const { institutionId } = await world();
+        const due = await raised(institutionId, {
+          adjustmentAmount: '-500.00',
+          adjustmentNote: 'Opening discount',
+          dueDate: '2026-05-15',
+        });
+        const unchanged = await edit(due.id, { studentCount: 310, studentCountNote: 'Recount' });
+        expect(unchanged.body.data).toMatchObject({
+          adjustmentAmount: '-500.00',
+          adjustmentNote: 'Opening discount',
+          dueDate: '2026-05-15',
+          totalAmount: '15000.00',
+          version: 2,
+        });
+
+        const cleared = await edit(
+          due.id,
+          {
+            adjustmentAmount: '0.00',
+            adjustmentNote: null,
+            dueDate: null,
+            studentCount: 0,
+            studentCountNote: null,
+          },
+          2,
+        );
+        expect(cleared.body.data).toMatchObject({
+          adjustmentAmount: '0.00',
+          adjustmentNote: null,
+          dueDate: null,
+          studentCount: 0,
+          studentCountNote: null,
+          totalAmount: '0.00',
+          version: 3,
+        });
+      });
+
+      it('takes the rate in force on a new period start, and keeps the frozen rate otherwise', async () => {
+        const { institutionId, rateId } = await world();
+        const newRate = await setRate(institutionId, '65.00', '2026-10-01');
+        const due = await raised(institutionId);
+
+        const sameStart = await edit(due.id, { periodEndDate: '2027-06-30', studentCount: 301 });
+        expect(sameStart.body.data).toMatchObject({
+          priceRateId: rateId,
+          ratePerStudentAmount: '50.00',
+          totalAmount: '15050.00',
+        });
+
+        const moved = await edit(due.id, { periodStartDate: '2026-10-01' }, 2);
+        expect(moved.body.data).toMatchObject({
+          priceRateId: newRate,
+          ratePerStudentAmount: '65.00',
+          baseAmount: '19565.00',
+          totalAmount: '19565.00',
+          version: 3,
+        });
+
+        // A rate set after the edit changes nothing already frozen.
+        await setRate(institutionId, '80.00', '2027-04-01');
+        expect((await asAdmin('get', dueAt(due.id))).body.data).toMatchObject({
+          ratePerStudentAmount: '65.00',
+        });
+      });
+
+      it('answers 422 NO_RATE_IN_FORCE when no rate starts on or before the new period start, and changes nothing', async () => {
+        const { institutionId } = await world();
+        const due = await raised(institutionId);
+        const res = await edit(due.id, { periodStartDate: '2026-03-31' });
+        expect([res.status, res.body.code]).toEqual([422, 'NO_RATE_IN_FORCE']);
+        expect(fieldsOf(res)).toEqual([['periodStartDate', 'NO_RATE_IN_FORCE']]);
+        expect((await asAdmin('get', dueAt(due.id))).body.data).toMatchObject({
+          periodStartDate: '2026-04-01',
+          version: 1,
+        });
+        expect(await later(due.id)).toEqual([]);
+      });
+
+      it.each([
+        [
+          'NOTE_REQUIRED for a new count with no note',
+          { studentCount: 310, studentCountNote: null },
+          422,
+          'NOTE_REQUIRED',
+          'studentCountNote',
+        ],
+        [
+          'NOTE_REQUIRED for an adjustment with no note',
+          { adjustmentAmount: '-10.00' },
+          422,
+          'NOTE_REQUIRED',
+          'adjustmentNote',
+        ],
+        [
+          'TOTAL_NEGATIVE for a total below zero',
+          { adjustmentAmount: '-15000.01', adjustmentNote: 'Too much' },
+          422,
+          'TOTAL_NEGATIVE',
+          'adjustmentAmount',
+        ],
+        [
+          'OUT_OF_RANGE for a period that ends before it starts',
+          { periodEndDate: '2026-03-31' },
+          400,
+          'VALIDATION_FAILED',
+          'periodEndDate',
+        ],
+      ])('answers %s, and changes nothing', async (_what, body, status, code, field) => {
+        const { institutionId } = await world();
+        const due = await raised(institutionId);
+        const res = await edit(due.id, body);
+        expect([res.status, res.body.code]).toEqual([status, code]);
+        expect(res.body.errors?.map((e) => e.field)).toContain(field);
+        expect((await asAdmin('get', dueAt(due.id))).body.data).toMatchObject({
+          studentCount: 300,
+          totalAmount: '15000.00',
+          version: 1,
+        });
+        expect(await later(due.id)).toEqual([]);
+      });
+
+      it('answers 400 OUT_OF_RANGE on the count when the new rate times it is more than the columns hold', async () => {
+        const { institutionId } = await world();
+        await setRate(institutionId, '99999999.99', '2027-01-01');
+        const due = await raised(institutionId);
+        const res = await edit(due.id, {
+          periodStartDate: '2027-01-01',
+          studentCount: 1_000_000,
+          studentCountNote: 'x',
+        });
+        expect([res.status, res.body.code]).toEqual([400, 'VALIDATION_FAILED']);
+        expect(fieldsOf(res)).toEqual([['studentCount', 'OUT_OF_RANGE']]);
+        expect((await asAdmin('get', dueAt(due.id))).body.data.version).toBe(1);
+      });
+
+      it('refuses a body that names a field a due cannot change, or leaves out the version', async () => {
+        const { institutionId } = await world();
+        const due = await raised(institutionId);
+        for (const [body, field, code] of [
+          [{ version: 1, institutionId }, 'institutionId', 'FIELD_NOT_ALLOWED'],
+          [{ version: 1, invoiceNo: 'BNX/1' }, 'invoiceNo', 'FIELD_NOT_ALLOWED'],
+          [{ version: 1, totalAmount: '1.00' }, 'totalAmount', 'FIELD_NOT_ALLOWED'],
+          [{ version: 1, dueStatus: 2 }, 'dueStatus', 'FIELD_NOT_ALLOWED'],
+          [{ version: 1, studentCount: '320' }, 'studentCount', 'INVALID_TYPE'],
+          [{ version: 1, studentCount: null }, 'studentCount', 'INVALID_TYPE'],
+          [{ version: 1, adjustmentAmount: null }, 'adjustmentAmount', 'INVALID_TYPE'],
+          [{ version: 1, dueDate: '15-05-2026' }, 'dueDate', 'INVALID_FORMAT'],
+          [{ studentCount: 5 }, 'version', 'INVALID_TYPE'],
+        ] as const) {
+          const res = await asAdmin('patch', dueAt(due.id), body);
+          expect([res.status, res.body.code]).toEqual([400, 'VALIDATION_FAILED']);
+          expect(fieldsOf(res)).toContainEqual([field, code]);
+        }
+        expect((await asAdmin('get', dueAt(due.id))).body.data.version).toBe(1);
+      });
+
+      it('writes nothing, and keeps the version and the audit trail, when the request changes nothing', async () => {
+        const { institutionId } = await world();
+        const due = await raised(institutionId, { dueDate: '2026-05-15' });
+        const before = (await asAdmin('get', dueAt(due.id))).body.data;
+
+        const res = await edit(due.id, {
+          studentCount: 300,
+          periodStartDate: '2026-04-01',
+          adjustmentAmount: '0.00',
+          dueDate: '2026-05-15',
+        });
+        expect(res.status).toBe(200);
+        expect(res.body.data).toEqual(before);
+        expect(await later(due.id)).toEqual([]);
+        expect((await edit(due.id, {})).body.data.version).toBe(1);
+      });
+
+      it('sends the Owners no email, whatever is edited', async () => {
+        const { institutionId, owner } = await world();
+        const due = await raised(institutionId);
+        await t.app.get(BackgroundMailer).flush();
+        const sent = dueMails(owner.email).length;
+        expect(
+          (await edit(due.id, { studentCount: 310, studentCountNote: 'Recount' })).status,
+        ).toBe(200);
+        await t.app.get(BackgroundMailer).flush();
+        expect(dueMails(owner.email)).toHaveLength(sent);
+      });
+    });
+
+    describe('PLT-29 mark paid', () => {
+      it('ends the due Paid with the date, mode and reference, and audits it', async () => {
+        const { societyId, institutionId } = await world();
+        const due = await raised(institutionId);
+
+        const res = await pay(due.id, { paymentReference: 'UTR 4821' });
+        expect([res.status, res.body.code]).toEqual([200, 'OK']);
+        expect(res.body.data).toMatchObject({
+          dueStatus: 2,
+          paidDate: '2026-05-10',
+          paymentMode: 2,
+          paymentReference: 'UTR 4821',
+          totalAmount: '15000.00',
+          version: 2,
+          updatedBy: { id: superAdmin.id },
+        });
+        expect((await asAdmin('get', dueAt(due.id))).body.data).toEqual(res.body.data);
+        expect(await listedIds('dueStatus=2')).toContain(due.id);
+
+        expect(await later(due.id)).toEqual([
+          expect.objectContaining({
+            action: 'platform_due.mark_paid',
+            actor_user_id: superAdmin.id,
+            society_id: societyId,
+            institution_id: institutionId,
+            old_values: expect.objectContaining({ due_status: 1, paid_date: null }),
+            new_values: expect.objectContaining({
+              due_status: 2,
+              paid_date: '2026-05-10',
+              payment_mode: 2,
+              payment_reference: 'UTR 4821',
+            }),
+          }),
+        ]);
+      });
+
+      it('takes any of the four modes, a payment with no reference, and today in India but not tomorrow', async () => {
+        const { institutionId } = await world();
+        const due = await raised(institutionId);
+        const tomorrow = await pay(due.id, { paidDate: '2031-06-02' });
+        expect([tomorrow.status, tomorrow.body.code]).toEqual([400, 'VALIDATION_FAILED']);
+        expect(fieldsOf(tomorrow)).toEqual([['paidDate', 'OUT_OF_RANGE']]);
+        expect((await asAdmin('get', dueAt(due.id))).body.data.dueStatus).toBe(1);
+
+        const today = await pay(due.id, { paidDate: '2031-06-01', paymentMode: 4 });
+        expect(today.body.data).toMatchObject({
+          paidDate: '2031-06-01',
+          paymentMode: 4,
+          paymentReference: null,
+        });
+        for (const mode of [1, 3]) {
+          const other = await raised(institutionId);
+          expect((await pay(other.id, { paymentMode: mode })).body.data.paymentMode).toBe(mode);
+        }
+      });
+
+      it('refuses a body with no date or mode, a mode that is not 1 to 4, and a blank reference', async () => {
+        const { institutionId } = await world();
+        const due = await raised(institutionId);
+        for (const [body, field, code] of [
+          [{ paidDate: undefined }, 'paidDate', 'INVALID_TYPE'],
+          [{ paidDate: '2026-02-30' }, 'paidDate', 'INVALID_FORMAT'],
+          [{ paymentMode: undefined }, 'paymentMode', 'INVALID_CODE'],
+          [{ paymentMode: 0 }, 'paymentMode', 'INVALID_CODE'],
+          [{ paymentMode: 5 }, 'paymentMode', 'INVALID_CODE'],
+          [{ paymentMode: '2' }, 'paymentMode', 'INVALID_CODE'],
+          [{ paymentReference: '' }, 'paymentReference', 'TOO_SHORT'],
+          [{ paymentReference: 'r'.repeat(101) }, 'paymentReference', 'TOO_LONG'],
+          [{ dueStatus: 2 }, 'dueStatus', 'FIELD_NOT_ALLOWED'],
+        ] as const) {
+          const res = await pay(due.id, body);
+          expect([res.status, res.body.code]).toEqual([400, 'VALIDATION_FAILED']);
+          expect(fieldsOf(res)).toContainEqual([field, code]);
+        }
+        expect((await asAdmin('get', dueAt(due.id))).body.data.dueStatus).toBe(1);
+      });
+
+      it('sends the Owners no email', async () => {
+        const { institutionId, owner } = await world();
+        const due = await raised(institutionId);
+        await t.app.get(BackgroundMailer).flush();
+        const sent = dueMails(owner.email).length;
+        expect((await pay(due.id)).status).toBe(200);
+        await t.app.get(BackgroundMailer).flush();
+        expect(dueMails(owner.email)).toHaveLength(sent);
+      });
+    });
+
+    describe('PLT-30 cancel', () => {
+      it('ends the due Cancelled with who, when and why, keeps the row and its number, and audits it', async () => {
+        const { societyId, institutionId } = await world();
+        const due = await raised(institutionId);
+        t.clock.set('2031-06-01T04:40:00.000Z');
+
+        const res = await cancel(due.id, { reason: 'Raised twice by mistake' });
+        expect([res.status, res.body.code]).toEqual([200, 'OK']);
+        expect(res.body.data).toMatchObject({
+          invoiceNo: due.invoiceNo,
+          dueStatus: 0,
+          cancelledAt: '2031-06-01T04:40:00.000Z',
+          cancelledBy: { id: superAdmin.id, roleName: 'Super Admin' },
+          cancelReason: 'Raised twice by mistake',
+          paidDate: null,
+          version: 2,
+        });
+        expect((await asAdmin('get', dueAt(due.id))).body.data).toEqual(res.body.data);
+        expect(await listedIds(`institutionId=${institutionId}&dueStatus=0`)).toEqual([due.id]);
+
+        expect(await later(due.id)).toEqual([
+          expect.objectContaining({
+            action: 'platform_due.cancel',
+            actor_user_id: superAdmin.id,
+            society_id: societyId,
+            institution_id: institutionId,
+            old_values: expect.objectContaining({ due_status: 1, cancel_reason: null }),
+            new_values: expect.objectContaining({
+              due_status: 0,
+              cancel_reason: 'Raised twice by mistake',
+            }),
+          }),
+        ]);
+
+        // The number is not given out again.
+        const next = await raised(institutionId);
+        expect(numberOf(next.invoiceNo)).toBe(numberOf(due.invoiceNo) + 1);
+      });
+
+      it('needs a reason of 5 to 500 characters', async () => {
+        const { institutionId } = await world();
+        const due = await raised(institutionId);
+        for (const [body, code] of [
+          [{ reason: undefined }, 'INVALID_TYPE'],
+          [{ reason: 'Oops' }, 'TOO_SHORT'],
+          [{ reason: 'r'.repeat(501) }, 'TOO_LONG'],
+        ] as const) {
+          const res = await cancel(due.id, body);
+          expect([res.status, res.body.code]).toEqual([400, 'VALIDATION_FAILED']);
+          expect(fieldsOf(res)).toEqual([['reason', code]]);
+        }
+        expect((await cancel(due.id, { reason: 'r'.repeat(500) })).status).toBe(200);
+      });
+
+      it('sends the Owners no email', async () => {
+        const { institutionId, owner } = await world();
+        const due = await raised(institutionId);
+        await t.app.get(BackgroundMailer).flush();
+        const sent = dueMails(owner.email).length;
+        expect((await cancel(due.id)).status).toBe(200);
+        await t.app.get(BackgroundMailer).flush();
+        expect(dueMails(owner.email)).toHaveLength(sent);
+      });
+    });
+
+    describe('the shared rules', () => {
+      it('answers 409 VERSION_CONFLICT for a version that is not the current one, before anything else, and changes nothing', async () => {
+        const { institutionId } = await world();
+        const due = await raised(institutionId);
+        expect((await edit(due.id, { studentCount: 301, studentCountNote: 'x' })).status).toBe(200);
+
+        for (const res of [
+          await edit(due.id, { studentCount: 302, studentCountNote: 'x' }, 1),
+          await pay(due.id, {}, 1),
+          await cancel(due.id, {}, 1),
+          await edit(due.id, { studentCount: 302, studentCountNote: 'x' }, 7),
+        ]) {
+          expect([res.status, res.body.code]).toEqual([409, 'VERSION_CONFLICT']);
+        }
+        expect((await asAdmin('get', dueAt(due.id))).body.data).toMatchObject({
+          studentCount: 301,
+          dueStatus: 1,
+          version: 2,
+        });
+      });
+
+      it('makes Paid and Cancelled final: 409 INVALID_STATE for an edit, a payment or a cancellation, and VERSION_CONFLICT still comes first', async () => {
+        const { institutionId } = await world();
+        const paid = await raised(institutionId);
+        const cancelled = await raised(institutionId);
+        expect((await pay(paid.id)).status).toBe(200);
+        expect((await cancel(cancelled.id)).status).toBe(200);
+
+        for (const id of [paid.id, cancelled.id]) {
+          for (const res of [
+            await edit(id, { studentCount: 5, studentCountNote: 'x' }, 2),
+            await pay(id, {}, 2),
+            await cancel(id, {}, 2),
+          ]) {
+            expect([res.status, res.body.code]).toEqual([409, 'INVALID_STATE']);
+          }
+          expect((await edit(id, {}, 1)).body.code).toBe('VERSION_CONFLICT');
+          expect((await asAdmin('get', dueAt(id))).body.data.version).toBe(2);
+          expect(await later(id)).toHaveLength(1);
+        }
+      });
+
+      it('lets one of two requests at once win, the other is told to reload, and the audit trail has one entry', async () => {
+        const { institutionId } = await world();
+        const due = await raised(institutionId);
+        const results = await Promise.all([pay(due.id), cancel(due.id)]);
+        expect(results.map((res) => res.status).toSorted()).toEqual([200, 409]);
+        const loser = results.find((res) => res.status === 409)!;
+        expect(loser.body.code).toBe('VERSION_CONFLICT');
+        expect((await asAdmin('get', dueAt(due.id))).body.data.version).toBe(2);
+        expect(await later(due.id)).toHaveLength(1);
+      });
     });
   });
 
@@ -855,11 +1372,10 @@ describe('PLT-24 to PLT-27 platform dues (PRD 9.3, API design 10.22)', () => {
       await expect(insertDue(asSuperAdmin, ids)).resolves.toBeDefined();
     });
 
-    it('keeps every due: the app role can neither change nor delete one', async () => {
+    it('keeps every due: the app role can neither delete nor truncate one', async () => {
       const { institutionId } = await world();
       const due = await raised(institutionId);
       for (const statement of [
-        sql`update platform_dues set total_amount = '1.00' where id = ${due.id}`,
         sql`delete from platform_dues where id = ${due.id}`,
         sql`truncate platform_dues`,
       ]) {
@@ -867,6 +1383,80 @@ describe('PLT-24 to PLT-27 platform dues (PRD 9.3, API design 10.22)', () => {
           database.transaction(asSuperAdmin, (tx) => statement.execute(tx)),
         ).rejects.toThrow(/permission denied/);
       }
+    });
+
+    it.each([
+      ['the invoice number', sql`invoice_no = 'BNX/FY2031-32/9999'`],
+      ['the Institution', sql`institution_id = society_id`],
+      ['the Society', sql`society_id = institution_id`],
+      ['the automatic count', sql`student_count_auto = 5`],
+      ['the author', sql`created_by = null`],
+      ['the version', sql`version = 9`],
+    ])('lets the app role change what the lifecycle changes, but never %s', async (_what, set) => {
+      const { institutionId } = await world();
+      const due = await raised(institutionId);
+      await expect(
+        database.transaction(asSuperAdmin, (tx) =>
+          sql`update platform_dues set ${set} where id = ${due.id}`.execute(tx),
+        ),
+      ).rejects.toThrow(/permission denied/);
+    });
+
+    it('refuses any change to a Paid or a Cancelled due, even written directly by a Super Admin', async () => {
+      const { institutionId } = await world();
+      const paid = await raised(institutionId);
+      const cancelled = await raised(institutionId);
+      expect((await pay(paid.id)).status).toBe(200);
+      expect((await cancel(cancelled.id)).status).toBe(200);
+
+      for (const [id, word] of [
+        [paid.id, 'Paid'],
+        [cancelled.id, 'Cancelled'],
+      ] as const) {
+        await expect(
+          database.transaction(asSuperAdmin, (tx) =>
+            sql`update platform_dues set due_date = '2031-01-01' where id = ${id}`.execute(tx),
+          ),
+        ).rejects.toThrow(new RegExp(`A ${word} due cannot be changed`));
+      }
+    });
+
+    it('lets only a Super Admin change a due: for anyone else the row is not there to change', async () => {
+      const { societyId, institutionId } = await world();
+      const due = await raised(institutionId);
+      for (const tenant of [
+        { roleCode: 2, societyId },
+        { roleCode: 3, societyId, institutionIds: [institutionId] },
+        {},
+      ]) {
+        const result = await database.transaction(tenant, (tx) =>
+          sql`update platform_dues set due_date = '2031-01-01' where id = ${due.id}`.execute(tx),
+        );
+        expect(result.numAffectedRows).toBe(0n);
+      }
+      expect((await asAdmin('get', dueAt(due.id))).body.data).toMatchObject({
+        dueDate: null,
+        version: 1,
+      });
+    });
+
+    it('keeps the frozen rate whole when written directly: its amount must be the one on the rate row, and the rate must be the Institution’s own', async () => {
+      const ids = await world();
+      const other = await world();
+      const due = await raised(ids.institutionId);
+      await expect(
+        database.transaction(asSuperAdmin, (tx) =>
+          sql`update platform_dues set rate_per_student_amount = '51.00', base_amount = '15300.00',
+            total_amount = '15300.00' where id = ${due.id}`.execute(tx),
+        ),
+      ).rejects.toThrow(/fk_platform_dues_rate/);
+      await expect(
+        database.transaction(asSuperAdmin, (tx) =>
+          sql`update platform_dues set price_rate_id = ${other.rateId} where id = ${due.id}`.execute(
+            tx,
+          ),
+        ),
+      ).rejects.toThrow(/fk_platform_dues_rate/);
     });
 
     it.each([

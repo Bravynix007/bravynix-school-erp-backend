@@ -66,11 +66,26 @@ describe('DueRepository', () => {
     });
   });
 
+  it('locks the row it reads when asked to, for a change that names the version it read', async () => {
+    const { tx, queries } = recorder();
+    await repository.find(tx, 'due-1', true);
+    expect(queries[0]!.sql).toBe('select * from "platform_dues" where "id" = $1 for update');
+  });
+
+  it('updates the columns it is given on one due', async () => {
+    const { tx, queries } = recorder();
+    await repository.update(tx, 'due-1', { due_status: 2, paid_date: '2026-10-30' });
+    expect(queries[0]).toEqual({
+      sql: 'update "platform_dues" set "due_status" = $1, "paid_date" = $2 where "id" = $3',
+      parameters: [2, '2026-10-30', 'due-1'],
+    });
+  });
+
   describe('page', () => {
     it('asks for everything, in the sort, the ID as the last key, and the page', async () => {
       const [rows] = await page({}, [{ field: 'createdAt', direction: 'desc' }]);
       expect(rows!.sql).toBe(
-        'select * from "platform_dues" where 1 = 1 order by "platform_dues"."created_at" desc, "platform_dues"."id" limit $1 offset $2',
+        'select * from "platform_dues" where 1 = 1 order by "platform_dues"."created_at" desc nulls last, "platform_dues"."id" limit $1 offset $2',
       );
       expect(rows!.parameters).toEqual([10, 20]);
     });
@@ -93,9 +108,16 @@ describe('DueRepository', () => {
         expect(query.parameters.slice(0, 5)).toEqual(['%FY2026\\_%', 's', 'i', 1, 2]);
       }
       expect(queries[0]!.sql).toContain(
-        'order by "platform_dues"."total_amount" desc, "platform_dues"."invoice_no" asc, "platform_dues"."id"',
+        'order by "platform_dues"."total_amount" desc nulls last, "platform_dues"."invoice_no" asc nulls last, "platform_dues"."id"',
       );
       expect(queries[1]!.sql).toContain('count(*)');
+    });
+
+    it('puts a due with no due date last, whichever way the dates are sorted', async () => {
+      for (const direction of ['asc', 'desc'] as const) {
+        const [rows] = await page({}, [{ field: 'dueDate', direction }]);
+        expect(rows!.sql).toContain(`"platform_dues"."due_date" ${direction} nulls last`);
+      }
     });
 
     it('leaves a status list that is empty out of the filter', async () => {

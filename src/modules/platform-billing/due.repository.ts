@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { ExpressionBuilder, Insertable, Selectable } from 'kysely';
+import type { ExpressionBuilder, Insertable, Selectable, Updateable } from 'kysely';
 import { containsPattern, type SortKey } from '../../common/pagination/pagination.js';
 import type { Database, Tx } from '../../platform/database/index.js';
 import type { DueSortField } from './due.dto.js';
@@ -7,6 +7,7 @@ import type { PlatformDuesTable } from './billing.tables.js';
 
 export type DueRow = Selectable<PlatformDuesTable>;
 export type NewDue = Insertable<PlatformDuesTable>;
+export type DueChanges = Updateable<PlatformDuesTable>;
 
 export interface DueFilter {
   q?: string;
@@ -41,8 +42,15 @@ export class DueRepository {
     return tx.insertInto('platform_dues').values(values).returningAll().executeTakeFirstOrThrow();
   }
 
-  find(tx: Tx, id: string): Promise<DueRow | undefined> {
-    return tx.selectFrom('platform_dues').selectAll().where('id', '=', id).executeTakeFirst();
+  /** One due; `lock` holds the row until the transaction ends, for a change that names the `version` it read. */
+  find(tx: Tx, id: string, lock = false): Promise<DueRow | undefined> {
+    let query = tx.selectFrom('platform_dues').selectAll().where('id', '=', id);
+    if (lock) query = query.forUpdate();
+    return query.executeTakeFirst();
+  }
+
+  async update(tx: Tx, id: string, changes: DueChanges): Promise<void> {
+    await tx.updateTable('platform_dues').set(changes).where('id', '=', id).execute();
   }
 
   async page(
@@ -53,7 +61,12 @@ export class DueRepository {
     offset: number,
   ): Promise<{ rows: DueRow[]; total: number }> {
     let query = tx.selectFrom('platform_dues').selectAll().where(this.matching(filter));
-    for (const key of sort) query = query.orderBy(SORT_COLUMN[key.field], key.direction);
+    // A due with no due date (the only nullable sort column) comes last in either direction.
+    for (const key of sort) {
+      query = query.orderBy(SORT_COLUMN[key.field], (order) =>
+        (key.direction === 'asc' ? order.asc() : order.desc()).nullsLast(),
+      );
+    }
     const rows = await query.orderBy('platform_dues.id').limit(limit).offset(offset).execute();
     const { total } = await tx
       .selectFrom('platform_dues')
