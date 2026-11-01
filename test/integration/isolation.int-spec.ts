@@ -4,7 +4,7 @@ import { AuditService } from '../../src/platform/audit/index.js';
 import { DatabaseService, type TenantContext } from '../../src/platform/database/index.js';
 import { createPool } from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
-import { writeBillingSeed } from '../../src/seeds/billing-seed.js';
+import { seededRateId, writeBillingSeed } from '../../src/seeds/billing-seed.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { institutions, personaByKey, societies } from '../../src/seeds/two-worlds.js';
 import * as blocks from '../support/blocks.js';
@@ -70,7 +70,7 @@ const tenantTables = async () => {
         and a.attname = 'institution_id' and not a.attisdropped) as "hasInstitution"
     from pg_class c join pg_namespace n on n.oid = c.relnamespace
     where n.nspname = 'public' and c.relkind in ('r', 'p') and not c.relispartition
-      and c.relname <> all (array['role_assignments', 'auth_sessions', 'access_blocks', 'institution_price_rates', 'number_sequences'])
+      and c.relname <> all (array['role_assignments', 'auth_sessions', 'access_blocks', 'institution_price_rates', 'platform_dues', 'number_sequences'])
       and (c.relname = 'societies' or exists (
         select 1 from pg_attribute a where a.attrelid = c.oid
           and a.attname ~ '(^|_)(society|institution)_id$' and not a.attisdropped))
@@ -85,6 +85,16 @@ const visible = async (table: string, tenant: TenantContext) => {
   );
   return rows;
 };
+
+/** One due for an Institution, written by the table owner with the Institution's seeded rate. */
+const dueOf = (institution: (typeof institutions)[number], n: number) => sql`
+  insert into platform_dues
+    (society_id, institution_id, invoice_no, period_start_date, period_end_date,
+     student_count_auto, student_count, student_count_note, price_rate_id,
+     rate_per_student_amount, base_amount, total_amount, created_by)
+  select society_id, id, ${`ISO/${n}`}, '2026-04-01', '2027-03-31', 0, 10, 'Counted',
+    ${seededRateId(institution.key)}, '50.00', '500.00', '500.00', ${personaByKey('SA1').id}
+  from institutions where id = ${institution.id}`;
 
 const rates = (tenant: TenantContext) => visible('institution_price_rates', tenant);
 
@@ -267,6 +277,37 @@ describe('tenant isolation', () => {
       expect(await rates({ societyId: socA.id, roleCode: 3, institutionIds: [a1.id] })).toEqual([]);
       expect(await rates({ societyId: missing, roleCode: 2 })).toEqual([]);
       expect(await rates({})).toEqual([]);
+    });
+
+    // Dues, like rates, are Super Admin's alone until the Owner's view arrives: one due in each Institution of each world, and nobody but Super Admin reads any.
+    it('shows Super Admin every due, and an Owner, an admin or a request with no tenant none, not even their own', async () => {
+      await ownerDb.transaction().execute(async (tx) => {
+        await sql`select set_config('app.role_code', '1', true)`.execute(tx);
+        await sql`delete from platform_dues where invoice_no like 'ISO/%'`.execute(tx);
+        for (const [n, institution] of [a1, a2, b1].entries())
+          await dueOf(institution, n).execute(tx);
+      });
+      try {
+        const dues = (tenant: TenantContext) => visible('platform_dues', tenant);
+        expect((await dues({ roleCode: 1 })).map((row) => row.institution_id).toSorted()).toEqual(
+          [a1.id, a2.id, b1.id].toSorted(),
+        );
+        expect(await dues({ societyId: socA.id, roleCode: 2 })).toEqual([]);
+        expect(await dues({ societyId: socB.id, roleCode: 2, institutionIds: [b1.id] })).toEqual(
+          [],
+        );
+        expect(await dues({ societyId: socA.id, roleCode: 3, institutionIds: [a1.id] })).toEqual(
+          [],
+        );
+        expect(await dues({ societyId: missing, roleCode: 2 })).toEqual([]);
+        expect(await dues({})).toEqual([]);
+      } finally {
+        await ownerDb.transaction().execute(async (tx) => {
+          await sql`alter table platform_dues no force row level security`.execute(tx);
+          await sql`delete from platform_dues where invoice_no like 'ISO/%'`.execute(tx);
+          await sql`alter table platform_dues force row level security`.execute(tx);
+        });
+      }
     });
 
     it('shows a request that set no tenant nothing, from every table', async () => {

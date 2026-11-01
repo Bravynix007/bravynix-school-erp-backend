@@ -153,6 +153,45 @@ describe('DatabaseService', () => {
     });
   });
 
+  it('gives up waiting for a lock after 5 seconds, in this transaction only (API design 14.4)', async () => {
+    const shown = (tenant: object) =>
+      database.transaction(tenant, async (tx) => {
+        const { rows } = await sql<{ lock_timeout: string }>`show lock_timeout`.execute(tx);
+        return rows[0]!.lock_timeout;
+      });
+    expect(await shown({})).toBe('5s');
+    const outside = await sql<{ lock_timeout: string }>`show lock_timeout`.execute(database.db);
+    expect(outside.rows[0]!.lock_timeout).toBe('0');
+  });
+
+  it('fails a statement that waits too long for a lock with 55P03, which the API answers as RESOURCE_BUSY', async () => {
+    let release!: () => void;
+    const hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let locked!: () => void;
+    const isLocked = new Promise<void>((resolve) => {
+      locked = resolve;
+    });
+    const holder = database.transaction({ roleCode: 1 }, async (tx) => {
+      await sql`select pg_advisory_xact_lock(7001)`.execute(tx);
+      locked();
+      await hold;
+    });
+    await isLocked;
+    try {
+      await expect(
+        database.transaction({ roleCode: 1 }, async (tx) => {
+          await sql`set local lock_timeout = '200ms'`.execute(tx);
+          await sql`select pg_advisory_xact_lock(7001)`.execute(tx);
+        }),
+      ).rejects.toMatchObject({ code: '55P03' });
+    } finally {
+      release();
+      await holder;
+    }
+  });
+
   it("never carries one transaction's tenant into the next on a pooled connection", async () => {
     await database.transaction(
       { societyId: '00000000-0000-7000-8000-000000001001' },

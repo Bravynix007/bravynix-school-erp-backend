@@ -31,6 +31,7 @@ const en: Catalogue = {
   INVALID_STATE: 'This action is not possible right now',
   DUPLICATE: 'This already exists',
   IDEMPOTENCY_IN_PROGRESS: 'This request is already being processed',
+  RESOURCE_BUSY: 'Someone else is changing this right now, please try again',
   PAYLOAD_TOO_LARGE: 'The request is too large',
   UNSUPPORTED_MEDIA_TYPE: 'Unsupported content type',
   IDEMPOTENCY_KEY_REUSED: 'This request key was already used for a different request',
@@ -72,6 +73,10 @@ const en: Catalogue = {
   CANNOT_ACT_ON_SELF: 'You cannot do this to your own account',
   NOT_LOCKED: 'This account is not locked',
   AUTHENTICATOR_LOCKED: 'The authenticator is locked; lift the lock first',
+  // Platform dues (API design 10.22)
+  NO_RATE_IN_FORCE: 'This Institution has no rate on or before the start of the period',
+  TOTAL_NEGATIVE: 'The adjustment cannot take the total below zero',
+  NOTE_REQUIRED: 'A note is required',
   // Field codes
   REQUIRED: 'This field is required',
   FIELD_NOT_ALLOWED: 'This field is not allowed',

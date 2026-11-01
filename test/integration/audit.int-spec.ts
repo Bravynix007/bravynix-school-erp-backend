@@ -529,6 +529,10 @@ describe('rolling back', () => {
           await import('../../src/platform/database/migrations/2026_11_01_0013_platform_idempotency_numbering.js'),
           /number_sequences/,
         ],
+        [
+          await import('../../src/platform/database/migrations/2026_11_01_0014_billing_platform_dues.js'),
+          /platform_dues/,
+        ],
       ] as const;
       for (const [migration, name] of guarded) {
         await expect(migration.down(null as never)).rejects.toThrow(

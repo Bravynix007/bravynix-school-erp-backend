@@ -96,6 +96,20 @@ export class InstitutionRepository {
     return { rows, total };
   }
 
+  /** The name and Society of these Institutions, by ID. */
+  async refs(
+    tx: Tx,
+    ids: readonly string[],
+  ): Promise<Map<string, { id: string; name: string; society_id: string }>> {
+    if (ids.length === 0) return new Map();
+    const rows = await tx
+      .selectFrom('institutions')
+      .select(['id', 'name', 'society_id'])
+      .where('id', 'in', ids)
+      .execute();
+    return new Map(rows.map((row) => [row.id, row]));
+  }
+
   /** The active Institutions among `ids`, by name: what an Owner's or Admin's switcher shows. */
   async activeAmong(tx: Tx, societyId: string, ids: readonly string[]): Promise<InstitutionRow[]> {
     if (ids.length === 0) return [];

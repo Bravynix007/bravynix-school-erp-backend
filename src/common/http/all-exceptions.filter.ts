@@ -36,6 +36,15 @@ const STATUS_TO_CODE: Partial<Record<number, string>> = {
 };
 
 /**
+ * Postgres gave up waiting for a lock (55P03), or chose this transaction to end a deadlock (40P01). The codes
+ * are written out here because `src/common` may not import the database module that names the others.
+ */
+function isLockContention(exception: unknown): boolean {
+  const { code } = (exception ?? {}) as { code?: unknown };
+  return code === '55P03' || code === '40P01';
+}
+
+/**
  * Turns every thrown error into the standard error envelope (API design 8).
  * Unknown errors become 500 INTERNAL_ERROR with nothing internal in the body;
  * the full error goes to the log with the request ID.
@@ -48,6 +57,12 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const response = host.switchToHttp().getResponse<Response>();
     const normalised = this.normalise(exception);
 
+    if (isLockContention(exception)) {
+      this.logger.warn(
+        { code: (exception as { code: string }).code, requestId: RequestContext.requestId() },
+        'A lock was not free',
+      );
+    }
     if (normalised.status >= 500) {
       this.logger.error(
         { err: exception, requestId: RequestContext.requestId() },
@@ -99,6 +114,15 @@ export class AllExceptionsFilter implements ExceptionFilter {
         code:
           STATUS_TO_CODE[status] ??
           (status >= 500 ? ErrorCode.INTERNAL_ERROR : ErrorCode.VALIDATION_FAILED),
+      };
+    }
+
+    // Safe to try again, with the same Idempotency-Key where the endpoint takes one (API design 14.4).
+    if (isLockContention(exception)) {
+      return {
+        status: HttpStatus.CONFLICT,
+        code: ErrorCode.RESOURCE_BUSY,
+        retryAfterSeconds: 1,
       };
     }
 

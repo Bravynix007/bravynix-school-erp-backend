@@ -12,6 +12,7 @@ import * as m0010 from './2026_10_27_0010_identity_context_society_name.js';
 import * as m0011 from './2026_10_27_0011_tenancy_access_blocks.js';
 import * as m0012 from './2026_10_28_0012_billing_price_rates.js';
 import * as m0013 from './2026_11_01_0013_platform_idempotency_numbering.js';
+import * as m0014 from './2026_11_01_0014_billing_platform_dues.js';
 
 /**
  * Every migration, in order. Listed explicitly (not read from disk) so the
@@ -35,6 +36,7 @@ const migrations: Record<string, Migration> = {
   '2026_10_27_0011_tenancy_access_blocks': m0011,
   '2026_10_28_0012_billing_price_rates': m0012,
   '2026_11_01_0013_platform_idempotency_numbering': m0013,
+  '2026_11_01_0014_billing_platform_dues': m0014,
 };
 
 export const migrationProvider: MigrationProvider = {

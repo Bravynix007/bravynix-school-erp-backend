@@ -12,6 +12,14 @@ export interface InstitutionRef {
   active: boolean;
 }
 
+/** An Institution and its Society, by name, for a list that shows both. */
+export interface InstitutionName {
+  id: string;
+  name: string;
+  societyId: string;
+  societyName: string;
+}
+
 /**
  * Which Institution an ID names, for other modules. The `institutions` and
  * `societies` tables stay private to Tenancy (SDD 9.3 rule 1). It reads under
@@ -35,5 +43,24 @@ export class InstitutionDirectory {
       name: institution.name,
       active: institution.status === 1 && society?.status === 1,
     };
+  }
+
+  /** The names of these Institutions and their Societies, by Institution ID; an ID the caller cannot see is left out. */
+  async names(tx: Tx, ids: readonly string[]): Promise<Map<string, InstitutionName>> {
+    const institutions = await this.institutions.refs(tx, ids);
+    const societies = await this.societies.refs(tx, [
+      ...new Set([...institutions.values()].map((row) => row.society_id)),
+    ]);
+    return new Map(
+      [...institutions.values()].map((row) => [
+        row.id,
+        {
+          id: row.id,
+          name: row.name,
+          societyId: row.society_id,
+          societyName: societies.get(row.society_id)?.name ?? '',
+        },
+      ]),
+    );
   }
 }
