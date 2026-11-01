@@ -65,8 +65,8 @@ import { TenancyModule } from './platform/tenancy/tenancy.module.js';
     TenancyModule,
     HealthModule,
     // Platform modules (Files, Notifications, Jobs) are registered here as they are built.
-    PlatformBillingModule,
     // Business modules are registered here as they are built.
+    PlatformBillingModule,
   ],
 })
 export class AppModule {}

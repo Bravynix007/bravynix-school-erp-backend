@@ -33,7 +33,7 @@ const body = (overrides: Partial<SetPriceRateDto> = {}) =>
     ...overrides,
   }) as SetPriceRateDto;
 
-function build(institution: Partial<InstitutionRef> | null = {}) {
+function build(institution: Partial<InstitutionRef> | null = {}, clockAt = now) {
   const ref =
     institution === null
       ? undefined
@@ -62,7 +62,7 @@ function build(institution: Partial<InstitutionRef> | null = {}) {
     { find } as unknown as InstitutionDirectory,
     { describe } as unknown as PersonDirectory,
     { record } as unknown as AuditService,
-    new FixedClock(now),
+    new FixedClock(clockAt),
   );
   return { service, tenants, insert, history, find, record };
 }
@@ -91,6 +91,20 @@ describe('PriceRateService', () => {
         ['later', false],
         ['now', true],
         ['first', false],
+      ]);
+    });
+
+    it('counts the day in India: 00:30 IST on 1 October already has the October rate in force', async () => {
+      // 2026-09-30T19:00Z is 2026-10-01 00:30 in IST, though the UTC day is still 30 September.
+      const { service, history } = build({}, '2026-09-30T19:00:00.000Z');
+      history.mockResolvedValue([
+        rate({ id: 'october', effective_from_date: '2026-10-01' }),
+        rate({ id: 'april', effective_from_date: '2026-04-01' }),
+      ]);
+      const result = await service.history(admin, 'inst-1');
+      expect(result.data.map((r) => [r.id, r.inForce])).toEqual([
+        ['october', true],
+        ['april', false],
       ]);
     });
 

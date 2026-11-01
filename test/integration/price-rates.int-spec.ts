@@ -374,6 +374,23 @@ describe('PLT-22 and PLT-23 per-student rates (PRD 9.2, API design 10.22)', () =
       await expect(insert('1.00', '   ')).rejects.toThrow(/ck_institution_price_rates_note/);
     });
 
+    it('lets nobody but a Super Admin insert a rate, whatever Society and Institution they name', async () => {
+      const societyId = await society();
+      const inst = await institution(societyId);
+      const insertAs = (tenant: { roleCode: number; personId?: string }) =>
+        database.transaction({ ...tenant, societyId, institutionIds: [inst.id] }, (tx) =>
+          sql`insert into institution_price_rates
+                (society_id, institution_id, rate_per_student_amount, effective_from_date, created_by)
+              values (${societyId}, ${inst.id}, '1.00', '2020-01-01', ${superAdmin.id})`.execute(
+            tx,
+          ),
+        );
+      await expect(insertAs({ roleCode: 2 })).rejects.toThrow(/row-level security/);
+      await expect(insertAs({ roleCode: 3 })).rejects.toThrow(/row-level security/);
+      await expect(insertAs({ roleCode: 4 })).rejects.toThrow(/row-level security/);
+      await expect(insertAs({ roleCode: 1, personId: superAdmin.id })).resolves.toBeDefined();
+    });
+
     it('refuses a rate whose Society is not the Institution’s own', async () => {
       const societyId = await society();
       const other = await society();

@@ -121,8 +121,9 @@ describe('QA: PLT-22 and PLT-23 per-student rates', () => {
   it('R1 money: only plain two-decimal strings up to eight whole digits', async () => {
     const societyId = await society();
     const inst = await institution(societyId);
+    // Surrounding spaces are trimmed before validation, so this is a plain 50.00.
     const spaced = await setRate(inst.id, rate(' 50.00 ', '2001-02-01'));
-    console.log('R1 spaced:', spaced.status, spaced.body.data?.ratePerStudentAmount);
+    expect([spaced.status, spaced.body.data.ratePerStudentAmount]).toEqual([201, '50.00']);
     const refused = [
       '50',
       '50.0',
@@ -143,19 +144,10 @@ describe('QA: PLT-22 and PLT-23 per-student rates', () => {
       const res = await setRate(inst.id, rate(amount, `2001-01-${String(day++).padStart(2, '0')}`));
       answers.push(`${JSON.stringify(amount)}=${res.status}`);
     }
-    console.log('R1 refused:', answers.join(' '));
     expect(answers.filter((a) => !a.endsWith('=400'))).toEqual([]);
     const max = await setRate(inst.id, rate('99999999.99', '2002-01-01'));
     const zero = await setRate(inst.id, rate('0.00', '2002-01-02'));
     const padded = await setRate(inst.id, rate('00000007.50', '2002-01-03'));
-    console.log(
-      'R1 accepted:',
-      max.status,
-      max.body.data?.ratePerStudentAmount,
-      zero.status,
-      padded.status,
-      padded.body.data?.ratePerStudentAmount,
-    );
     expect([max.status, zero.status, padded.status]).toEqual([201, 201, 201]);
     expect(max.body.data.ratePerStudentAmount).toBe('99999999.99');
     expect(padded.body.data.ratePerStudentAmount).toBe('7.50');
@@ -183,7 +175,6 @@ describe('QA: PLT-22 and PLT-23 per-student rates', () => {
       const res = await setRate(inst.id, rate('1.00', day));
       answers.push(`${day}=${res.status}${res.status >= 400 ? `/${res.body.code}` : ''}`);
     }
-    console.log('R2:', answers.join(' '));
     expect(answers.filter((a) => /=5\d\d/.test(a))).toEqual([]);
     expect(answers).toEqual(
       expect.arrayContaining([
@@ -201,16 +192,6 @@ describe('QA: PLT-22 and PLT-23 per-student rates', () => {
     const spaces = await setRate(inst.id, rate('1.00', '2003-01-01', '   '));
     const tabs = await setRate(inst.id, rate('1.00', '2003-01-03', '\t\n'));
     const emoji = await setRate(inst.id, rate('1.00', '2003-01-04', '😀'.repeat(250)));
-    console.log(
-      'R3:',
-      spaces.status,
-      spaces.body.code,
-      '| tabs',
-      tabs.status,
-      tabs.body.code,
-      '| 250 emoji',
-      emoji.status,
-    );
     expect.soft(spaces.status, 'spaces-only note').toBe(400);
     expect.soft(tabs.status, 'whitespace-only note').toBe(400);
     expect.soft(emoji.status).toBe(201);
@@ -222,7 +203,6 @@ describe('QA: PLT-22 and PLT-23 per-student rates', () => {
     const answers = await Promise.all(
       ['1.00', '2.00', '3.00', '4.00', '5.00'].map((a) => setRate(inst.id, rate(a, '2004-01-01'))),
     );
-    console.log('R4:', answers.map((a) => `${a.status}/${a.body.code}`).join(' '));
     expect(answers.map((a) => a.status).toSorted()).toEqual([201, 409, 409, 409, 409]);
     expect(answers.filter((a) => a.status === 409).every((a) => a.body.code === 'DUPLICATE')).toBe(
       true,
@@ -260,10 +240,6 @@ describe('QA: PLT-22 and PLT-23 per-student rates', () => {
       effectiveFromDate: string;
       inForce: boolean;
     }[];
-    console.log(
-      'R5:',
-      rows.map((r) => `${r.effectiveFromDate}:${r.ratePerStudentAmount}:${r.inForce}`).join(' '),
-    );
     expect(rows.map((r) => r.ratePerStudentAmount)).toEqual(['3.00', '2.00', '1.00']);
     expect(rows.map((r) => r.inForce)).toEqual([false, true, false]);
     // A past rate added after the current one does not take over.
@@ -279,20 +255,7 @@ describe('QA: PLT-22 and PLT-23 per-student rates', () => {
     const otherOwner = await ownerOf(other);
     const res = await api('get', ratesPath(inst.id), otherOwner.token);
     const bad = await asAdmin('get', '/v1/platform/institutions/not-a-uuid/price-rates');
-    const upper = await asAdmin('get', ratesPath(inst.id.toUpperCase()));
     const notFound = await asAdmin('get', ratesPath(missing));
-    console.log(
-      'R7:',
-      res.status,
-      res.body.code,
-      '| bad id',
-      bad.status,
-      '| upper-case id',
-      upper.status,
-      '| unknown',
-      notFound.status,
-      notFound.body.code,
-    );
     expect(res.status).toBe(403);
     expect(bad.status).toBe(404);
     expect(notFound.status).toBe(404);
@@ -316,7 +279,6 @@ describe('QA: PLT-22 and PLT-23 per-student rates', () => {
     ] as const) {
       answers.push((await asAdmin(method, path, { ratePerStudentAmount: '1.00' })).status);
     }
-    console.log('R8:', answers.join(' '));
     expect(answers.every((s) => s === 404 || s === 405)).toBe(true);
   });
 });
