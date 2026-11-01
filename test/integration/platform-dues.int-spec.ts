@@ -1421,7 +1421,7 @@ describe('PLT-24 to PLT-30 platform dues (PRD 9.3, API design 10.22)', () => {
       }
     });
 
-    it('lets only a Super Admin change a due: for anyone else the row is not there to change', async () => {
+    it('lets only a Super Admin change a due: for anyone else no row is there to change, with or without a filter', async () => {
       const { societyId, institutionId } = await world();
       const due = await raised(institutionId);
       for (const tenant of [
@@ -1429,10 +1429,13 @@ describe('PLT-24 to PLT-30 platform dues (PRD 9.3, API design 10.22)', () => {
         { roleCode: 3, societyId, institutionIds: [institutionId] },
         {},
       ]) {
-        const result = await database.transaction(tenant, (tx) =>
-          sql`update platform_dues set due_date = '2031-01-01' where id = ${due.id}`.execute(tx),
-        );
-        expect(result.numAffectedRows).toBe(0n);
+        for (const statement of [
+          sql`update platform_dues set due_date = '2031-01-01' where id = ${due.id}`,
+          sql`update platform_dues set due_date = '2031-01-01'`,
+        ]) {
+          const result = await database.transaction(tenant, (tx) => statement.execute(tx));
+          expect(result.numAffectedRows).toBe(0n);
+        }
       }
       expect((await asAdmin('get', dueAt(due.id))).body.data).toMatchObject({
         dueDate: null,

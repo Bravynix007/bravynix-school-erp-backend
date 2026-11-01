@@ -394,7 +394,9 @@ export async function writeDemoSeed(db: Kysely<unknown>): Promise<void> {
       on conflict (id) do nothing
     `.execute(db);
   }
-  // The counter continues after the seeded dues; a counter that already moved on is left alone.
+  // The counter continues after the seeded dues; a counter that already moved on is left alone (a counter only ever
+  // steps up by one). A database seeded before the six dues (three, counter at 4) must be reset with `npm run demo:reset`,
+  // not seeded again, or live raises would meet the numbers 0004 to 0006.
   await sql`
     insert into number_sequences (sequence_type, period_key, prefix, next_value)
     values (3, ${DEMO_INVOICE_YEAR.key}, ${DEMO_INVOICE_YEAR.prefix}, ${DEMO_INVOICE_YEAR.next})
