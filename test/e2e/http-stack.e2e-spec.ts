@@ -88,6 +88,24 @@ describe('HTTP stack', () => {
       );
     });
 
+    it('refuses a NUL character in a body or a query with 400, not 500', async () => {
+      // Postgres text cannot hold U+0000; before this check the insert failed with a 500.
+      const body = await request(http)
+        .post('/v1/fixtures/echo')
+        .send({ name: 'As\u0000ha' })
+        .expect(400);
+      expect(body.body).toMatchObject({
+        success: false,
+        code: 'VALIDATION_FAILED',
+        errors: [{ field: 'name', code: 'INVALID_FORMAT' }],
+      });
+      const query = await request(http).get('/v1/fixtures/page?q=a%00b').expect(400);
+      expect(query.body).toMatchObject({
+        code: 'VALIDATION_FAILED',
+        errors: [{ field: 'q', code: 'INVALID_FORMAT' }],
+      });
+    });
+
     it('trims query strings, which Express 5 parses with a null prototype', async () => {
       const res = await request(http).get('/v1/fixtures/page?q=%20%20vidya%20').expect(200);
       expect(res.body.data.q).toBe('vidya');

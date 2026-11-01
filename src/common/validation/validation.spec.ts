@@ -229,3 +229,38 @@ describe('TrimStringsPipe reserved keys', () => {
     ]);
   });
 });
+
+describe('TrimStringsPipe NUL characters', () => {
+  const pipe = new TrimStringsPipe();
+
+  const refused = (value: unknown, type: 'body' | 'query' = 'body') => {
+    try {
+      pipe.transform(value, { type });
+    } catch (error) {
+      return (error as AppException).options.errors?.map((e) => [e.field, e.code]);
+    }
+    return undefined;
+  };
+
+  it('refuses text with a NUL anywhere, with its path, as INVALID_FORMAT', () => {
+    expect(
+      refused({ name: 'Sun\u0000rise', nested: { note: 'a' }, items: ['ok', { label: '\u0000' }] }),
+    ).toEqual([
+      ['name', 'INVALID_FORMAT'],
+      ['items[1].label', 'INVALID_FORMAT'],
+    ]);
+  });
+
+  it('refuses a NUL in a query value too, and reports it with a reserved key in one answer', () => {
+    expect(refused({ q: 'a\u0000b' }, 'query')).toEqual([['q', 'INVALID_FORMAT']]);
+    const body = JSON.parse('{"__proto__":{"a":1},"name":"x\\u0000"}');
+    expect(refused(body)).toEqual([
+      ['__proto__', 'FIELD_NOT_ALLOWED'],
+      ['name', 'INVALID_FORMAT'],
+    ]);
+  });
+
+  it('lets every other control character and all of Unicode through', () => {
+    expect(refused({ name: 'tab\there \u0001 😀 नमस्ते' })).toBeUndefined();
+  });
+});
