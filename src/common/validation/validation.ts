@@ -247,6 +247,10 @@ function trimDeep(value: unknown, path: string, refused: Refusals): unknown {
   return value;
 }
 
+/**
+ * Trims every string in a body or query, and refuses reserved keys (`FIELD_NOT_ALLOWED`)
+ * and NUL characters (`INVALID_FORMAT`), which Postgres text cannot hold, in one 400.
+ */
 @Injectable()
 export class TrimStringsPipe implements PipeTransform {
   transform(value: unknown, metadata: ArgumentMetadata): unknown {
