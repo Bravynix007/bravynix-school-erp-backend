@@ -4,6 +4,7 @@ import { AuditService } from '../../src/platform/audit/index.js';
 import { DatabaseService, type TenantContext } from '../../src/platform/database/index.js';
 import { createPool } from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
+import { writeBillingSeed } from '../../src/seeds/billing-seed.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { institutions, personaByKey, societies } from '../../src/seeds/two-worlds.js';
 import * as blocks from '../support/blocks.js';
@@ -69,7 +70,7 @@ const tenantTables = async () => {
         and a.attname = 'institution_id' and not a.attisdropped) as "hasInstitution"
     from pg_class c join pg_namespace n on n.oid = c.relnamespace
     where n.nspname = 'public' and c.relkind in ('r', 'p') and not c.relispartition
-      and c.relname <> all (array['role_assignments', 'auth_sessions', 'access_blocks'])
+      and c.relname <> all (array['role_assignments', 'auth_sessions', 'access_blocks', 'institution_price_rates'])
       and (c.relname = 'societies' or exists (
         select 1 from pg_attribute a where a.attrelid = c.oid
           and a.attname ~ '(^|_)(society|institution)_id$' and not a.attisdropped))
@@ -84,6 +85,8 @@ const visible = async (table: string, tenant: TenantContext) => {
   );
   return rows;
 };
+
+const rates = (tenant: TenantContext) => visible('institution_price_rates', tenant);
 
 const seenBy = async (tenant: TenantContext) =>
   (await visible('access_blocks', tenant)).map((row) => row.society_id);
@@ -100,6 +103,7 @@ describe('tenant isolation', () => {
       dialect: new PostgresDialect({ pool: createPool(migrationUrl, 2, 30_000) }),
     });
     await writeIdentitySeed(ownerDb);
+    await writeBillingSeed(ownerDb);
     await clearLoginState(ownerDb);
     // Role 3 grants need a staff record, which arrives with the People module.
     for (const caller of Object.values(callers)) {
@@ -202,6 +206,16 @@ describe('tenant isolation', () => {
       );
       expect(await seenBy({ societyId: missing, roleCode: 2 })).toEqual([]);
       expect(await seenBy({})).toEqual([]);
+    });
+
+    // Rates are Super Admin's alone (PRD 6.5): an Owner or an Admin reads none of them, not even their own.
+    it('shows Super Admin every rate, and an Owner, an admin or a request with no tenant none', async () => {
+      const everyone = (await rates({ roleCode: 1 })).map((row) => row.institution_id);
+      expect(everyone.toSorted()).toEqual(institutions.map((i) => i.id).toSorted());
+      expect(await rates({ societyId: socA.id, roleCode: 2 })).toEqual([]);
+      expect(await rates({ societyId: socA.id, roleCode: 3, institutionIds: [a1.id] })).toEqual([]);
+      expect(await rates({ societyId: missing, roleCode: 2 })).toEqual([]);
+      expect(await rates({})).toEqual([]);
     });
 
     it('shows a request that set no tenant nothing, from every table', async () => {

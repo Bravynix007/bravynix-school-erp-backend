@@ -38,7 +38,7 @@ Mail sent locally lands in Mailpit at http://localhost:8025.
 ### Demo data
 
 `npm run demo:reset` drops and rebuilds a separate database, `school_erp_demo`, and writes the `demo` scenario (two
-Societies, three Institutions, two Owners, two Institution Admins; every email ends in `@demo.test`). `npm run
+Societies, three Institutions, two Owners, two Institution Admins, and a per-student rate for each Institution; every email ends in `@demo.test`). `npm run
 demo:api` runs the API against it with `demo.env` (a `DATABASE_URL` already set in your shell wins over the
 file, so leave it unset). `demo:reset` refuses anything but a local server and touches only `school_erp_demo`. It needs the database administrator: `DEMO_ADMIN_URL` (default
 `postgres://postgres:postgres@localhost:5432/postgres`, the docker compose user). The run-through script is the
