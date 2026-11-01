@@ -6,7 +6,11 @@ import { sql, type Kysely } from 'kysely';
  * counters behind receipt, enquiry and platform invoice numbers.
  *
  * `idempotency_keys` has no tenant column: a key belongs to the person who sent
- * it, and the service always reads it by that person. It lives for 24 hours.
+ * it, and its row-level security lets a person read and write only their own
+ * (DDD 15.3, the person family), because the stored answers will hold dues,
+ * invoices and receipts. Super Admin may also read and delete any: Postgres
+ * needs read access for a DELETE with a WHERE clause, and the hourly sweep
+ * runs as the platform. A stored answer lives for 24 hours.
  *
  * `number_sequences` rows are never deleted. Platform invoices (type 3) belong
  * to no Society, so only Super Admin may touch them; receipts and enquiries
@@ -30,6 +34,21 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     )
   `.execute(db);
   await sql`create index ix_idempotency_keys_expires on idempotency_keys (expires_at)`.execute(db);
+
+  await sql`alter table idempotency_keys enable row level security`.execute(db);
+  await sql`alter table idempotency_keys force row level security`.execute(db);
+  await sql`
+    create policy idempotency_keys_select on idempotency_keys for select
+      using (user_id = app_current_person_id() or app_is_super_admin())
+  `.execute(db);
+  await sql`
+    create policy idempotency_keys_insert on idempotency_keys for insert
+      with check (user_id = app_current_person_id())
+  `.execute(db);
+  await sql`
+    create policy idempotency_keys_delete on idempotency_keys for delete
+      using (user_id = app_current_person_id() or app_is_super_admin())
+  `.execute(db);
 
   await sql`
     create table number_sequences (

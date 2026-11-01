@@ -4,9 +4,9 @@ import { createPool } from '../../src/platform/database/database.service.js';
 import { migrationProvider } from '../../src/platform/database/migrations/index.js';
 
 /**
- * Rolls the database back to just after the named migration, so a test of one
- * migration does not break when a later one is added. Does nothing if the
- * database is already at or before it.
+ * Moves the database to just after the named migration, so a test of one
+ * migration does not break when a later one is added. It rolls back when the
+ * database is ahead and migrates forward when it is behind.
  */
 export async function rollBackTo(connectionString: string, migrationName: string) {
   const db = new Kysely<unknown>({

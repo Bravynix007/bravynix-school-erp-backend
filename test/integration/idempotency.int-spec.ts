@@ -70,9 +70,28 @@ describe('Idempotency-Key and gap-free invoice numbers (API design 14, DDD 9.1)'
     });
   };
 
-  const stored = async () =>
-    (await sql<{ n: number }>`select count(*)::int as n from idempotency_keys`.execute(ownerDb))
-      .rows[0]!.n;
+  /** Makes every stored answer 25 hours old. There is no update policy, so the owner steps around row-level security for this one write. */
+  const ageStoredAnswers = () =>
+    ownerDb.transaction().execute(async (tx) => {
+      await sql`alter table idempotency_keys no force row level security`.execute(tx);
+      await sql`update idempotency_keys set created_at = now() - interval '25 hours',
+        expires_at = now() - interval '1 hour'`.execute(tx);
+      await sql`alter table idempotency_keys force row level security`.execute(tx);
+    });
+
+  /** How many answers are stored. Row-level security applies to the table owner too, so count per person. */
+  const stored = async () => {
+    let total = 0;
+    for (const person of [first.id, second.id]) {
+      total += await ownerDb.transaction().execute(async (tx) => {
+        await sql`select set_config('app.person_id', ${person}, true)`.execute(tx);
+        return (
+          await sql<{ n: number }>`select count(*)::int as n from idempotency_keys`.execute(tx)
+        ).rows[0]!.n;
+      });
+    }
+    return total;
+  };
 
   beforeAll(async () => {
     await runMigrations(migrationUrl, 'latest');
@@ -238,20 +257,14 @@ describe('Idempotency-Key and gap-free invoice numbers (API design 14, DDD 9.1)'
     it('forgets an answer after 24 hours: the same key then runs again, and the sweep removes the old rows', async () => {
       const key = newId();
       await call('plain', key);
-      await ownerDb.transaction().execute(async (tx) => {
-        await sql`update idempotency_keys set created_at = now() - interval '25 hours',
-          expires_at = now() - interval '1 hour'`.execute(tx);
-      });
+      await ageStoredAnswers();
       // The fixture clock is fixed in 2026, so move it past the stored expiry.
       await moveClock(new Date(Date.now() + 60_000));
       const again = await call('plain', key);
       expect([again.status, again.headers['idempotent-replayed']]).toEqual([201, undefined]);
       expect(idempotentFixture.runs).toBe(2);
 
-      await ownerDb.transaction().execute(async (tx) => {
-        await sql`update idempotency_keys set created_at = now() - interval '25 hours',
-          expires_at = now() - interval '1 hour'`.execute(tx);
-      });
+      await ageStoredAnswers();
       const removed = await t.app.get(IdempotencyService).sweepExpired();
       expect(removed).toBe(1);
       expect(await stored()).toBe(0);
@@ -317,6 +330,36 @@ describe('Idempotency-Key and gap-free invoice numbers (API design 14, DDD 9.1)'
           /permission denied/,
         );
       }
+    });
+
+    it('keeps a stored answer to the person who made it: an Owner cannot read, write as them or delete it', async () => {
+      await call('plain', newId());
+      const owner = { personId: newId(), societyId: newId(), roleCode: 2 as const };
+      for (const tenantOf of [owner, {}]) {
+        const seen = await database.transaction(tenantOf, (tx) =>
+          sql`select user_id from idempotency_keys`.execute(tx),
+        );
+        expect(seen.rows).toEqual([]);
+      }
+      const mine = await database.transaction(tenant, (tx) =>
+        sql`select user_id from idempotency_keys`.execute(tx),
+      );
+      expect(mine.rows).toHaveLength(1);
+      // Writing a row in another person's name is refused, whoever asks.
+      await expect(
+        database.transaction({ ...tenant, personId: second.id }, (tx) =>
+          sql`insert into idempotency_keys
+              (user_id, idempotency_key, operation, request_fingerprint, response_status, response_body, expires_at)
+            values (${first.id}, ${newId()}, 'x', '\\x00', 201, '{}', now() + interval '1 hour')`.execute(
+            tx,
+          ),
+        ),
+      ).rejects.toThrow(/row-level security/);
+      const ownerDelete = await database.transaction(owner, (tx) =>
+        sql`delete from idempotency_keys`.execute(tx),
+      );
+      expect(ownerDelete.numAffectedRows).toBe(0n);
+      expect(await stored()).toBe(1);
     });
 
     it('keep a platform invoice counter to Super Admin: an Owner reads and writes none', async () => {

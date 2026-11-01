@@ -8,7 +8,7 @@ import type { IdempotencyRepository, StoredAnswer } from './idempotency.reposito
 import { IdempotencyService, type IdempotentCall } from './idempotency.service.js';
 
 const now = '2026-11-01T10:00:00.000Z';
-const key = '0192f3b0-2c3d-7e4f-9a50-2b3c4d5e6f70';
+const key = '00000000-0000-4000-8000-000000000001';
 const tx = {} as Tx;
 
 const call = (overrides: Partial<IdempotentCall> = {}): IdempotentCall => ({

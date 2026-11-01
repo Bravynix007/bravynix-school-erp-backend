@@ -2,7 +2,7 @@ import { HttpStatus } from '@nestjs/common';
 import { AppException } from '../../common/http/app-exception.js';
 import { fingerprintOf, isStorableRefusal, parseIdempotencyKey } from './idempotency.rules.js';
 
-const key = '0192f3b0-2c3d-7e4f-9a50-2b3c4d5e6f70';
+const key = '00000000-0000-4000-8000-000000000001';
 
 describe('parseIdempotencyKey', () => {
   it('takes a UUID, lower-cased and trimmed', () => {
