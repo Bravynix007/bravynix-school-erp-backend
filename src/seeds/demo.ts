@@ -1,5 +1,5 @@
 import { sql, type Kysely } from 'kysely';
-import { dueAmounts } from '../modules/platform-billing/due.rules.js';
+import { DueStatus, dueAmounts } from '../modules/platform-billing/due.rules.js';
 
 /**
  * The "demo" scenario: a small, realistic set of Phase 1 data for showing the console and the app side by side
@@ -169,38 +169,64 @@ export const rates: {
   },
 ];
 
+/** How a seeded due ended: still Due (nothing), paid, or cancelled. */
+type DueOutcome =
+  | { paid: { date: string; mode: number; reference: string } }
+  | { cancelled: { at: string; reason: string } };
+
 /**
  * Dues BravyNix has raised, numbered from the start of the financial year 2026-27 so the first due raised live in the
- * demo is number 4. Each one names the rate seeded for its Institution, so the amounts are exactly what raising it
- * would have given. Paid and cancelled dues arrive with the slice that can pay and cancel them.
+ * demo is number 7. Each one names the rate seeded for its Institution, so the amounts are exactly what raising it
+ * would have given. Two are paid and one is cancelled, so the ledger shows every state.
  */
 export const dues: {
   id: string;
   institution: DemoInstitution['code'];
   rateId: string;
   invoiceNo: string;
+  periodStartDate: string;
+  periodEndDate: string;
   studentCount: number;
   studentCountNote: string;
   adjustmentAmount: string;
   adjustmentNote: string | null;
   dueDate: string;
+  outcome?: DueOutcome;
 }[] = [
   {
     id: id(9601),
     institution: 'SVHS',
     rateId: id(9501),
     invoiceNo: 'BNX/FY2026-27/0001',
+    periodStartDate: '2026-04-01',
+    periodEndDate: '2026-09-30',
     studentCount: 300,
     studentCountNote: 'Counted from the admission register',
     adjustmentAmount: '0.00',
     adjustmentNote: null,
     dueDate: '2026-05-15',
+    outcome: { paid: { date: '2026-05-10', mode: 2, reference: 'UTR 4821' } },
   },
   {
     id: id(9602),
+    institution: 'SVHS',
+    rateId: id(9502),
+    invoiceNo: 'BNX/FY2026-27/0002',
+    periodStartDate: '2026-10-01',
+    periodEndDate: '2027-03-31',
+    studentCount: 300,
+    studentCountNote: 'Counted from the admission register',
+    adjustmentAmount: '0.00',
+    adjustmentNote: null,
+    dueDate: '2026-11-15',
+  },
+  {
+    id: id(9603),
     institution: 'SVPS',
     rateId: id(9503),
-    invoiceNo: 'BNX/FY2026-27/0002',
+    invoiceNo: 'BNX/FY2026-27/0003',
+    periodStartDate: '2026-04-01',
+    periodEndDate: '2027-03-31',
     studentCount: 180,
     studentCountNote: 'Counted from the admission register',
     adjustmentAmount: '-100.00',
@@ -208,15 +234,45 @@ export const dues: {
     dueDate: '2026-05-15',
   },
   {
-    id: id(9603),
+    id: id(9604),
     institution: 'LPS',
     rateId: id(9504),
-    invoiceNo: 'BNX/FY2026-27/0003',
+    invoiceNo: 'BNX/FY2026-27/0004',
+    periodStartDate: '2026-04-01',
+    periodEndDate: '2026-09-30',
     studentCount: 250,
     studentCountNote: 'Counted from the admission register',
     adjustmentAmount: '0.00',
     adjustmentNote: null,
     dueDate: '2026-05-15',
+    outcome: { paid: { date: '2026-05-12', mode: 3, reference: 'UPI 90417' } },
+  },
+  {
+    id: id(9605),
+    institution: 'LPS',
+    rateId: id(9504),
+    invoiceNo: 'BNX/FY2026-27/0005',
+    periodStartDate: '2026-10-01',
+    periodEndDate: '2027-03-31',
+    studentCount: 250,
+    studentCountNote: 'Counted from the admission register',
+    adjustmentAmount: '0.00',
+    adjustmentNote: null,
+    dueDate: '2026-11-15',
+  },
+  {
+    id: id(9606),
+    institution: 'SVPS',
+    rateId: id(9503),
+    invoiceNo: 'BNX/FY2026-27/0006',
+    periodStartDate: '2026-04-01',
+    periodEndDate: '2027-03-31',
+    studentCount: 180,
+    studentCountNote: 'Counted from the admission register',
+    adjustmentAmount: '0.00',
+    adjustmentNote: null,
+    dueDate: '2026-05-15',
+    outcome: { cancelled: { at: '2026-04-20T09:30:00+05:30', reason: 'Raised twice by mistake' } },
   },
 ];
 
@@ -320,18 +376,27 @@ export async function writeDemoSeed(db: Kysely<unknown>): Promise<void> {
     if (!rate) throw new Error(`Unknown demo rate ${d.rateId}`);
     // The amounts raising it would give: the count times the rate, then the signed adjustment.
     const { baseAmount, totalAmount } = dueAmounts(d.studentCount, rate.amount, d.adjustmentAmount);
+    const paid = d.outcome && 'paid' in d.outcome ? d.outcome.paid : undefined;
+    const cancelled = d.outcome && 'cancelled' in d.outcome ? d.outcome.cancelled : undefined;
     await sql`
       insert into platform_dues
         (id, society_id, institution_id, invoice_no, period_start_date, period_end_date, student_count_auto,
          student_count, student_count_note, price_rate_id, rate_per_student_amount, base_amount, adjustment_amount,
-         adjustment_note, total_amount, due_date, created_by, updated_by)
-      values (${d.id}, ${societyOf(institution.society).id}, ${institution.id}, ${d.invoiceNo}, '2026-04-01',
-        '2027-03-31', 0, ${d.studentCount}, ${d.studentCountNote}, ${d.rateId}, ${rate.amount}, ${baseAmount},
-        ${d.adjustmentAmount}, ${d.adjustmentNote}, ${totalAmount}, ${d.dueDate}, ${superAdmin.id}, ${superAdmin.id})
+         adjustment_note, total_amount, due_date, due_status, paid_date, payment_mode, payment_reference,
+         cancelled_at, cancelled_by, cancel_reason, created_by, updated_by)
+      values (${d.id}, ${societyOf(institution.society).id}, ${institution.id}, ${d.invoiceNo}, ${d.periodStartDate},
+        ${d.periodEndDate}, 0, ${d.studentCount}, ${d.studentCountNote}, ${d.rateId}, ${rate.amount}, ${baseAmount},
+        ${d.adjustmentAmount}, ${d.adjustmentNote}, ${totalAmount}, ${d.dueDate},
+        ${paid ? DueStatus.Paid : cancelled ? DueStatus.Cancelled : DueStatus.Due},
+        ${paid?.date ?? null}, ${paid?.mode ?? null}, ${paid?.reference ?? null},
+        ${cancelled?.at ?? null}, ${cancelled ? superAdmin.id : null}, ${cancelled?.reason ?? null},
+        ${superAdmin.id}, ${superAdmin.id})
       on conflict (id) do nothing
     `.execute(db);
   }
-  // The counter continues after the seeded dues; a counter that already moved on is left alone.
+  // The counter continues after the seeded dues; a counter that already moved on is left alone (a counter only ever
+  // steps up by one). A database seeded before the six dues (three, counter at 4) must be reset with `npm run demo:reset`,
+  // not seeded again, or live raises would meet the numbers 0004 to 0006.
   await sql`
     insert into number_sequences (sequence_type, period_key, prefix, next_value)
     values (3, ${DEMO_INVOICE_YEAR.key}, ${DEMO_INVOICE_YEAR.prefix}, ${DEMO_INVOICE_YEAR.next})

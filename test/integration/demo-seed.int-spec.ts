@@ -144,23 +144,98 @@ describe('the demo seed', () => {
     });
   });
 
-  it('raises three dues, numbered from 1, with the amounts the rate gives, and the next live due is number 4', async () => {
+  it('raises six dues, numbered from 1, with the amounts the rate gives and every state shown, and the next live due is number 7', async () => {
     await withDemo(2, async (tx) => {
-      const rows = await sql<{ invoice: string; code: string; total: string; rate: string }>`
-        select d.invoice_no as invoice, i.code, d.total_amount as total, d.rate_per_student_amount as rate
+      const rows = await sql<{
+        invoice: string;
+        code: string;
+        start: string;
+        total: string;
+        rate: string;
+        status: number;
+        paid: string | null;
+        mode: number | null;
+        reference: string | null;
+        cancelled: boolean;
+        reason: string | null;
+      }>`
+        select d.invoice_no as invoice, i.code, d.period_start_date as start, d.total_amount as total,
+          d.rate_per_student_amount as rate, d.due_status as status, d.paid_date as paid,
+          d.payment_mode as mode, d.payment_reference as reference,
+          d.cancelled_by is not null and d.cancelled_at is not null as cancelled, d.cancel_reason as reason
         from platform_dues d join institutions i on i.id = d.institution_id
         where d.id in (${sql.join(dues.map((d) => sql`${d.id}`))})
         order by d.invoice_no
       `.execute(tx);
+      const open = { paid: null, mode: null, reference: null, cancelled: false, reason: null };
       expect(rows.rows).toEqual([
-        { invoice: 'BNX/FY2026-27/0001', code: 'SVHS', total: '18000.00', rate: '60.00' },
-        { invoice: 'BNX/FY2026-27/0002', code: 'SVPS', total: '8000.00', rate: '45.00' },
-        { invoice: 'BNX/FY2026-27/0003', code: 'LPS', total: '13750.00', rate: '55.00' },
+        {
+          ...open,
+          invoice: 'BNX/FY2026-27/0001',
+          code: 'SVHS',
+          start: '2026-04-01',
+          total: '18000.00',
+          rate: '60.00',
+          status: 2,
+          paid: '2026-05-10',
+          mode: 2,
+          reference: 'UTR 4821',
+        },
+        {
+          ...open,
+          invoice: 'BNX/FY2026-27/0002',
+          code: 'SVHS',
+          start: '2026-10-01',
+          total: '19500.00',
+          rate: '65.00',
+          status: 1,
+        },
+        {
+          ...open,
+          invoice: 'BNX/FY2026-27/0003',
+          code: 'SVPS',
+          start: '2026-04-01',
+          total: '8000.00',
+          rate: '45.00',
+          status: 1,
+        },
+        {
+          ...open,
+          invoice: 'BNX/FY2026-27/0004',
+          code: 'LPS',
+          start: '2026-04-01',
+          total: '13750.00',
+          rate: '55.00',
+          status: 2,
+          paid: '2026-05-12',
+          mode: 3,
+          reference: 'UPI 90417',
+        },
+        {
+          ...open,
+          invoice: 'BNX/FY2026-27/0005',
+          code: 'LPS',
+          start: '2026-10-01',
+          total: '13750.00',
+          rate: '55.00',
+          status: 1,
+        },
+        {
+          ...open,
+          invoice: 'BNX/FY2026-27/0006',
+          code: 'SVPS',
+          start: '2026-04-01',
+          total: '8100.00',
+          rate: '45.00',
+          status: 0,
+          cancelled: true,
+          reason: 'Raised twice by mistake',
+        },
       ]);
       const counter = await sql<{ next: number }>`
         select next_value as next from number_sequences
         where sequence_type = 3 and period_key = 'FY2026-27'`.execute(tx);
-      expect(counter.rows).toEqual([{ next: 4 }]);
+      expect(counter.rows).toEqual([{ next: 7 }]);
     });
   });
 

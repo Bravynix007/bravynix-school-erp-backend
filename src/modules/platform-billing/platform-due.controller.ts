@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiHeader, ApiTags } from '@nestjs/swagger';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { CurrentPrincipal } from '../../common/auth/current-principal.decorator.js';
@@ -6,11 +6,18 @@ import { superAdminPolicy } from '../../common/auth/platform-policy.js';
 import type { ApiResult } from '../../common/http/api-result.js';
 import { UuidParamPipe } from '../../common/http/uuid-param.pipe.js';
 import { IDEMPOTENCY_HEADER } from '../../platform/idempotency/index.js';
-import { DueQuoteQueryDto, ListDuesQueryDto, RaiseDueDto } from './due.dto.js';
+import {
+  CancelDueDto,
+  DueQuoteQueryDto,
+  ListDuesQueryDto,
+  MarkDuePaidDto,
+  RaiseDueDto,
+  UpdateDueDto,
+} from './due.dto.js';
 import type { DueQuote, DueResource, DueSummary } from './due.resource.js';
 import { DueService } from './due.service.js';
 
-/** PLT-24 to PLT-27: Super Admin quotes, raises and reads the dues of Institutions (PRD 9.3). */
+/** PLT-24 to PLT-30: Super Admin quotes, raises, reads, edits, settles and cancels the dues of Institutions (PRD 9.3). */
 @ApiTags('Platform: Dues')
 @Controller('platform')
 export class PlatformDueController {
@@ -62,5 +69,35 @@ export class PlatformDueController {
     @Param('dueId', UuidParamPipe) dueId: string,
   ): Promise<DueResource> {
     return this.dues.get(principal, dueId);
+  }
+
+  @superAdminPolicy('PLT-28', 'Edits a due while it is still Due; the amounts are worked out again')
+  @Patch('dues/:dueId')
+  edit(
+    @CurrentPrincipal() principal: Principal,
+    @Param('dueId', UuidParamPipe) dueId: string,
+    @Body() body: UpdateDueDto,
+  ): Promise<DueResource> {
+    return this.dues.edit(principal, dueId, body);
+  }
+
+  @superAdminPolicy('PLT-29', 'Records the payment of a due: the date, the mode and a reference')
+  @Post('dues/:dueId/mark-paid')
+  markPaid(
+    @CurrentPrincipal() principal: Principal,
+    @Param('dueId', UuidParamPipe) dueId: string,
+    @Body() body: MarkDuePaidDto,
+  ): Promise<DueResource> {
+    return this.dues.markPaid(principal, dueId, body);
+  }
+
+  @superAdminPolicy('PLT-30', 'Cancels a due that is still Due, with a reason')
+  @Post('dues/:dueId/cancel')
+  cancel(
+    @CurrentPrincipal() principal: Principal,
+    @Param('dueId', UuidParamPipe) dueId: string,
+    @Body() body: CancelDueDto,
+  ): Promise<DueResource> {
+    return this.dues.cancel(principal, dueId, body);
   }
 }

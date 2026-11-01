@@ -16,8 +16,9 @@ export async function readAuditRows<T>(
     .transaction()
     .execute(async (trx) => {
       await sql`alter table audit_logs no force row level security`.execute(trx);
-      found = (await sql`select * from audit_logs where ${where} order by created_at`.execute(trx))
-        .rows as T[];
+      found = (
+        await sql`select * from audit_logs where ${where} order by created_at, id`.execute(trx)
+      ).rows as T[];
       throw new Error(ROLLBACK);
     })
     .catch((error: unknown) => {

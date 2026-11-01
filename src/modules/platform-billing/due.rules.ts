@@ -1,6 +1,6 @@
 import { HttpStatus } from '@nestjs/common';
 import { AppException } from '../../common/http/app-exception.js';
-import { FieldErrorCode } from '../../common/http/error-codes.js';
+import { ErrorCode, FieldErrorCode } from '../../common/http/error-codes.js';
 import { fieldError } from '../../common/validation/field-error.js';
 import { rateInForce, type DatedRate } from './price-rate.rules.js';
 
@@ -21,6 +21,9 @@ export const STUDENT_COUNT_AUTO = 0;
 /** A due's state (DDD 9.10). */
 export const DueStatus = { Cancelled: 0, Due: 1, Paid: 2 } as const;
 export type DueStatus = (typeof DueStatus)[keyof typeof DueStatus];
+
+/** How a due was paid (PRD 11.4): 1 Cash, 2 Bank transfer, 3 UPI, 4 Cheque. */
+export const PAYMENT_MODES = [1, 2, 3, 4] as const;
 
 /** The largest amount the money columns hold: numeric(12,2). */
 const MAX_CENTS = 999_999_999_999n;
@@ -44,6 +47,18 @@ export function fromCents(cents: bigint): string {
 export function requirePeriod(periodStartDate: string, periodEndDate: string): void {
   if (periodEndDate < periodStartDate) {
     throw AppException.validation([fieldError('periodEndDate', FieldErrorCode.OUT_OF_RANGE)]);
+  }
+}
+
+/** Only a due that is still Due can be edited, paid or cancelled: Paid and Cancelled are final, else 409 `INVALID_STATE`. */
+export function requireDue(status: number): void {
+  if (status !== DueStatus.Due) throw AppException.conflict(ErrorCode.INVALID_STATE);
+}
+
+/** Money cannot have arrived tomorrow: the paid date is today (India) or earlier, else 400 on `paidDate`. */
+export function requirePaidByToday(paidDate: string, today: string): void {
+  if (paidDate > today) {
+    throw AppException.validation([fieldError('paidDate', FieldErrorCode.OUT_OF_RANGE)]);
   }
 }
 

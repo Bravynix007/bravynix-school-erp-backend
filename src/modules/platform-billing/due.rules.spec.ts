@@ -2,8 +2,11 @@ import { AppException } from '../../common/http/app-exception.js';
 import {
   dueAmounts,
   fromCents,
+  PAYMENT_MODES,
   rateAtPeriodStart,
+  requireDue,
   requireNotes,
+  requirePaidByToday,
   requirePeriod,
   rupees,
   toCents,
@@ -147,5 +150,35 @@ describe('rupees', () => {
     ['1234567.50', '₹12,34,567.50'],
   ])('writes %s as %s', (amount, text) => {
     expect(rupees(amount)).toBe(text);
+  });
+});
+
+describe('requireDue', () => {
+  it('lets a due that is still Due through', () => {
+    expect(() => requireDue(1)).not.toThrow();
+  });
+
+  it.each([0, 2])('refuses status %i, which is final, with 409 INVALID_STATE', (status) => {
+    const error = refusal(() => requireDue(status));
+    expect([error.status, error.code]).toEqual([409, 'INVALID_STATE']);
+  });
+});
+
+describe('requirePaidByToday', () => {
+  it('takes today and any day before it', () => {
+    expect(() => requirePaidByToday('2026-11-01', '2026-11-01')).not.toThrow();
+    expect(() => requirePaidByToday('2026-05-10', '2026-11-01')).not.toThrow();
+  });
+
+  it('refuses a day to come with 400 OUT_OF_RANGE on paidDate', () => {
+    const error = refusal(() => requirePaidByToday('2026-11-02', '2026-11-01'));
+    expect(error.status).toBe(400);
+    expect(fields(error)).toEqual([['paidDate', 'OUT_OF_RANGE']]);
+  });
+});
+
+describe('PAYMENT_MODES', () => {
+  it('are cash, bank transfer, UPI and cheque (PRD 11.4)', () => {
+    expect(PAYMENT_MODES).toEqual([1, 2, 3, 4]);
   });
 });

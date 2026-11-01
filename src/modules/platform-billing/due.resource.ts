@@ -1,4 +1,5 @@
 import {
+  authorOf,
   authorStamps,
   type AuthorRef,
   type AuthorStamps,
@@ -34,6 +35,7 @@ export interface DueResource extends DueSummary, AuthorStamps {
   paymentMode: number | null;
   paymentReference: string | null;
   cancelledAt: string | null;
+  cancelledBy: AuthorRef | null;
   cancelReason: string | null;
   version: number;
 }
@@ -86,6 +88,7 @@ export function dueResource(
     paymentMode: row.payment_mode,
     paymentReference: row.payment_reference,
     cancelledAt: row.cancelled_at?.toISOString() ?? null,
+    cancelledBy: row.cancelled_by === null ? null : authorOf(row.cancelled_by, people),
     cancelReason: row.cancel_reason,
     version: row.version,
     ...authorStamps(row, people),
