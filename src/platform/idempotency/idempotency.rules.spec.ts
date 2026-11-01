@@ -54,6 +54,27 @@ describe('fingerprintOf', () => {
     expect(fingerprintOf('op', first).equals(fingerprintOf('op', second))).toBe(false);
   });
 
+  it('reads a date as its ISO text, so two different dates differ and one date is stable', () => {
+    const a = fingerprintOf('op', { from: new Date('2026-04-01T00:00:00Z') });
+    expect(a.equals(fingerprintOf('op', { from: new Date('2026-04-01T00:00:00Z') }))).toBe(true);
+    expect(a.equals(fingerprintOf('op', { from: new Date('2026-05-01T00:00:00Z') }))).toBe(false);
+    expect(a.equals(fingerprintOf('op', { from: '2026-04-01T00:00:00.000Z' }))).toBe(true);
+  });
+
+  it.each([new Map([[1, 2]]), new Set([1])])(
+    'refuses a Map or a Set, which would otherwise read as {}',
+    (odd) => {
+      expect(() => fingerprintOf('op', { odd })).toThrow(TypeError);
+    },
+  );
+
+  it('reads a class instance, such as a validated body, as its own fields', () => {
+    class Body {
+      label = 'a';
+    }
+    expect(fingerprintOf('op', new Body()).equals(fingerprintOf('op', { label: 'a' }))).toBe(true);
+  });
+
   it('differs when the operation does', () => {
     expect(fingerprintOf('one', {}).equals(fingerprintOf('two', {}))).toBe(false);
   });
@@ -77,6 +98,11 @@ describe('isStorableRefusal', () => {
 
   it.each([400, 401, 403, 404, 423, 429, 500, 503])('does not keep a %i', (status) => {
     expect(isStorableRefusal(refusal(status))).toBe(false);
+  });
+
+  it('does not keep a refusal that says to try again: it is retried with the same key', () => {
+    const busy = new AppException(HttpStatus.CONFLICT, 'RESOURCE_BUSY', { retryAfterSeconds: 2 });
+    expect(isStorableRefusal(busy)).toBe(false);
   });
 
   it('does not keep the key’s own refusals, or an error that is not an AppException', () => {

@@ -6,11 +6,13 @@ import { sql, type Kysely } from 'kysely';
  * counters behind receipt, enquiry and platform invoice numbers.
  *
  * `idempotency_keys` has no tenant column: a key belongs to the person who sent
- * it, and its row-level security lets a person read and write only their own
+ * it, and row-level security lets a person read and write only their own
  * (DDD 15.3, the person family), because the stored answers will hold dues,
- * invoices and receipts. Super Admin may also read and delete any: Postgres
- * needs read access for a DELETE with a WHERE clause, and the hourly sweep
- * runs as the platform. A stored answer lives for 24 hours.
+ * invoices and receipts. Nobody else reads them, Super Admin included. The
+ * hourly sweep is a maintenance function that runs as the table owner, who is
+ * not bound by the policies (the table is not FORCEd for that reason; the app
+ * role is not the owner, so it is always bound). It deletes only answers past
+ * their 24 hours, by the database clock.
  *
  * `number_sequences` rows are never deleted. Platform invoices (type 3) belong
  * to no Society, so only Super Admin may touch them; receipts and enquiries
@@ -36,10 +38,9 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`create index ix_idempotency_keys_expires on idempotency_keys (expires_at)`.execute(db);
 
   await sql`alter table idempotency_keys enable row level security`.execute(db);
-  await sql`alter table idempotency_keys force row level security`.execute(db);
   await sql`
     create policy idempotency_keys_select on idempotency_keys for select
-      using (user_id = app_current_person_id() or app_is_super_admin())
+      using (user_id = app_current_person_id())
   `.execute(db);
   await sql`
     create policy idempotency_keys_insert on idempotency_keys for insert
@@ -47,8 +48,21 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   `.execute(db);
   await sql`
     create policy idempotency_keys_delete on idempotency_keys for delete
-      using (user_id = app_current_person_id() or app_is_super_admin())
+      using (user_id = app_current_person_id())
   `.execute(db);
+  await sql`
+    create function maintenance.sweep_idempotency_keys() returns bigint
+    language sql
+    security definer
+    set search_path = pg_catalog, pg_temp
+    as $$
+      with removed as (
+        delete from public.idempotency_keys where expires_at <= now() returning 1
+      )
+      select count(*) from removed
+    $$
+  `.execute(db);
+  await sql`revoke all on function maintenance.sweep_idempotency_keys() from public`.execute(db);
 
   await sql`
     create table number_sequences (
@@ -70,6 +84,24 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       constraint ck_number_sequences_next check (next_value >= 1),
       constraint uq_number_sequences_scope unique nulls not distinct (sequence_type, institution_id, period_key)
     )
+  `.execute(db);
+  // The app role may update next_value, but only to hand out the next number:
+  // a rewind would reissue a number, a jump would leave a gap.
+  await sql`
+    create function number_sequences_step() returns trigger
+    language plpgsql as $$
+    begin
+      if new.next_value <> old.next_value + 1 then
+        raise exception 'number_sequences.next_value moves up by exactly one'
+          using errcode = 'check_violation';
+      end if;
+      return new;
+    end;
+    $$
+  `.execute(db);
+  await sql`
+    create trigger trg_number_sequences_step before update on number_sequences
+      for each row execute function number_sequences_step()
   `.execute(db);
   await sql`
     create trigger trg_number_sequences_updated before update on number_sequences
@@ -108,6 +140,13 @@ export async function up(db: Kysely<unknown>): Promise<void> {
         grant update (next_value, updated_at) on table number_sequences to erp_app;
         -- A stored answer is never edited; the hourly sweep deletes it.
         revoke update, truncate on table idempotency_keys from erp_app;
+        -- The sweep only removes answers past their time, so the app may run it.
+        grant usage on schema maintenance to erp_app;
+        grant execute on function maintenance.sweep_idempotency_keys() to erp_app;
+      end if;
+      if exists (select 1 from pg_roles where rolname = 'erp_platform') then
+        grant usage on schema maintenance to erp_platform;
+        grant execute on function maintenance.sweep_idempotency_keys() to erp_platform;
       end if;
     end;
     $$
@@ -120,5 +159,7 @@ export async function down(db: Kysely<unknown>): Promise<void> {
     throw new Error('Refusing to drop number_sequences in production: it holds issued numbers');
   }
   await sql`drop table if exists number_sequences`.execute(db);
+  await sql`drop function if exists number_sequences_step()`.execute(db);
+  await sql`drop function if exists maintenance.sweep_idempotency_keys()`.execute(db);
   await sql`drop table if exists idempotency_keys`.execute(db);
 }

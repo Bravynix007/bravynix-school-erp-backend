@@ -12,8 +12,7 @@ const key = '00000000-0000-4000-8000-000000000001';
 const tx = {} as Tx;
 
 const call = (overrides: Partial<IdempotentCall> = {}): IdempotentCall => ({
-  tenant: { roleCode: 1 },
-  person: 'person-1',
+  tenant: { roleCode: 1, personId: 'person-1' },
   key,
   operation: 'billing.raise_due',
   request: { institutionId: 'inst-1' },
@@ -223,6 +222,6 @@ describe('IdempotencyService.run', () => {
   it('sweeps the answers past their time and says how many went', async () => {
     const t = build();
     await expect(t.service.sweepExpired()).resolves.toBe(3);
-    expect(t.removeExpired).toHaveBeenCalledWith(tx, new Date(now));
+    expect(t.removeExpired).toHaveBeenCalledWith(tx);
   });
 });

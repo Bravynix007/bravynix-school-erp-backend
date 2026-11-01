@@ -22,10 +22,20 @@ export function parseIdempotencyKey(raw: string | string[] | undefined): string 
   return raw.trim().toLowerCase();
 }
 
-/** JSON with every object's keys in order, so the same request always reads the same. */
+/**
+ * JSON with every object's keys in order, so the same request always reads the same. An object that
+ * knows its JSON (a Date, for one) is read as that; a class instance, such as a validated body DTO,
+ * is read as its own fields. A Map or a Set would silently read as `{}` and make two different
+ * requests look the same, so they are refused.
+ */
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (value instanceof Map || value instanceof Set) {
+    throw new TypeError('An idempotent request cannot hold a Map or a Set');
+  }
   if (value !== null && typeof value === 'object') {
+    const { toJSON } = value as { toJSON?: () => unknown };
+    if (typeof toJSON === 'function') return canonical(toJSON.call(value));
     const entries = Object.entries(value as Record<string, unknown>)
       .filter(([, v]) => v !== undefined)
       .toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
@@ -47,12 +57,14 @@ export function fingerprintOf(operation: string, request: unknown): Buffer {
  * Only results a client must not repeat are stored: success answers and
  * refusals of the request's meaning (409 and 422), never a 400, 401, 403, 429 or
  * 5xx, which can change once the cause is fixed. The key's own refusals are
- * not stored either.
+ * not stored either, nor a refusal that says to try again (`retryAfterSeconds`,
+ * such as RESOURCE_BUSY): API design 14.4 retries it with the same key.
  */
 export function isStorableRefusal(error: unknown): error is AppException {
   return (
     error instanceof AppException &&
     (error.status === HttpStatus.CONFLICT || error.status === HttpStatus.UNPROCESSABLE_ENTITY) &&
-    !error.code.startsWith('IDEMPOTENCY_')
+    !error.code.startsWith('IDEMPOTENCY_') &&
+    error.options.retryAfterSeconds === undefined
   );
 }

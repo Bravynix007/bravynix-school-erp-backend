@@ -12,7 +12,8 @@ export class IdempotencyRepository {
   /**
    * Takes the right to run this person's request with this key, held until the
    * transaction ends. `false` means another request holds it: the first one
-   * is still running.
+   * is still running. The caller reads the stored answer after this, which relies on READ COMMITTED
+   * (the default): a snapshot taken before the first request committed would not see its answer.
    */
   async claim(tx: Tx, person: string, key: string): Promise<boolean> {
     const { rows } = await sql<{ claimed: boolean }>`
@@ -47,12 +48,14 @@ export class IdempotencyRepository {
       .execute();
   }
 
-  /** The hourly sweep: deletes every answer past its 24 hours and says how many. */
-  async removeExpired(tx: Tx, now: Date): Promise<number> {
-    const result = await tx
-      .deleteFrom('idempotency_keys')
-      .where('expires_at', '<=', now)
-      .executeTakeFirst();
-    return Number(result.numDeletedRows);
+  /**
+   * The hourly sweep: deletes every answer past its 24 hours (by the database clock) and says
+   * how many. It is a maintenance function because the policies let a person touch only their own.
+   */
+  async removeExpired(tx: Tx): Promise<number> {
+    const { rows } = await sql<{ removed: number }>`
+      select maintenance.sweep_idempotency_keys() as removed
+    `.execute(tx);
+    return Number(rows[0]!.removed);
   }
 }

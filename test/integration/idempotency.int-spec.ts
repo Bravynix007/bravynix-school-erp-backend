@@ -37,7 +37,9 @@ describe('Idempotency-Key and gap-free invoice numbers (API design 14, DDD 9.1)'
   const clearState = () =>
     ownerDb.transaction().execute(async (tx) => {
       await sql`select set_config('app.role_code', '1', true)`.execute(tx);
-      await sql`delete from number_sequences where sequence_type = 3`.execute(tx);
+      await sql`delete from number_sequences where sequence_type = 3 or period_key = 'KT'`.execute(
+        tx,
+      );
       await sql`delete from idempotency_keys`.execute(tx);
     });
 
@@ -70,28 +72,36 @@ describe('Idempotency-Key and gap-free invoice numbers (API design 14, DDD 9.1)'
     });
   };
 
-  /** Makes every stored answer 25 hours old. There is no update policy, so the owner steps around row-level security for this one write. */
+  /** Makes every stored answer 25 hours old. The table owner is not bound by the policies, so it can edit and count. */
   const ageStoredAnswers = () =>
-    ownerDb.transaction().execute(async (tx) => {
-      await sql`alter table idempotency_keys no force row level security`.execute(tx);
-      await sql`update idempotency_keys set created_at = now() - interval '25 hours',
-        expires_at = now() - interval '1 hour'`.execute(tx);
-      await sql`alter table idempotency_keys force row level security`.execute(tx);
-    });
+    sql`update idempotency_keys set created_at = now() - interval '25 hours',
+      expires_at = now() - interval '1 hour'`.execute(ownerDb);
 
-  /** How many answers are stored. Row-level security applies to the table owner too, so count per person. */
-  const stored = async () => {
-    let total = 0;
-    for (const person of [first.id, second.id]) {
-      total += await ownerDb.transaction().execute(async (tx) => {
-        await sql`select set_config('app.person_id', ${person}, true)`.execute(tx);
-        return (
-          await sql<{ n: number }>`select count(*)::int as n from idempotency_keys`.execute(tx)
-        ).rows[0]!.n;
-      });
-    }
-    return total;
+  const stored = async () =>
+    (await sql<{ n: number }>`select count(*)::int as n from idempotency_keys`.execute(ownerDb))
+      .rows[0]!.n;
+
+  /** Two Institutions of one Society, from the seeded data. */
+  const twoInstitutions = async () => {
+    const rows = await ownerDb.transaction().execute(async (tx) => {
+      await sql`select set_config('app.role_code', '1', true)`.execute(tx);
+      return sql<{ id: string; society_id: string }>`
+          select id, society_id from institutions
+          where society_id = (
+            select society_id from institutions group by society_id having count(*) >= 2 limit 1)
+          order by id limit 2`.execute(tx);
+    });
+    const [a, b] = rows.rows;
+    return { society: a!.society_id, mine: a!.id, sibling: b!.id };
   };
+  const insertCounter = (
+    tenantOf: object,
+    row: { society: string | null; institution: string | null },
+  ) =>
+    database.transaction(tenantOf, (tx) =>
+      sql`insert into number_sequences (sequence_type, society_id, institution_id, period_key, prefix)
+          values (1, ${row.society}, ${row.institution}, 'KT', 'P/')`.execute(tx),
+    );
 
   beforeAll(async () => {
     await runMigrations(migrationUrl, 'latest');
@@ -162,8 +172,8 @@ describe('Idempotency-Key and gap-free invoice numbers (API design 14, DDD 9.1)'
 
     it('does not care in what order the body’s fields come', async () => {
       const key = newId();
-      await call('plain', key, { label: 'a' });
-      const again = await call('plain', key, { label: 'a' });
+      await call('plain', key, { label: 'a', note: 'b' });
+      const again = await call('plain', key, { note: 'b', label: 'a' });
       expect(again.headers['idempotent-replayed']).toBe('true');
     });
 
@@ -332,22 +342,26 @@ describe('Idempotency-Key and gap-free invoice numbers (API design 14, DDD 9.1)'
       }
     });
 
-    it('keeps a stored answer to the person who made it: an Owner cannot read, write as them or delete it', async () => {
+    it('keeps a stored answer to the person who made it: nobody else reads it, deletes it or writes as them', async () => {
       await call('plain', newId());
+      const other = { personId: second.id, roleCode: 1 as const };
       const owner = { personId: newId(), societyId: newId(), roleCode: 2 as const };
-      for (const tenantOf of [owner, {}]) {
+      for (const tenantOf of [other, owner, {}]) {
         const seen = await database.transaction(tenantOf, (tx) =>
           sql`select user_id from idempotency_keys`.execute(tx),
         );
         expect(seen.rows).toEqual([]);
+        const deleted = await database.transaction(tenantOf, (tx) =>
+          sql`delete from idempotency_keys`.execute(tx),
+        );
+        expect(deleted.numAffectedRows).toBe(0n);
       }
       const mine = await database.transaction(tenant, (tx) =>
         sql`select user_id from idempotency_keys`.execute(tx),
       );
       expect(mine.rows).toHaveLength(1);
-      // Writing a row in another person's name is refused, whoever asks.
       await expect(
-        database.transaction({ ...tenant, personId: second.id }, (tx) =>
+        database.transaction(other, (tx) =>
           sql`insert into idempotency_keys
               (user_id, idempotency_key, operation, request_fingerprint, response_status, response_body, expires_at)
             values (${first.id}, ${newId()}, 'x', '\\x00', 201, '{}', now() + interval '1 hour')`.execute(
@@ -355,11 +369,67 @@ describe('Idempotency-Key and gap-free invoice numbers (API design 14, DDD 9.1)'
           ),
         ),
       ).rejects.toThrow(/row-level security/);
-      const ownerDelete = await database.transaction(owner, (tx) =>
-        sql`delete from idempotency_keys`.execute(tx),
-      );
-      expect(ownerDelete.numAffectedRows).toBe(0n);
       expect(await stored()).toBe(1);
+    });
+
+    it('lets the app run the sweep, which removes only the answers past their time', async () => {
+      await call('plain', newId());
+      await call('plain', newId());
+      // The sweep reads the database clock, so make the first answer old and the second live.
+      await sql`update idempotency_keys set expires_at = now() + interval '1 hour'`.execute(
+        ownerDb,
+      );
+      await sql`update idempotency_keys set expires_at = now() - interval '1 minute'
+        where ctid = (select ctid from idempotency_keys limit 1)`.execute(ownerDb);
+      expect(await t.app.get(IdempotencyService).sweepExpired()).toBe(1);
+      expect(await stored()).toBe(1);
+    });
+
+    it('lets an Institution Admin start a counter only for an Institution of their own', async () => {
+      const { society, mine, sibling } = await twoInstitutions();
+      const admin = {
+        personId: newId(),
+        roleCode: 3,
+        societyId: society,
+        institutionIds: [mine],
+      };
+      await expect(insertCounter(admin, { society, institution: sibling })).rejects.toThrow(
+        /row-level security/,
+      );
+      await expect(insertCounter(admin, { society: newId(), institution: mine })).rejects.toThrow(
+        /row-level security|foreign key/,
+      );
+      await expect(insertCounter(admin, { society, institution: mine })).resolves.toBeDefined();
+    });
+
+    it('has a Society and an Institution together or neither', async () => {
+      const { society, mine } = await twoInstitutions();
+      await expect(insertCounter(tenant, { society: null, institution: mine })).rejects.toThrow(
+        /ck_number_sequences_scope/,
+      );
+      await expect(insertCounter(tenant, { society, institution: null })).rejects.toThrow(
+        /ck_number_sequences_scope/,
+      );
+    });
+
+    it('hands a number out one step at a time: the app role can neither rewind nor jump a counter', async () => {
+      await call('plain', newId());
+      for (const next of ['1', '500', 'next_value']) {
+        await expect(
+          database.transaction(tenant, (tx) =>
+            sql`update number_sequences set next_value = ${sql.raw(next)} where sequence_type = 3`.execute(
+              tx,
+            ),
+          ),
+        ).rejects.toThrow(/moves up by exactly one/);
+      }
+      await expect(
+        database.transaction(tenant, (tx) =>
+          sql`update number_sequences set next_value = next_value + 1 where sequence_type = 3`.execute(
+            tx,
+          ),
+        ),
+      ).resolves.toBeDefined();
     });
 
     it('keep a platform invoice counter to Super Admin: an Owner reads and writes none', async () => {

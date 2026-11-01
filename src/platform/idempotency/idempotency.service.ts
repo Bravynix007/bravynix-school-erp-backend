@@ -14,9 +14,8 @@ import { IdempotencyRepository, type StoredAnswer } from './idempotency.reposito
 
 /** One call to an operation that needs an `Idempotency-Key` (API design 14.1). */
 export interface IdempotentCall {
-  tenant: TenantContext;
-  /** The signed-in person: keys are scoped to them, so nobody's key shows another's result. */
-  person: string;
+  /** The caller's tenant. Keys are scoped to `personId`, so nobody's key shows another's result. */
+  tenant: TenantContext & { personId: string };
   /** The `Idempotency-Key` header as received. */
   key: string | string[] | undefined;
   /** The name stored with the answer, for example `billing.raise_due`. */
@@ -25,7 +24,10 @@ export interface IdempotentCall {
   request: unknown;
 }
 
-/** What the work produced: the answer to send and the record it made. */
+/**
+ * What the work produced: the answer to send and the record it made. The answer is stored whole for
+ * 24 hours, so it carries nothing the person may not see again.
+ */
 export interface IdempotentOutcome<T> {
   result: ApiResult<T>;
   resourceId?: string;
@@ -73,9 +75,9 @@ export class IdempotencyService {
     const fingerprint = fingerprintOf(call.operation, call.request);
     let replayedRefusal = false;
     try {
-      return await this.database.transaction(this.tenantOf(call), async (tx) => {
-        if (!(await this.answers.claim(tx, call.person, key))) throw inProgress();
-        const stored = await this.stored(tx, call.person, key);
+      return await this.database.transaction(call.tenant, async (tx) => {
+        if (!(await this.answers.claim(tx, call.tenant.personId, key))) throw inProgress();
+        const stored = await this.stored(tx, call.tenant.personId, key);
         if (stored) {
           if (
             stored.operation !== call.operation ||
@@ -116,19 +118,9 @@ export class IdempotencyService {
     }
   }
 
-  /**
-   * The hourly sweep (DDD 14.2), run by the job runner when it exists; says how many answers it removed.
-   * It runs as the platform: row-level security lets Super Admin delete other people's answers.
-   */
+  /** The hourly sweep (DDD 14.2), run by the job runner when it exists; says how many answers it removed. */
   sweepExpired(): Promise<number> {
-    return this.database.transaction({ roleCode: 1 }, (tx) =>
-      this.answers.removeExpired(tx, this.clock.now()),
-    );
-  }
-
-  /** The caller's tenant with the signed-in person set: the policy on stored answers reads it. */
-  private tenantOf(call: IdempotentCall): TenantContext {
-    return { ...call.tenant, personId: call.person };
+    return this.database.transaction({}, (tx) => this.answers.removeExpired(tx));
   }
 
   /** An answer past its 24 hours counts as none, and is cleared so the key can be used again. */
@@ -153,8 +145,8 @@ export class IdempotencyService {
     error: AppException,
   ): Promise<void> {
     try {
-      await this.database.transaction(this.tenantOf(call), async (tx) => {
-        if (!(await this.answers.claim(tx, call.person, key))) return;
+      await this.database.transaction(call.tenant, async (tx) => {
+        if (!(await this.answers.claim(tx, call.tenant.personId, key))) return;
         await this.answers.insert(
           tx,
           this.row(call, key, fingerprint, undefined, {
@@ -183,7 +175,7 @@ export class IdempotencyService {
   ) {
     const now = this.clock.now();
     return {
-      user_id: call.person,
+      user_id: call.tenant.personId,
       idempotency_key: key,
       operation: call.operation,
       request_fingerprint: fingerprint,

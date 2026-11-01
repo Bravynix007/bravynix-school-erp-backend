@@ -245,6 +245,11 @@ class IdempotentBodyDto {
   @IsString()
   @MaxLength(20)
   label?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  note?: string;
 }
 
 /** What the idempotent fixture saw, so a test can tell a replay from a second run. */
@@ -287,7 +292,6 @@ class IdempotentFixtureController {
     return this.idempotency.run(
       {
         tenant: platformTenant(principal),
-        person: principal.personId,
         key,
         operation: 'fixtures.idempotent',
         request: { mode, body },
