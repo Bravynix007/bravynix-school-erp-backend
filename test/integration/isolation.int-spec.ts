@@ -208,7 +208,7 @@ describe('tenant isolation', () => {
       expect(await seenBy({})).toEqual([]);
     });
 
-    // Rates are Super Admin's alone (PRD 6.5): an Owner or an Admin reads none of them, not even their own.
+    // Rates are Super Admin's alone for now (no endpoint shows an Owner a rate; an Institution Admin never sees pricing, PRD 3.2): an Owner or an Admin reads none of them, not even their own.
     it('shows Super Admin every rate, and an Owner, an admin or a request with no tenant none', async () => {
       const everyone = (await rates({ roleCode: 1 })).map((row) => row.institution_id);
       expect(everyone.toSorted()).toEqual(institutions.map((i) => i.id).toSorted());

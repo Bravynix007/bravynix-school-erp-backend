@@ -6,8 +6,10 @@ import { sql, type Kysely } from 'kysely';
  * earlier keeps the rate it was raised at. Rows are never edited or deleted: a
  * mistake is corrected by a newer row.
  *
- * Only Super Admin reads and writes them. A Society Owner sees the dues
- * BravyNix raises, not the rate behind them (PRD 6.5).
+ * Only Super Admin reads and writes them for now. The PRD lets a Society Owner
+ * view pricing (PRD 3.2, DDD 9.10) and an Institution Admin not see it, but no
+ * V1 endpoint shows an Owner a rate (BIL-01 carries amounts, not the rate), so
+ * the read policy widens to the Society's Owners with the endpoint that needs it.
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`
