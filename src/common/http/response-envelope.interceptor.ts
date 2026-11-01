@@ -52,6 +52,9 @@ export class ResponseEnvelopeInterceptor implements NestInterceptor {
     // The adapter sets the HTTP status from the marked envelope; setting it
     // here too keeps it if a later interceptor copies the body.
     response.status(status);
+    for (const [name, headerValue] of Object.entries(result.options.headers ?? {})) {
+      response.setHeader(name, headerValue);
+    }
     if (!response.getHeader('Cache-Control')) response.setHeader('Cache-Control', 'no-store');
     const code = result.options.code ?? ResultCode.OK;
     return markEnvelope({

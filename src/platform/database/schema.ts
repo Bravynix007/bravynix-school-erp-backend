@@ -11,6 +11,8 @@ import type {
   UserTotpFactorsTable,
   UsersTable,
 } from '../identity/identity.tables.js';
+import type { NumberSequencesTable } from '../numbering/numbering.tables.js';
+import type { IdempotencyKeysTable } from '../idempotency/idempotency.tables.js';
 import type {
   AccessBlocksTable,
   InstitutionsTable,
@@ -37,4 +39,6 @@ export interface Database {
   societies: SocietiesTable;
   institutions: InstitutionsTable;
   access_blocks: AccessBlocksTable;
+  idempotency_keys: IdempotencyKeysTable;
+  number_sequences: NumberSequencesTable;
 }

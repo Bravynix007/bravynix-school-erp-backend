@@ -58,6 +58,8 @@ export class ApiResult<T> {
       code?: string;
       message?: string;
       meta?: ListMeta | null;
+      /** Extra response headers, for example `Idempotent-Replayed`. */
+      headers?: Readonly<Record<string, string>>;
     } = {},
   ) {}
 

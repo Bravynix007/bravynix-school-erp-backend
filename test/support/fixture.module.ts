@@ -1,4 +1,14 @@
-import { Body, Controller, Get, HttpStatus, Module, Param, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  HttpStatus,
+  Module,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common';
 import {
   IsEmail,
   IsInt,
@@ -18,7 +28,9 @@ import { AppException } from '../../src/common/http/app-exception.js';
 import { RawResponse } from '../../src/common/http/raw-response.decorator.js';
 import { PageQueryDto, pageMeta } from '../../src/common/pagination/pagination.js';
 import { Clock } from '../../src/common/time/clock.js';
-import { DatabaseService } from '../../src/platform/database/index.js';
+import { DatabaseService, platformTenant } from '../../src/platform/database/index.js';
+import { IdempotencyModule, IdempotencyService } from '../../src/platform/idempotency/index.js';
+import { NumberingModule, NumberSequenceService } from '../../src/platform/numbering/index.js';
 import { EmailSender } from '../../src/platform/email/email-sender.js';
 import { ScopeService } from '../../src/platform/tenancy/index.js';
 
@@ -228,7 +240,79 @@ class TenantFixtureController {
   }
 }
 
-@Module({ controllers: [FixtureController, TenantFixtureController] })
+class IdempotentBodyDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  label?: string;
+}
+
+/** What the idempotent fixture saw, so a test can tell a replay from a second run. */
+export const idempotentFixture = {
+  runs: 0,
+  attempts: new Map<string, number>(),
+  /** Held open by a `slow` call until the test calls `release`. */
+  gate: undefined as Promise<void> | undefined,
+  release: undefined as (() => void) | undefined,
+  reset(): void {
+    this.runs = 0;
+    this.attempts.clear();
+    this.gate = new Promise<void>((resolve) => {
+      this.release = resolve;
+    });
+  },
+};
+
+/**
+ * A test-only operation built the way a real one is (API design 14): it takes
+ * a platform invoice number inside the idempotent transaction, so a test can
+ * see replays, rollbacks and refusals in the numbers handed out.
+ */
+@Controller('fixtures/idempotent')
+class IdempotentFixtureController {
+  constructor(
+    private readonly idempotency: IdempotencyService,
+    private readonly numbers: NumberSequenceService,
+    private readonly clock: Clock,
+  ) {}
+
+  @Policy({ roles: [RoleCode.SuperAdmin], scope: 'platform', operationId: 'FIX-03' })
+  @Post(':mode')
+  async run(
+    @CurrentPrincipal() principal: Principal,
+    @Headers('idempotency-key') key: string | undefined,
+    @Param('mode') mode: string,
+    @Body() body: IdempotentBodyDto,
+  ): Promise<ApiResult<{ invoiceNo: string }>> {
+    return this.idempotency.run(
+      {
+        tenant: platformTenant(principal),
+        person: principal.personId,
+        key,
+        operation: 'fixtures.idempotent',
+        request: { mode, body },
+      },
+      async (tx) => {
+        idempotentFixture.runs += 1;
+        const attempt = (idempotentFixture.attempts.get(key ?? '') ?? 0) + 1;
+        idempotentFixture.attempts.set(key ?? '', attempt);
+        const invoiceNo = await this.numbers.nextPlatformInvoice(tx, this.clock.todayIst());
+        if (mode === 'slow') await idempotentFixture.gate;
+        if (mode === 'refuse') throw AppException.businessRule('BUSINESS_RULE');
+        if (mode === 'conflict') throw AppException.conflict('DUPLICATE');
+        if (mode === 'invalid') throw AppException.validation([]);
+        // Fails once, after taking a number, then works on the retry.
+        if (mode === 'flaky' && attempt === 1) throw new Error('the database went away');
+        return { result: ApiResult.created({ invoiceNo }), resourceId: undefined };
+      },
+    );
+  }
+}
+
+@Module({
+  imports: [IdempotencyModule, NumberingModule],
+  controllers: [FixtureController, TenantFixtureController, IdempotentFixtureController],
+})
 export class FixtureModule {}
 
 /** A controller that forgets its policy; the app must refuse to start. */
