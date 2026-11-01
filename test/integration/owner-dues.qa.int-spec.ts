@@ -371,12 +371,12 @@ describe('QA: BIL-01 and BIL-02 the Owner view, adversarial (PRD 9.3, API design
       ]);
     });
 
-    it('says what it does for an open due of 0.00', async () => {
+    it('reads all paid for an open due of 0.00, though the due is listed (BravyNix, 1 Nov)', async () => {
       const { institutionId, owner } = await world();
       await raised(institutionId, { studentCount: 0, studentCountNote: null });
-      const { banner } = await ownerList(owner.token);
-      console.log('QA-Q3 banner with only a 0.00 due open:', JSON.stringify(banner));
-      expect(banner.totalDueAmount).toBe('0.00');
+      const { banner, dues } = await ownerList(owner.token);
+      expect(banner).toEqual({ totalDueAmount: '0.00', hasOpenDues: false });
+      expect(dues).toHaveLength(1);
     });
   });
 

@@ -92,13 +92,17 @@ describe('OwnerDueService', () => {
       expect(result.dues.map((line) => line.id)).toEqual(['a', 'b', 'c', 'd']);
     });
 
-    it('says all dues are paid when none is Due, and when there are none at all', async () => {
+    it('reads all paid when nothing is owed: none Due, none at all, or only dues of 0.00', async () => {
       const { service, all } = build();
       all.mockResolvedValue([due({ due_status: 2, paid_date: '2026-05-10', payment_mode: 1 })]);
       expect((await service.list(owner)).banner).toEqual({
         totalDueAmount: '0.00',
         hasOpenDues: false,
       });
+      all.mockResolvedValue([due({ total_amount: '0.00', base_amount: '0.00' })]);
+      const free = await service.list(owner);
+      expect(free.banner).toEqual({ totalDueAmount: '0.00', hasOpenDues: false });
+      expect(free.dues).toHaveLength(1);
       all.mockResolvedValue([]);
       expect(await service.list(owner)).toEqual({
         banner: { totalDueAmount: '0.00', hasOpenDues: false },
