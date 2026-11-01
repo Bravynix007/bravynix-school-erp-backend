@@ -11,7 +11,9 @@ import { PlatformBillingModule } from './modules/platform-billing/index.js';
 import { AuditModule } from './platform/audit/audit.module.js';
 import { DatabaseModule } from './platform/database/database.module.js';
 import { EmailModule } from './platform/email/email.module.js';
+import { IdempotencyModule } from './platform/idempotency/idempotency.module.js';
 import { IdentityModule } from './platform/identity/identity.module.js';
+import { NumberingModule } from './platform/numbering/numbering.module.js';
 import { TenancyModule } from './platform/tenancy/tenancy.module.js';
 
 @Module({
@@ -63,6 +65,8 @@ import { TenancyModule } from './platform/tenancy/tenancy.module.js';
     AuditModule,
     IdentityModule,
     TenancyModule,
+    IdempotencyModule,
+    NumberingModule,
     HealthModule,
     // Platform modules (Files, Notifications, Jobs) are registered here as they are built.
     // Business modules are registered here as they are built.

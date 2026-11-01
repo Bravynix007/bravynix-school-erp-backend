@@ -70,7 +70,7 @@ const tenantTables = async () => {
         and a.attname = 'institution_id' and not a.attisdropped) as "hasInstitution"
     from pg_class c join pg_namespace n on n.oid = c.relnamespace
     where n.nspname = 'public' and c.relkind in ('r', 'p') and not c.relispartition
-      and c.relname <> all (array['role_assignments', 'auth_sessions', 'access_blocks', 'institution_price_rates'])
+      and c.relname <> all (array['role_assignments', 'auth_sessions', 'access_blocks', 'institution_price_rates', 'number_sequences'])
       and (c.relname = 'societies' or exists (
         select 1 from pg_attribute a where a.attrelid = c.oid
           and a.attname ~ '(^|_)(society|institution)_id$' and not a.attisdropped))
@@ -87,6 +87,11 @@ const visible = async (table: string, tenant: TenantContext) => {
 };
 
 const rates = (tenant: TenantContext) => visible('institution_price_rates', tenant);
+
+const counters = (tenant: TenantContext) =>
+  visible('number_sequences', tenant).then((rows) =>
+    rows.map((row) => row.institution_id ?? 'platform').toSorted(),
+  );
 
 const seenBy = async (tenant: TenantContext) =>
   (await visible('access_blocks', tenant)).map((row) => row.society_id);
@@ -206,6 +211,52 @@ describe('tenant isolation', () => {
       );
       expect(await seenBy({ societyId: missing, roleCode: 2 })).toEqual([]);
       expect(await seenBy({})).toEqual([]);
+    });
+
+    // A counter is per Institution for receipts and enquiries, and platform-wide for invoices,
+    // so the generic check above (a row for every role) leaves it out; it is tried here with
+    // one receipt counter in each Institution of each world.
+    it('shows each Institution’s counters only to its own Society, and the platform invoice counter to Super Admin alone', async () => {
+      await ownerDb.transaction().execute(async (tx) => {
+        await sql`select set_config('app.role_code', '1', true)`.execute(tx);
+        await sql`delete from number_sequences`.execute(tx);
+        for (const institution of [a1, a2, b1]) {
+          await sql`insert into number_sequences (sequence_type, society_id, institution_id, period_key, prefix)
+            values (1, ${institution.society === 'A' ? socA.id : socB.id}, ${institution.id}, '2026-2027', 'R/')`.execute(
+            tx,
+          );
+        }
+        await sql`insert into number_sequences (sequence_type, period_key, prefix) values (3, 'FY2026-27', 'BNX/')`.execute(
+          tx,
+        );
+      });
+      try {
+        expect(await counters({ roleCode: 1 })).toEqual(
+          [a1.id, a2.id, b1.id, 'platform'].toSorted(),
+        );
+        expect(
+          await counters({ societyId: socA.id, roleCode: 2, institutionIds: [a1.id, a2.id] }),
+        ).toEqual([a1.id, a2.id].toSorted());
+        expect(
+          await counters({ societyId: socA.id, roleCode: 3, institutionIds: [a1.id] }),
+        ).toEqual([a1.id]);
+        expect(
+          await counters({ societyId: socB.id, roleCode: 2, institutionIds: [b1.id] }),
+        ).toEqual([b1.id]);
+        // Naming another world’s Institution does not reach it.
+        expect(
+          await counters({ societyId: socB.id, roleCode: 2, institutionIds: [a1.id] }),
+        ).toEqual([]);
+        expect(
+          await counters({ societyId: missing, roleCode: 2, institutionIds: [a1.id] }),
+        ).toEqual([]);
+        expect(await counters({})).toEqual([]);
+      } finally {
+        await ownerDb.transaction().execute(async (tx) => {
+          await sql`select set_config('app.role_code', '1', true)`.execute(tx);
+          await sql`delete from number_sequences`.execute(tx);
+        });
+      }
     });
 
     // Rates are Super Admin's alone for now (no endpoint shows an Owner a rate; an Institution Admin never sees pricing, PRD 3.2): an Owner or an Admin reads none of them, not even their own.

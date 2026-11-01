@@ -13,7 +13,7 @@ export function platformTenant(
   principal: Principal,
   societyId?: string,
   institutionIds?: readonly string[],
-): TenantContext {
+): TenantContext & { personId: string } {
   // The policy guard already limits these routes to Super Admin; row-level
   // security would otherwise trust this context, so the role is checked again here.
   if (principal.roleCode !== RoleCode.SuperAdmin) throw AppException.forbidden();
