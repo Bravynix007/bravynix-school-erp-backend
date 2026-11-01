@@ -221,14 +221,25 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return proto === Object.prototype || proto === null;
 }
 
-function trimDeep(value: unknown, path: string, refused: string[]): unknown {
-  if (typeof value === 'string') return value.trim();
+/** Where a request body or query has something the API refuses before validation looks at it. */
+interface Refusals {
+  /** Keys that would be dropped without a word: `__proto__` and its kind. */
+  keys: string[];
+  /** Strings holding U+0000, which PostgreSQL cannot store in text. */
+  text: string[];
+}
+
+function trimDeep(value: unknown, path: string, refused: Refusals): unknown {
+  if (typeof value === 'string') {
+    if (value.includes('\u0000')) refused.text.push(path);
+    return value.trim();
+  }
   if (Array.isArray(value)) return value.map((item, i) => trimDeep(item, `${path}[${i}]`, refused));
   if (isPlainObject(value)) {
     return Object.fromEntries(
       Object.entries(value).map(([key, item]) => {
         const at = path ? `${path}.${key}` : key;
-        if (RESERVED_KEYS.has(key)) refused.push(at);
+        if (RESERVED_KEYS.has(key)) refused.keys.push(at);
         return [key, trimDeep(item, at, refused)];
       }),
     );
@@ -236,22 +247,20 @@ function trimDeep(value: unknown, path: string, refused: string[]): unknown {
   return value;
 }
 
-/**
- * Trims every string in the body and query before validation, and refuses
- * `__proto__`, `constructor` and `prototype` keys (API design 7.4).
- */
 @Injectable()
 export class TrimStringsPipe implements PipeTransform {
   transform(value: unknown, metadata: ArgumentMetadata): unknown {
     if (metadata.type !== 'body' && metadata.type !== 'query') return value;
-    const refused: string[] = [];
+    const refused: Refusals = { keys: [], text: [] };
     const trimmed = trimDeep(value, '', refused);
-    if (refused.length) {
+    if (refused.keys.length || refused.text.length) {
       const language = RequestContext.current()?.language;
-      const code = FieldErrorCode.FIELD_NOT_ALLOWED;
-      throw AppException.validation(
-        refused.map((field) => ({ field, code, message: message(code, language) })),
-      );
+      const refuse = (fields: string[], code: string): FieldError[] =>
+        fields.map((field) => ({ field, code, message: message(code, language) }));
+      throw AppException.validation([
+        ...refuse(refused.keys, FieldErrorCode.FIELD_NOT_ALLOWED),
+        ...refuse(refused.text, FieldErrorCode.INVALID_FORMAT),
+      ]);
     }
     return trimmed;
   }
