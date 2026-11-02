@@ -39,6 +39,14 @@ export interface InstitutionSummary extends InstitutionOption {
   blockedSections: ('staff' | 'students')[];
 }
 
+/** One Institution as Super Admin sees it (PLT-45): the resource, with its Society's name and its blocked sections. */
+export interface PlatformInstitution extends InstitutionResource {
+  societyName: string;
+  /** 1 active, 0 deactivated: the Institution's own `status` stays 1 when its Society is deactivated. */
+  societyStatus: number;
+  blockedSections: ('staff' | 'students')[];
+}
+
 /** Everyone an Institution row names, for one lookup. */
 export function peopleOfInstitutions(rows: readonly InstitutionRow[]): string[] {
   return rows
@@ -84,15 +92,28 @@ export function institutionOption(row: InstitutionRow, people: People): Institut
   };
 }
 
+function blockedSectionsOf(row: InstitutionListRow): ('staff' | 'students')[] {
+  return [
+    ...(row.staff_blocked ? (['staff'] as const) : []),
+    ...(row.students_blocked ? (['students'] as const) : []),
+  ];
+}
+
 export function institutionSummary(row: InstitutionListRow, people: People): InstitutionSummary {
   return {
     ...institutionOption(row, people),
     societyId: row.society_id,
     societyName: row.society_name,
     status: row.status,
-    blockedSections: [
-      ...(row.staff_blocked ? (['staff'] as const) : []),
-      ...(row.students_blocked ? (['students'] as const) : []),
-    ],
+    blockedSections: blockedSectionsOf(row),
+  };
+}
+
+export function platformInstitution(row: InstitutionListRow, people: People): PlatformInstitution {
+  return {
+    ...institutionResource(row, people),
+    societyName: row.society_name,
+    societyStatus: row.society_status,
+    blockedSections: blockedSectionsOf(row),
   };
 }

@@ -31,6 +31,7 @@ const institution = (overrides: Partial<InstitutionRow> = {}): InstitutionRow =>
   status: 1,
   society_id: 'society-1',
   society_name: 'Sunrise',
+  society_status: 1,
   name: 'Green Valley',
   code: 'GVS',
   place: 'Old Town',
@@ -60,6 +61,11 @@ function build(
   const insert = vi.fn<InstitutionRepository['insert']>().mockResolvedValue();
   const activeAmong = vi.fn<InstitutionRepository['activeAmong']>().mockResolvedValue([]);
   const page = vi.fn<InstitutionRepository['page']>().mockResolvedValue({ rows: [], total: 0 });
+  const findWithBlocks = vi
+    .fn<InstitutionRepository['findWithBlocks']>()
+    .mockResolvedValue(
+      current ? { ...current, staff_blocked: false, students_blocked: true } : undefined,
+    );
   const findSociety = vi.fn<SocietyRepository['find']>().mockResolvedValue(society as SocietyRow);
   const record = vi.fn<AuditService['record']>().mockResolvedValue('audit-1');
   const endAdminAccessInInstitution = vi
@@ -83,7 +89,7 @@ function build(
   });
   const service = new InstitutionService(
     { transaction } as unknown as DatabaseService,
-    { find, update, insert, activeAmong, page } as unknown as InstitutionRepository,
+    { find, update, insert, activeAmong, page, findWithBlocks } as unknown as InstitutionRepository,
     { find: findSociety } as unknown as SocietyRepository,
     { requireInstitution, forPrincipal } as unknown as ScopeService,
     {
@@ -101,6 +107,7 @@ function build(
     insert,
     activeAmong,
     page,
+    findWithBlocks,
     record,
     endAdminAccessInInstitution,
     requireInstitution,
@@ -342,6 +349,34 @@ describe('InstitutionService', () => {
     it('answers 404 when the row is gone', async () => {
       const t = build(null);
       expect((await refusal(t.service.get(owner, 'inst-1'))).status).toBe(404);
+    });
+  });
+
+  describe('platformGet (PLT-45)', () => {
+    it('reads any Society’s Institution as Super Admin, with the Society’s name and the blocked sections', async () => {
+      const t = build();
+      const result = await t.service.platformGet(caller(1), 'inst-1');
+      expect(t.transaction).toHaveBeenCalledWith(
+        expect.objectContaining({ personId: 'person-1', roleCode: 1 }),
+        expect.any(Function),
+      );
+      expect(t.findWithBlocks).toHaveBeenCalledWith(t.tx, 'inst-1');
+      expect(result).toMatchObject({
+        id: 'inst-1',
+        societyId: 'society-1',
+        societyName: 'Sunrise',
+        societyStatus: 1,
+        name: 'Green Valley',
+        status: 1,
+        version: 2,
+        blockedSections: ['students'],
+        address: { line1: '12 Lake Road', line2: null, pincode: null },
+      });
+    });
+
+    it('answers 404 when there is no such Institution', async () => {
+      const t = build(null);
+      expect((await refusal(t.service.platformGet(caller(1), 'inst-1'))).status).toBe(404);
     });
   });
 

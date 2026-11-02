@@ -629,6 +629,63 @@ describe('PLT-19 and INS-01 to INS-05 Institutions', () => {
     });
   });
 
+  describe('PLT-45 one Institution', () => {
+    it('shows an Institution of any Society with its Society’s name and blocked sections, also when deactivated', async () => {
+      const societyId = await society();
+      const made = await institution(societyId, {
+        name: 'Green Valley',
+        code: `g-${newId().slice(-8)}`,
+      });
+      await asAdmin('post', '/v1/platform/access-blocks', {
+        section: 'staff',
+        societyId,
+        institutionId: made.id,
+        reason: 'Dues',
+      });
+      const res = await asAdmin('get', `/v1/platform/institutions/${made.id}`);
+      expect(res.status).toBe(200);
+      expect(res.body.data).toMatchObject({
+        id: made.id,
+        societyId,
+        societyName: 'Sunrise Trust',
+        societyStatus: 1,
+        name: 'Green Valley',
+        status: 1,
+        version: 1,
+        blockedSections: ['staff'],
+        address: { line1: expect.any(String) },
+      });
+
+      await asOwner(societyId, 'delete', `/v1/institutions/${made.id}`);
+      const ended = await asAdmin('get', `/v1/platform/institutions/${made.id}`);
+      expect(ended.status).toBe(200);
+      expect(ended.body.data.status).toBe(0);
+    });
+
+    it('shows the Society’s own status, because its Institutions keep theirs when it is deactivated', async () => {
+      const societyId = await society();
+      const made = await institution(societyId);
+      expect((await asAdmin('delete', `/v1/platform/societies/${societyId}`)).status).toBe(200);
+      const res = await asAdmin('get', `/v1/platform/institutions/${made.id}`);
+      expect(res.body.data).toMatchObject({ status: 1, societyStatus: 0 });
+    });
+
+    it('answers 404 for an unknown or malformed ID, 403 to an Owner and 401 without a token', async () => {
+      for (const id of [newId(), 'not-a-uuid']) {
+        const res = await asAdmin('get', `/v1/platform/institutions/${id}`);
+        expect(res.status).toBe(404);
+      }
+      const societyId = await society();
+      const made = await institution(societyId);
+      const owner = await ownerOf(societyId);
+      expect((await api('get', `/v1/platform/institutions/${made.id}`, owner.token)).status).toBe(
+        403,
+      );
+      const none = await request(t.app.getHttpServer()).get(`/v1/platform/institutions/${made.id}`);
+      expect(none.status).toBe(401);
+    });
+  });
+
   describe('PLT-19 list', () => {
     it('pages, filters and sorts across Societies', async () => {
       const tag = newId().slice(-8);

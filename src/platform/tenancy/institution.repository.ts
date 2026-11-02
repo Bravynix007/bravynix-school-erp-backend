@@ -12,7 +12,11 @@ import { BlockSection } from '../../common/auth/block-section.js';
 import { institutionHasBlock } from './block-columns.js';
 import type { InstitutionsTable } from './tenancy.tables.js';
 
-export type InstitutionRow = Selectable<InstitutionsTable> & { society_name: string };
+export type InstitutionRow = Selectable<InstitutionsTable> & {
+  society_name: string;
+  /** 1 active, 0 deactivated: an Institution keeps its own status when its Society is deactivated. */
+  society_status: number;
+};
 
 /** A row of the PLT-19 list: which sections of the Institution are blocked. */
 export type InstitutionListRow = InstitutionRow & {
@@ -47,7 +51,15 @@ export class InstitutionRepository {
       .selectFrom('institutions')
       .innerJoin('societies', 'societies.id', 'institutions.society_id')
       .selectAll('institutions')
-      .select('societies.name as society_name');
+      .select(['societies.name as society_name', 'societies.status as society_status']);
+  }
+
+  /** The two block flags of an Institution, for the PLT-19 list and PLT-45. */
+  private withBlocks(tx: Tx) {
+    return this.selectInstitution(tx).select([
+      institutionHasBlock(BlockSection.Staff).as('staff_blocked'),
+      institutionHasBlock(BlockSection.Students).as('students_blocked'),
+    ]);
   }
 
   private matching(filter: InstitutionFilter) {
@@ -80,12 +92,7 @@ export class InstitutionRepository {
     limit: number,
     offset: number,
   ): Promise<{ rows: InstitutionListRow[]; total: number }> {
-    let query = this.selectInstitution(tx)
-      .select([
-        institutionHasBlock(BlockSection.Staff).as('staff_blocked'),
-        institutionHasBlock(BlockSection.Students).as('students_blocked'),
-      ])
-      .where(this.matching(filter));
+    let query = this.withBlocks(tx).where(this.matching(filter));
     for (const key of sort) query = query.orderBy(SORT_COLUMN[key.field], key.direction);
     const rows = await query.orderBy('institutions.id').limit(limit).offset(offset).execute();
     const { total } = await tx
@@ -94,6 +101,11 @@ export class InstitutionRepository {
       .where(this.matching(filter))
       .executeTakeFirstOrThrow();
     return { rows, total };
+  }
+
+  /** One Institution with its blocked sections, for Super Admin (PLT-45); `undefined` when there is none. */
+  async findWithBlocks(tx: Tx, id: string): Promise<InstitutionListRow | undefined> {
+    return this.withBlocks(tx).where('institutions.id', '=', id).executeTakeFirst();
   }
 
   /** How many Institutions are active in an active Society. */
