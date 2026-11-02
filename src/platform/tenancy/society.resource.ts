@@ -33,9 +33,13 @@ export interface SocietySummary extends AuthorStamps {
   /** The Society's Owners are blocked. */
   blocked: boolean;
   institutionCount: number;
+  /** What the Society still owes BravyNix: the total of its dues that are still Due (PLT-02). */
+  outstandingDuesAmount: string;
 }
 
 export interface SocietyDetail extends SocietyResource {
+  /** The same figure on the profile, the "dues summary" of PLT-04. */
+  outstandingDuesAmount: string;
   institutions: {
     id: string;
     code: string;
@@ -77,7 +81,11 @@ export function societyResource(row: SocietyRow, people: People): SocietyResourc
   };
 }
 
-export function societySummary(row: SocietyRow, people: People): SocietySummary {
+export function societySummary(
+  row: SocietyRow,
+  people: People,
+  outstandingDuesAmount: string,
+): SocietySummary {
   return {
     id: row.id,
     code: row.code,
@@ -85,6 +93,7 @@ export function societySummary(row: SocietyRow, people: People): SocietySummary 
     status: row.status,
     blocked: row.owners_blocked,
     institutionCount: row.institution_count,
+    outstandingDuesAmount,
     ...authorStamps(row, people),
   };
 }

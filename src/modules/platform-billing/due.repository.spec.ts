@@ -81,6 +81,37 @@ describe('DueRepository', () => {
     });
   });
 
+  describe('the figures', () => {
+    it('totals the dues still Due by Society, and asks nothing for no Society', async () => {
+      const { tx, queries } = recorder();
+      expect(await repository.outstandingBySociety(tx, [])).toEqual(new Map());
+      expect(queries).toEqual([]);
+      expect(await repository.outstandingBySociety(tx, ['s1', 's2'])).toEqual(new Map());
+      expect(queries[0]!.sql).toBe(
+        'select "society_id", sum(total_amount)::numeric(14,2)::text as "total" from "platform_dues" where "society_id" in ($1, $2) and "due_status" = $3 group by "society_id"',
+      );
+      expect(queries[0]!.parameters).toEqual(['s1', 's2', 1]);
+    });
+
+    it('totals every due still Due, with 0.00 when there is none', async () => {
+      const { tx, queries } = recorder();
+      await ignoringNoRows(repository.outstandingTotal(tx));
+      expect(queries[0]!.sql).toBe(
+        'select coalesce(sum(total_amount), 0)::numeric(14,2)::text as "total" from "platform_dues" where "due_status" = $1',
+      );
+      expect(queries[0]!.parameters).toEqual([1]);
+    });
+
+    it('totals the dues paid from one date up to, not including, another', async () => {
+      const { tx, queries } = recorder();
+      await ignoringNoRows(repository.collectedBetween(tx, '2026-11-01', '2026-12-01'));
+      expect(queries[0]!.sql).toBe(
+        'select coalesce(sum(total_amount), 0)::numeric(14,2)::text as "total" from "platform_dues" where "due_status" = $1 and "paid_date" >= $2 and "paid_date" < $3',
+      );
+      expect(queries[0]!.parameters).toEqual([2, '2026-11-01', '2026-12-01']);
+    });
+  });
+
   describe('page', () => {
     it('asks for everything, in the sort, the ID as the last key, and the page', async () => {
       const [rows] = await page({}, [{ field: 'createdAt', direction: 'desc' }]);

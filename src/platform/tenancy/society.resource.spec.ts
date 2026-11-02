@@ -55,13 +55,14 @@ describe('Society resource (API design 10.4b)', () => {
   });
 
   it('summarises a row for the list, with its stamps', () => {
-    expect(societySummary(row({ owners_blocked: true }), people)).toEqual({
+    expect(societySummary(row({ owners_blocked: true }), people, '19500.00')).toEqual({
       id: 's1',
       code: 'SUN',
       name: 'Sunrise',
       status: 1,
       blocked: true,
       institutionCount: 2,
+      outstandingDuesAmount: '19500.00',
       createdBy: people.get('p1'),
       createdAt: '2026-10-01T00:00:00.000Z',
       updatedBy: people.get('p2'),

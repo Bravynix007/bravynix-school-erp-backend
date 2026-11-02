@@ -119,6 +119,16 @@ export class SocietyRepository {
     return new Map(rows.map((row) => [row.id, row]));
   }
 
+  /** How many Societies are active. */
+  async countActive(tx: Tx): Promise<number> {
+    const { total } = await tx
+      .selectFrom('societies')
+      .select((eb) => eb.fn.countAll<number>().as('total'))
+      .where('status', '=', 1)
+      .executeTakeFirstOrThrow();
+    return Number(total);
+  }
+
   async insert(tx: Tx, values: NewSociety): Promise<void> {
     await tx.insertInto('societies').values(values).execute();
   }

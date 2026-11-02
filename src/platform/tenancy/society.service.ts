@@ -27,6 +27,7 @@ import {
   type ListSocietiesQueryDto,
   type UpdateSocietyDto,
 } from './society.dto.js';
+import { SocietyDues } from './society-dues.js';
 import { SocietyOwnerService } from './society-owner.service.js';
 import { SocietyRepository, type SocietyChanges, type SocietyRow } from './society.repository.js';
 import {
@@ -41,6 +42,9 @@ import {
 
 /** Why the grants of a deactivated Society were revoked; a reactivation can find them by it. */
 export const SOCIETY_DEACTIVATED = 'society_deactivated';
+
+/** What a Society that has never been billed owes. */
+const OWES_NOTHING = '0.00';
 
 type Profile = Partial<Omit<CreateSocietyDto, 'name' | 'code'>>;
 
@@ -95,6 +99,7 @@ export class SocietyService {
     private readonly people: PersonDirectory,
     private readonly grants: GrantDirectory,
     private readonly owners: SocietyOwnerService,
+    private readonly dues: SocietyDues,
     private readonly audit: AuditService,
     private readonly clock: Clock,
   ) {}
@@ -104,29 +109,43 @@ export class SocietyService {
     query: ListSocietiesQueryDto,
   ): Promise<ApiResult<SocietySummary[]>> {
     const sort = parseSort(query.sort, SOCIETY_SORT_FIELDS, [{ field: 'name', direction: 'asc' }]);
-    const { rows, total } = await this.database.transaction(platformTenant(principal), (tx) =>
-      this.societies.page(
-        tx,
-        { q: query.q, statuses: query.status, blocked: query.blocked },
-        sort,
-        query.limit,
-        pageOffset(query.page, query.limit),
-      ),
+    const { rows, total, owed } = await this.database.transaction(
+      platformTenant(principal),
+      async (tx) => {
+        const page = await this.societies.page(
+          tx,
+          { q: query.q, statuses: query.status, blocked: query.blocked },
+          sort,
+          query.limit,
+          pageOffset(query.page, query.limit),
+        );
+        return {
+          ...page,
+          owed: await this.dues.outstanding(
+            tx,
+            page.rows.map((row) => row.id),
+          ),
+        };
+      },
     );
     const people = await this.people.describe(peopleOf(rows));
     return ApiResult.list(
-      rows.map((row) => societySummary(row, people)),
+      rows.map((row) => societySummary(row, people, owed.get(row.id) ?? OWES_NOTHING)),
       pageMeta(query.page, query.limit, total),
     );
   }
 
   async get(principal: Principal, id: string): Promise<SocietyDetail> {
-    const { row, institutions } = await this.database.transaction(
+    const { row, institutions, owed } = await this.database.transaction(
       platformTenant(principal),
       async (tx) => {
         const found = await this.societies.find(tx, id);
         if (!found) throw AppException.notFound();
-        return { row: found, institutions: await this.societies.institutions(tx, id) };
+        return {
+          row: found,
+          institutions: await this.societies.institutions(tx, id),
+          owed: (await this.dues.outstanding(tx, [id])).get(id) ?? OWES_NOTHING,
+        };
       },
     );
     const owners = await this.grants.societyOwners(id);
@@ -134,6 +153,7 @@ export class SocietyService {
       ...(await this.resource(row)),
       institutions: institutionsOf(institutions),
       owners,
+      outstandingDuesAmount: owed,
     };
   }
 
@@ -168,6 +188,7 @@ export class SocietyService {
       ...(await this.resource(row)),
       institutions: [],
       owners: await this.grants.societyOwners(id),
+      outstandingDuesAmount: OWES_NOTHING,
     };
   }
 

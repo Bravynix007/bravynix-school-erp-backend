@@ -1,8 +1,16 @@
 import { Injectable } from '@nestjs/common';
-import type { ExpressionBuilder, Insertable, Selectable, Updateable } from 'kysely';
+import {
+  sql,
+  type ExpressionBuilder,
+  type Insertable,
+  type Selectable,
+  type SelectQueryBuilder,
+  type Updateable,
+} from 'kysely';
 import { containsPattern, type SortKey } from '../../common/pagination/pagination.js';
 import type { Database, Tx } from '../../platform/database/index.js';
 import type { DueSortField } from './due.dto.js';
+import { DueStatus } from './due.rules.js';
 import type { PlatformDuesTable } from './billing.tables.js';
 
 export type DueRow = Selectable<PlatformDuesTable>;
@@ -57,6 +65,46 @@ export class DueRepository {
       .orderBy('created_at', 'desc')
       .orderBy('id', 'desc')
       .execute();
+  }
+
+  /** What each of these Societies still owes: the total of its dues that are Due. A Society that owes nothing is left out. */
+  async outstandingBySociety(tx: Tx, societyIds: readonly string[]): Promise<Map<string, string>> {
+    if (societyIds.length === 0) return new Map();
+    const rows = await tx
+      .selectFrom('platform_dues')
+      .select(['society_id', sql<string>`sum(total_amount)::numeric(14,2)::text`.as('total')])
+      .where('society_id', 'in', societyIds)
+      .where('due_status', '=', DueStatus.Due)
+      .groupBy('society_id')
+      .execute();
+    return new Map(rows.map((row) => [row.society_id, row.total]));
+  }
+
+  /** The total of every due still Due, across Societies. */
+  async outstandingTotal(tx: Tx): Promise<string> {
+    return this.sum(tx, (query) => query.where('due_status', '=', DueStatus.Due));
+  }
+
+  /** The total of the dues paid on a date from `from` up to but not including `before` (both `YYYY-MM-DD`). */
+  async collectedBetween(tx: Tx, from: string, before: string): Promise<string> {
+    return this.sum(tx, (query) =>
+      query
+        .where('due_status', '=', DueStatus.Paid)
+        .where('paid_date', '>=', from)
+        .where('paid_date', '<', before),
+    );
+  }
+
+  private async sum(
+    tx: Tx,
+    narrow: (
+      query: SelectQueryBuilder<Database, 'platform_dues', object>,
+    ) => SelectQueryBuilder<Database, 'platform_dues', object>,
+  ): Promise<string> {
+    const { total } = await narrow(tx.selectFrom('platform_dues'))
+      .select(sql<string>`coalesce(sum(total_amount), 0)::numeric(14,2)::text`.as('total'))
+      .executeTakeFirstOrThrow();
+    return total;
   }
 
   async update(tx: Tx, id: string, changes: DueChanges): Promise<void> {

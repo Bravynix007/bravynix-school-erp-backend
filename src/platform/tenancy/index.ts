@@ -6,3 +6,4 @@ export {
   type InstitutionName,
   type InstitutionRef,
 } from './institution-directory.js';
+export { SocietyDues } from './society-dues.js';
