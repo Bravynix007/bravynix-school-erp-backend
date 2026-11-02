@@ -11,6 +11,7 @@ import {
   people,
   rates,
   societies,
+  subjects,
   superAdmin,
   writeDemoSeed,
 } from '../../src/seeds/demo.js';
@@ -121,6 +122,22 @@ describe('the demo seed', () => {
         { code: 'LPS', current: 1, total: 1 },
         { code: 'SVHS', current: 1, total: 2 },
         { code: 'SVPS', current: 1, total: 1 },
+      ]);
+    });
+  });
+
+  it('gives each Society its subjects, written once however often it runs', async () => {
+    await withDemo(2, async (tx) => {
+      await sql`alter table subjects no force row level security`.execute(tx);
+      const rows = await sql<{ code: string; names: string[] }>`
+        select s.code, array_agg(j.name order by j.name) as names
+        from subjects j join societies s on s.id = j.society_id
+        where j.id in (${sql.join(subjects.map((subject) => sql`${subject.id}`))})
+        group by s.code order by s.code
+      `.execute(tx);
+      expect(rows.rows).toEqual([
+        { code: 'LET', names: ['English', 'Mathematics', 'Science', 'Social Science'] },
+        { code: 'SVES', names: ['English', 'Hindi', 'Mathematics', 'Science', 'Social Science'] },
       ]);
     });
   });
