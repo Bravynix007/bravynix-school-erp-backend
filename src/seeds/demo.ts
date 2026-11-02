@@ -2,9 +2,11 @@ import { sql, type Kysely } from 'kysely';
 import {
   commonSubjects,
   insertAcademicYears,
+  insertClasses,
   insertClassesOffered,
   insertSubjects,
   type SeedAcademicYear,
+  type SeedClass,
   type SeedClassesOffered,
   type SeedSubject,
 } from './academic-seed.js';
@@ -161,6 +163,53 @@ export const classesOffered: SeedClassesOffered[] = [
   { institutionId: id(9202), categories: ['PRE_SCHOOL', 'NURSERY', 'LOWER_PRIMARY'] },
   { institutionId: id(9203), categories: ['LOWER_PRIMARY', 'HIGHER_PRIMARY', 'HIGH_SCHOOL'] },
 ];
+
+/** What each Institution teaches: the classes by the code of their predefined class, with their sections. */
+const classPlan: readonly {
+  institutionId: string;
+  classes: readonly (readonly [predefinedCode: string, sections: readonly string[]])[];
+}[] = [
+  {
+    institutionId: id(9201),
+    classes: [
+      ['C08', ['A', 'B']],
+      ['C09', ['A', 'B']],
+      ['C10', ['A', 'B']],
+    ],
+  },
+  {
+    institutionId: id(9202),
+    classes: [
+      ['NUR', ['A']],
+      ['LKG', ['A']],
+      ['UKG', ['A']],
+      ['C01', ['A']],
+    ],
+  },
+  {
+    institutionId: id(9203),
+    classes: [
+      ['C08', ['A']],
+      ['C09', ['A', 'B']],
+      ['C10', ['A']],
+    ],
+  },
+];
+
+/** Every Institution has its classes and sections, so the app can show a school at once. */
+export const classes: SeedClass[] = classPlan.flatMap((plan, p) =>
+  plan.classes.map(([predefinedCode, sections], n) => ({
+    id: id(9901 + p * 10 + n),
+    institutionId: plan.institutionId,
+    predefinedCode,
+    streamName: null,
+    sections: sections.map((code, k) => ({
+      id: id(9951 + p * 30 + n * 5 + k),
+      predefinedCode: code,
+      capacity: 40,
+    })),
+  })),
+);
 
 /** Both Societies start with the common subjects; the first adds Hindi, so the lists differ. */
 export const subjects: SeedSubject[] = [
@@ -432,6 +481,7 @@ export async function writeDemoSeed(db: Kysely<unknown>): Promise<void> {
   await insertAcademicYears(db, academicYears);
   await insertSubjects(db, subjects);
   await insertClassesOffered(db, classesOffered);
+  await insertClasses(db, classes);
 
   for (const d of dues) {
     const institution = institutionOf(d.institution);

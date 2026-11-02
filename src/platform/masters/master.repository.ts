@@ -87,6 +87,47 @@ export class MasterRepository {
     return result.rows;
   }
 
+  /** A predefined class with its category, hidden or not; `undefined` when there is none. */
+  async predefinedClass(
+    tx: Tx,
+    id: string,
+  ): Promise<
+    | {
+        id: string;
+        code: string;
+        name: string;
+        status: number;
+        categoryId: string;
+        categoryCode: string;
+      }
+    | undefined
+  > {
+    const result = await sql<{
+      id: string;
+      code: string;
+      name: string;
+      status: number;
+      categoryId: string;
+      categoryCode: string;
+    }>`
+      select p.id, p.code, p.name, p.status, p.class_category_id as "categoryId", c.code as "categoryCode"
+      from predefined_classes p join class_categories c on c.id = p.class_category_id
+      where p.id = ${id}
+    `.execute(tx);
+    return result.rows[0];
+  }
+
+  /** A predefined section, hidden or not; `undefined` when there is none. */
+  async predefinedSection(
+    tx: Tx,
+    id: string,
+  ): Promise<{ id: string; code: string; name: string; status: number } | undefined> {
+    const result = await sql<{ id: string; code: string; name: string; status: number }>`
+      select id, code, name, status from predefined_sections where id = ${id}
+    `.execute(tx);
+    return result.rows[0];
+  }
+
   /** The country of a state, or the state of a city; `undefined` when there is none. */
   async parentOf(tx: Tx, table: 'states' | 'cities', id: string): Promise<string | undefined> {
     const column = table === 'states' ? sql.ref('country_id') : sql.ref('state_id');

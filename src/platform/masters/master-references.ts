@@ -13,8 +13,31 @@ export interface PlaceIds {
   cityId?: string | null;
 }
 
+/** 422 `REFERENCE_INACTIVE`, naming the field that points at a hidden master entry (API design 12.2). */
+function inactive(field: string): AppException {
+  return new AppException(HttpStatus.UNPROCESSABLE_ENTITY, ErrorCode.REFERENCE_INACTIVE, {
+    errors: [fieldError(field, ErrorCode.REFERENCE_INACTIVE)],
+  });
+}
+
 /** A class category as another module shows it. */
 export interface ClassCategoryRef {
+  id: string;
+  code: string;
+  name: string;
+}
+
+/** A predefined class as a class is made from it: its category travels with it. */
+export interface PredefinedClassRef {
+  id: string;
+  code: string;
+  name: string;
+  categoryId: string;
+  categoryCode: string;
+}
+
+/** A predefined section as a section is made from it. */
+export interface PredefinedSectionRef {
   id: string;
   code: string;
   name: string;
@@ -48,12 +71,26 @@ export class MasterReferences {
     for (const { id, field } of entries) {
       const status = statuses.get(id);
       if (status === undefined) throw AppException.notFound();
-      if (status === 0) {
-        throw new AppException(HttpStatus.UNPROCESSABLE_ENTITY, ErrorCode.REFERENCE_INACTIVE, {
-          errors: [fieldError(field, ErrorCode.REFERENCE_INACTIVE)],
-        });
-      }
+      if (status === 0) throw inactive(field);
     }
+  }
+
+  /** A new class points at a predefined class that exists (404) and is shown (422 `REFERENCE_INACTIVE`). */
+  async requirePredefinedClass(tx: Tx, id: string, field: string): Promise<PredefinedClassRef> {
+    const found = await this.masters.predefinedClass(tx, id);
+    if (!found) throw AppException.notFound();
+    if (found.status === 0) throw inactive(field);
+    const { status: _status, ...ref } = found;
+    return ref;
+  }
+
+  /** A new section points at a predefined section that exists (404) and is shown (422 `REFERENCE_INACTIVE`). */
+  async requirePredefinedSection(tx: Tx, id: string, field: string): Promise<PredefinedSectionRef> {
+    const found = await this.masters.predefinedSection(tx, id);
+    if (!found) throw AppException.notFound();
+    if (found.status === 0) throw inactive(field);
+    const { status: _status, ...ref } = found;
+    return ref;
   }
 
   /** The class categories with these IDs (hidden ones too: a link that exists stays), in the order of the list. */

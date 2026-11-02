@@ -1,0 +1,90 @@
+import { Injectable } from '@nestjs/common';
+import { sql, type Insertable, type Selectable, type Updateable } from 'kysely';
+import type { Tx } from '../../platform/database/index.js';
+import type { ClassesTable } from './academic-setup.tables.js';
+
+export type ClassRow = Selectable<ClassesTable>;
+export type NewClass = Insertable<ClassesTable>;
+export type ClassChanges = Updateable<ClassesTable>;
+
+/** A class with the names it is shown with and the number of its active sections. */
+export interface ClassView extends ClassRow {
+  predefined_code: string;
+  predefined_name: string;
+  category_code: string;
+  category_name: string;
+  section_count: number;
+}
+
+/** Queries on `classes`; every one runs in the caller's transaction, under row-level security. */
+@Injectable()
+export class ClassRepository {
+  private view(tx: Tx) {
+    return tx
+      .selectFrom('classes as c')
+      .innerJoin('predefined_classes as p', 'p.id', 'c.predefined_class_id')
+      .innerJoin('class_categories as g', 'g.id', 'c.class_category_id')
+      .selectAll('c')
+      .select([
+        'p.code as predefined_code',
+        'p.name as predefined_name',
+        'g.code as category_code',
+        'g.name as category_name',
+        sql<number>`(select count(*)::int from sections s where s.class_id = c.id and s.status = 1)`.as(
+          'section_count',
+        ),
+      ]);
+  }
+
+  /** The active classes in the order of the lists: category, predefined class, then stream. */
+  active(tx: Tx, institutionId: string): Promise<ClassView[]> {
+    return this.view(tx)
+      .where('c.institution_id', '=', institutionId)
+      .where('c.status', '=', 1)
+      .orderBy('g.display_order')
+      .orderBy('p.display_order')
+      .orderBy(sql`lower(c.stream_name)`, (order) => order.asc().nullsFirst())
+      .orderBy('c.id')
+      .execute();
+  }
+
+  /** One class with its names; `lock` locks the class row for the change. */
+  async find(tx: Tx, id: string, lock = false): Promise<ClassRow | undefined> {
+    const query = tx.selectFrom('classes').selectAll().where('id', '=', id);
+    return (lock ? query.forUpdate() : query).executeTakeFirst();
+  }
+
+  /** The classes with these IDs, with their names, in the order of the lists. */
+  views(tx: Tx, ids: readonly string[]): Promise<ClassView[]> {
+    return this.view(tx)
+      .where('c.id', 'in', ids)
+      .orderBy('g.display_order')
+      .orderBy('p.display_order')
+      .orderBy(sql`lower(c.stream_name)`, (order) => order.asc().nullsFirst())
+      .orderBy('c.id')
+      .execute();
+  }
+
+  /** The categories the Institution offers, as a set of IDs. */
+  async offeredCategories(tx: Tx, institutionId: string): Promise<Set<string>> {
+    const rows = await tx
+      .selectFrom('institution_class_categories')
+      .select('class_category_id')
+      .where('institution_id', '=', institutionId)
+      .execute();
+    return new Set(rows.map((row) => row.class_category_id));
+  }
+
+  insert(tx: Tx, values: NewClass): Promise<ClassRow> {
+    return tx.insertInto('classes').values(values).returningAll().executeTakeFirstOrThrow();
+  }
+
+  update(tx: Tx, id: string, changes: ClassChanges): Promise<ClassRow> {
+    return tx
+      .updateTable('classes')
+      .set(changes)
+      .where('id', '=', id)
+      .returningAll()
+      .executeTakeFirstOrThrow();
+  }
+}
