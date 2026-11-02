@@ -19,6 +19,7 @@ import {
   type Tx,
 } from '../database/index.js';
 import { GrantDirectory, PersonDirectory } from '../identity/index.js';
+import { MasterReferences, type ClassCategoryRef } from '../masters/index.js';
 import {
   INSTITUTION_SORT_FIELDS,
   type CreateInstitutionDto,
@@ -31,16 +32,16 @@ import {
   type InstitutionRow,
 } from './institution.repository.js';
 import {
+  institutionDetail,
   institutionOption,
-  institutionResource,
   institutionSummary,
   platformInstitution,
+  type InstitutionDetail,
   type InstitutionOption,
-  type InstitutionResource,
   type InstitutionSummary,
   type PlatformInstitution,
 } from './institution.resource.js';
-import { addressColumns, contactColumns } from './profile-columns.js';
+import { addressColumns, contactColumns, placeColumns } from './profile-columns.js';
 import { requireActive } from './record-rules.js';
 import { ScopeService } from './scope.service.js';
 import { SocietyRepository } from './society.repository.js';
@@ -59,7 +60,9 @@ function profileColumns(profile: Profile): InstitutionChanges {
     columns.affiliation_number = profile.affiliationNumber;
   if (profile.gstin !== undefined) columns.gstin = profile.gstin;
   if (profile.telephone !== undefined) columns.telephone = profile.telephone;
-  if (profile.address !== undefined) Object.assign(columns, addressColumns(profile.address));
+  if (profile.address !== undefined) {
+    Object.assign(columns, addressColumns(profile.address), placeColumns(profile.address));
+  }
   if (profile.location !== undefined) {
     // numeric(9,6) is kept as an exact decimal string.
     columns.latitude = profile.location?.latitude.toFixed(6) ?? null;
@@ -68,8 +71,32 @@ function profileColumns(profile: Profile): InstitutionChanges {
   return columns;
 }
 
-/** What the audit log keeps of an Institution: its own fields, nothing derived. */
-function auditView(row: InstitutionRow): AuditValues {
+/** One row of `institution_class_categories`. */
+function offering(societyId: string, institutionId: string, categoryId: string, by: string) {
+  return {
+    society_id: societyId,
+    institution_id: institutionId,
+    class_category_id: categoryId,
+    created_by: by,
+  };
+}
+
+/** What a list of class categories asked for adds and takes away; no list asked for changes nothing. */
+function diffOffered(
+  before: readonly ClassCategoryRef[],
+  wanted: readonly string[] | undefined,
+): { added: string[]; removed: string[] } {
+  if (wanted === undefined) return { added: [], removed: [] };
+  const had = new Set(before.map((category) => category.id));
+  const wants = new Set(wanted);
+  return {
+    added: wanted.filter((id) => !had.has(id)),
+    removed: [...had].filter((id) => !wants.has(id)),
+  };
+}
+
+/** What the audit log keeps of an Institution: its own fields and the class categories it offers. */
+function auditView(row: InstitutionRow, classesOffered: readonly ClassCategoryRef[]): AuditValues {
   return {
     name: row.name,
     code: row.code,
@@ -84,6 +111,10 @@ function auditView(row: InstitutionRow): AuditValues {
     address_line_1: row.address_line_1,
     address_line_2: row.address_line_2,
     pincode: row.pincode,
+    country_id: row.country_id,
+    state_id: row.state_id,
+    city_id: row.city_id,
+    classes_offered: classesOffered.map((category) => category.id),
     latitude: row.latitude,
     longitude: row.longitude,
     status: row.status,
@@ -102,6 +133,7 @@ export class InstitutionService {
     private readonly database: DatabaseService,
     private readonly institutions: InstitutionRepository,
     private readonly societies: SocietyRepository,
+    private readonly masters: MasterReferences,
     private readonly scope: ScopeService,
     private readonly people: PersonDirectory,
     private readonly grants: GrantDirectory,
@@ -156,17 +188,29 @@ export class InstitutionService {
       if (!found) throw AppException.notFound();
       return found;
     });
-    return platformInstitution(row, await this.people.describe(authorIdsOf([row])));
+    // The classes offered are kept per Institution, so they are read inside that Institution's scope.
+    const offered = await this.database.transaction(
+      platformTenant(principal, row.society_id, [id]),
+      (tx) => this.offered(tx, id),
+    );
+    return platformInstitution(
+      row,
+      await this.people.describe(authorIdsOf([row])),
+      offered,
+    );
   }
 
   /** INS-03: inside the caller's scope only; an Institution whose staff are blocked answers 423 to its staff. */
-  async get(principal: Principal, id: string): Promise<InstitutionResource> {
+  async get(principal: Principal, id: string): Promise<InstitutionDetail> {
     const { tenant } = await this.scope.requireInstitution(principal, id);
-    const row = await this.database.transaction(tenant, (tx) => this.mustFind(tx, id));
-    return this.resource(row);
+    const { row, offered } = await this.database.transaction(tenant, async (tx) => ({
+      row: await this.mustFind(tx, id),
+      offered: await this.offered(tx, id),
+    }));
+    return this.detail(row, offered);
   }
 
-  async create(principal: Principal, body: CreateInstitutionDto): Promise<InstitutionResource> {
+  async create(principal: Principal, body: CreateInstitutionDto): Promise<InstitutionDetail> {
     const societyId = principal.societyId;
     if (societyId === null) throw AppException.forbidden();
     const id = newId();
@@ -176,11 +220,14 @@ export class InstitutionService {
       societyId,
       institutionIds: [id],
     };
-    const row = await this.database
+    const { row, offered } = await this.database
       .transaction(tenant, async (tx) => {
         const society = await this.societies.find(tx, societyId);
         if (!society) throw AppException.notFound();
         requireActive(society);
+        const classesOffered = body.classesOffered ?? [];
+        await this.masters.requirePlace(tx, body.address, 'address');
+        await this.requireCategories(tx, classesOffered);
         await this.institutions.insert(tx, {
           id,
           society_id: societyId,
@@ -190,25 +237,35 @@ export class InstitutionService {
           ...addressColumns(body.address),
           ...insertStamp(principal.personId),
         });
+        await this.institutions.offer(
+          tx,
+          classesOffered.map((categoryId) =>
+            offering(societyId, id, categoryId, principal.personId),
+          ),
+        );
         const created = await this.mustFind(tx, id);
-        await this.record(tx, 'institution.create', created, { after: auditView(created) });
-        return created;
+        const categories = await this.offered(tx, id);
+        await this.record(tx, 'institution.create', created, {
+          after: auditView(created, categories),
+        });
+        return { row: created, offered: categories };
       })
       .catch((error: unknown) => {
         throw isDuplicateOn(error, 'uq_institutions_society_code') ? duplicateOn('code') : error;
       });
-    return this.resource(row);
+    return this.detail(row, offered);
   }
 
   async update(
     principal: Principal,
     id: string,
     body: UpdateInstitutionDto,
-  ): Promise<InstitutionResource> {
+  ): Promise<InstitutionDetail> {
     const { tenant } = await this.scope.requireInstitution(principal, id);
-    const row = await this.database.transaction(tenant, async (tx) => {
+    const { row, offered } = await this.database.transaction(tenant, async (tx) => {
       const current = await this.lockedAt(tx, id, body.version);
       requireActive(current);
+      const before = await this.offered(tx, id);
       const wanted: InstitutionChanges = {
         ...(body.name === undefined ? {} : { name: body.name }),
         ...profileColumns(body),
@@ -219,16 +276,34 @@ export class InstitutionService {
           ([column, value]) => current[column as keyof InstitutionRow] !== value,
         ),
       ) as InstitutionChanges;
-      if (Object.keys(changes).length === 0) return current;
+      // A place already on the Institution stays even if its entry has been hidden since; only a new link is checked.
+      if (
+        body.address !== undefined &&
+        ('country_id' in changes || 'state_id' in changes || 'city_id' in changes)
+      ) {
+        await this.masters.requirePlace(tx, body.address, 'address');
+      }
+      const { added, removed } = diffOffered(before, body.classesOffered);
+      await this.requireCategories(tx, added);
+      if (Object.keys(changes).length === 0 && added.length === 0 && removed.length === 0) {
+        return { row: current, offered: before };
+      }
+      // The classes offered belong to the resource, so changing only them is a new version too.
       await this.institutions.update(tx, id, { ...changes, ...updateStamp(principal.personId) });
+      await this.institutions.withdraw(tx, id, removed);
+      await this.institutions.offer(
+        tx,
+        added.map((categoryId) => offering(current.society_id, id, categoryId, principal.personId)),
+      );
       const updated = await this.mustFind(tx, id);
+      const after = await this.offered(tx, id);
       await this.record(tx, 'institution.update', updated, {
-        before: auditView(current),
-        after: auditView(updated),
+        before: auditView(current, before),
+        after: auditView(updated, after),
       });
-      return updated;
+      return { row: updated, offered: after };
     });
-    return this.resource(row);
+    return this.detail(row, offered);
   }
 
   /** Deactivates; the Admin grants for it end, so an Admin with no other Institution loses the role. */
@@ -268,8 +343,25 @@ export class InstitutionService {
     return row;
   }
 
-  private async resource(row: InstitutionRow): Promise<InstitutionResource> {
-    return institutionResource(row, await this.people.describe(authorIdsOf([row])));
+  private async detail(
+    row: InstitutionRow,
+    offered: ClassCategoryRef[],
+  ): Promise<InstitutionDetail> {
+    return institutionDetail(row, await this.people.describe(authorIdsOf([row])), offered);
+  }
+
+  /** The class categories the Institution offers, with their names, in the order of the master list. */
+  private async offered(tx: Tx, institutionId: string): Promise<ClassCategoryRef[]> {
+    return this.masters.classCategories(tx, await this.institutions.offeredIds(tx, institutionId));
+  }
+
+  /** A category a request adds exists (404) and is shown (422 `REFERENCE_INACTIVE`, naming `classesOffered[i]`). */
+  private requireCategories(tx: Tx, ids: readonly string[]): Promise<void> {
+    return this.masters.requireAllShown(
+      tx,
+      'class_categories',
+      ids.map((id, i) => ({ id, field: `classesOffered[${i}]` })),
+    );
   }
 
   /** The audit entry carries the Society's and the Institution's IDs, so the Society's owners see it (API design 20.3). */

@@ -4,6 +4,7 @@ import { runMigrations } from '../../src/platform/database/migrator.js';
 import {
   admins,
   asha,
+  classesOffered,
   dues,
   institutions,
   meera,
@@ -138,6 +139,25 @@ describe('the demo seed', () => {
       expect(rows.rows).toEqual([
         { code: 'LET', names: ['English', 'Mathematics', 'Science', 'Social Science'] },
         { code: 'SVES', names: ['English', 'Hindi', 'Mathematics', 'Science', 'Social Science'] },
+      ]);
+    });
+  });
+
+  it('gives each Institution the class categories it offers, written once however often it runs', async () => {
+    await withDemo(2, async (tx) => {
+      await sql`alter table institution_class_categories no force row level security`.execute(tx);
+      const rows = await sql<{ code: string; categories: string[] }>`
+        select i.code, array_agg(c.code order by c.display_order) as categories
+        from institution_class_categories o
+        join institutions i on i.id = o.institution_id
+        join class_categories c on c.id = o.class_category_id
+        where o.institution_id in (${sql.join(classesOffered.map((offer) => sql`${offer.institutionId}`))})
+        group by i.code order by i.code
+      `.execute(tx);
+      expect(rows.rows).toEqual([
+        { code: 'LPS', categories: ['LOWER_PRIMARY', 'HIGHER_PRIMARY', 'HIGH_SCHOOL'] },
+        { code: 'SVHS', categories: ['LOWER_PRIMARY', 'HIGHER_PRIMARY', 'HIGH_SCHOOL'] },
+        { code: 'SVPS', categories: ['PRE_SCHOOL', 'NURSERY', 'LOWER_PRIMARY'] },
       ]);
     });
   });

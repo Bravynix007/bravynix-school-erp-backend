@@ -5,7 +5,6 @@ import { ApiResult } from '../../common/http/api-result.js';
 import { AppException } from '../../common/http/app-exception.js';
 import { ErrorCode } from '../../common/http/error-codes.js';
 import { requireVersion } from '../../common/http/require-version.js';
-import { fieldError } from '../../common/validation/field-error.js';
 import { AuditService, type AuditValues } from '../audit/index.js';
 import {
   DatabaseService,
@@ -19,6 +18,7 @@ import {
 import type { MasterQueryDto } from './master.dto.js';
 import { parseMasterBody } from './master-body.js';
 import type { MasterSpec } from './master.catalog.js';
+import { MasterReferences } from './master-references.js';
 import { MasterRepository } from './master.repository.js';
 import { listEtag, masterEntry, type MasterEntry, type MasterRow } from './master.resource.js';
 import { listFilters, planInsert, planMove } from './master.rules.js';
@@ -52,6 +52,7 @@ export class MasterService {
   constructor(
     private readonly database: DatabaseService,
     private readonly masters: MasterRepository,
+    private readonly references: MasterReferences,
     private readonly audit: AuditService,
   ) {}
 
@@ -218,17 +219,12 @@ export class MasterService {
     body: Record<string, unknown>,
   ): Promise<void> {
     if (!spec.parent) return;
-    const status = await this.masters.statusOf(
+    await this.references.requireShown(
       tx,
       spec.parent.table,
       body[spec.parent.field] as string,
+      spec.parent.field,
     );
-    if (status === undefined) throw AppException.notFound();
-    if (status === 0) {
-      throw new AppException(HttpStatus.UNPROCESSABLE_ENTITY, ErrorCode.REFERENCE_INACTIVE, {
-        errors: [fieldError(spec.parent.field, ErrorCode.REFERENCE_INACTIVE)],
-      });
-    }
   }
 
   /** A unique violation becomes 409 `DUPLICATE` on the field it protects. */

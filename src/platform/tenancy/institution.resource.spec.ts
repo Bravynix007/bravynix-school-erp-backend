@@ -30,6 +30,9 @@ const row = (overrides: Partial<InstitutionRow> = {}): InstitutionRow => ({
   address_line_1: '12 Lake Road',
   address_line_2: null,
   pincode: null,
+  country_id: null,
+  state_id: null,
+  city_id: null,
   latitude: null,
   longitude: null,
   ...overrides,
@@ -112,13 +115,15 @@ describe('Institution resource (API design 10.4c)', () => {
   });
 
   it('gives Super Admin the whole resource with the Society’s name and the blocked sections', () => {
-    expect(platformInstitution(listRow({ staff_blocked: true }), people)).toMatchObject({
+    const offered = [{ id: 'c1', code: 'LOWER_PRIMARY', name: 'Lower Primary' }];
+    expect(platformInstitution(listRow({ staff_blocked: true }), people, offered)).toMatchObject({
       id: 'i1',
       societyId: 's1',
       societyName: 'Sunrise',
       societyStatus: 1,
       address: { line1: '12 Lake Road', line2: null, pincode: null },
       version: 4,
+      classesOffered: offered,
       blockedSections: ['staff'],
     });
   });
