@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { ApiResult } from '../../common/http/api-result.js';
 import { AppException } from '../../common/http/app-exception.js';
+import { authorIdsOf } from '../../common/http/author-stamps.js';
 import { changedColumns } from '../../common/http/changed-columns.js';
 import { newId } from '../../common/ids/ids.js';
 import { requireVersion } from '../../common/http/require-version.js';
@@ -16,7 +17,6 @@ import { PersonDirectory } from '../../platform/identity/index.js';
 import { MasterReferences } from '../../platform/masters/index.js';
 import { ScopeService, type InstitutionContext } from '../../platform/tenancy/index.js';
 import { ClassRepository } from './class.repository.js';
-import { peopleOf } from './class.resource.js';
 import { translateSectionError } from './class.rules.js';
 import type { CreateSectionDto, UpdateSectionDto } from './section.dto.js';
 import { SectionRepository, type SectionRow, type SectionView } from './section.repository.js';
@@ -151,7 +151,7 @@ export class SectionService {
   }
 
   private async resources(views: readonly SectionView[]): Promise<SectionResource[]> {
-    const people = await this.people.describe(peopleOf(views));
+    const people = await this.people.describe(authorIdsOf(views));
     return views.map((view) => sectionResource(view, people));
   }
 

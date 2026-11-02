@@ -355,6 +355,28 @@ describe('CLS-01 to CLS-05 and SEC-01 to SEC-04 classes and sections (PRD 7.3, A
       });
     });
 
+    it('reads IDs in upper case as it reads them in lower case, in the body, the query and the path', async () => {
+      const created = await classAdded(first, {
+        institutionId: first.toUpperCase(),
+        predefinedClassId: predefined('C09').id.toUpperCase(),
+      });
+      expect(created.predefinedClass.id).toBe(predefined('C09').id);
+      const listed = await api(
+        'get',
+        `/v1/classes?institutionId=${first.toUpperCase()}`,
+        owner.token,
+      );
+      expect(listed.status).toBe(200);
+      const added = await sectionAdded(created.id, {
+        classId: created.id.toUpperCase(),
+        predefinedSectionId: section('A').id.toUpperCase(),
+      });
+      expect(added.classId).toBe(created.id);
+      expect(
+        (await api('get', `/v1/classes/${created.id.toUpperCase()}/sections`, owner.token)).status,
+      ).toBe(200);
+    });
+
     it('refuses what is not a field, a bad type and a missing Institution', async () => {
       for (const extra of [{ status: 0 }, { societyId: societyA }, { classCategoryId: 'x' }]) {
         expect((await addClass(first, extra)).status).toBe(400);

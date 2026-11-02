@@ -48,16 +48,3 @@ export function classResource(
     ...authorStamps(row, people),
   };
 }
-
-/** Everyone the rows name (classes or sections), for one lookup. */
-export function peopleOf(
-  rows: readonly { created_by: string | null; updated_by: string | null }[],
-): string[] {
-  return [
-    ...new Set(
-      rows
-        .flatMap((row) => [row.created_by, row.updated_by])
-        .filter((id): id is string => id !== null),
-    ),
-  ];
-}
