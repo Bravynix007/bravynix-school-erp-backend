@@ -1,9 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, Length, ValidateIf } from 'class-validator';
+import { IsOptional, IsString, Length } from 'class-validator';
 import { VersionDto } from '../../common/validation/version.dto.js';
-
-/** A change may leave a field out; naming the name as `null` is refused, because a subject always has one. */
-const WhenPresent = () => ValidateIf((_dto, value: unknown) => value !== undefined);
+import { WhenPresent } from '../../common/validation/when-present.js';
 
 /** SUB-02 body (API design 10.4i). */
 export class CreateSubjectDto {
