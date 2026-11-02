@@ -1,12 +1,10 @@
 import { applyDecorators } from '@nestjs/common';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsISO8601, IsString, IsUUID, Length, Matches, ValidateIf } from 'class-validator';
+import { IsISO8601, IsString, IsUUID, Length, Matches } from 'class-validator';
 import { VersionDto } from '../../common/validation/version.dto.js';
+import { WhenPresent } from '../../common/validation/when-present.js';
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
-
-/** A change may leave a field out; naming it as `null` is refused, because none of these can be cleared. */
-const WhenPresent = () => ValidateIf((_dto, value: unknown) => value !== undefined);
 
 const IsCalendarDate = () =>
   applyDecorators(IsString(), Matches(DATE_ONLY), IsISO8601({ strict: true }));
