@@ -64,9 +64,15 @@ export class MasterReferences {
   /**
    * A place: a state needs its country and a city its state (400 `REQUIRED`), each must exist and be shown, and
    * the state must be in the country and the city in the state (400 `INVALID_VALUE` on the part that does not
-   * fit). `prefix` names the object the fields are in, for the field errors (`address`).
+   * fit). `prefix` names the object the fields are in, for the field errors (`address`). A part that `current`
+   * already holds stays even if its entry has been hidden since: only a part that is new is checked for that.
    */
-  async requirePlace(tx: Tx, place: PlaceIds, prefix: string): Promise<void> {
+  async requirePlace(
+    tx: Tx,
+    place: PlaceIds,
+    prefix: string,
+    current: PlaceIds = {},
+  ): Promise<void> {
     const { countryId, stateId, cityId } = place;
     const at = (name: string) => `${prefix}.${name}`;
     if (stateId && !countryId) {
@@ -75,9 +81,15 @@ export class MasterReferences {
     if (cityId && !stateId) {
       throw AppException.validation([fieldError(at('stateId'), FieldErrorCode.REQUIRED)]);
     }
-    if (countryId) await this.requireShown(tx, 'countries', countryId, at('countryId'));
-    if (stateId) await this.requireShown(tx, 'states', stateId, at('stateId'));
-    if (cityId) await this.requireShown(tx, 'cities', cityId, at('cityId'));
+    if (countryId && countryId !== current.countryId) {
+      await this.requireShown(tx, 'countries', countryId, at('countryId'));
+    }
+    if (stateId && stateId !== current.stateId) {
+      await this.requireShown(tx, 'states', stateId, at('stateId'));
+    }
+    if (cityId && cityId !== current.cityId) {
+      await this.requireShown(tx, 'cities', cityId, at('cityId'));
+    }
     if (stateId && (await this.masters.parentOf(tx, 'states', stateId)) !== countryId) {
       throw AppException.validation([fieldError(at('stateId'), FieldErrorCode.INVALID_VALUE)]);
     }

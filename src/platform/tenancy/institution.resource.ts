@@ -32,7 +32,7 @@ export interface InstitutionResource extends AuthorStamps {
 
 /**
  * The Institution as its Society sees it (INS-02 to INS-04): the resource and the class categories it offers, in
- * the order of the master list. Super Admin has no view of an Institution's setup (PLT-45 leaves them out).
+ * the order of the master list. Super Admin sees the same in PLT-45.
  */
 export interface InstitutionDetail extends InstitutionResource {
   classesOffered: ClassCategoryRef[];

@@ -273,7 +273,7 @@ describe('InstitutionService', () => {
       t.offeredIds.mockResolvedValue(['k1', 'k2']);
       await t.service.update(owner, 'inst-1', patch({ version: 2, classesOffered: ['k2', 'k3'] }));
       expect(t.requireAllShown).toHaveBeenLastCalledWith(t.tx, 'class_categories', [
-        { id: 'k3', field: 'classesOffered[0]' },
+        { id: 'k3', field: 'classesOffered[1]' },
       ]);
       expect(t.withdraw).toHaveBeenCalledWith(t.tx, 'inst-1', ['k1']);
       expect(t.offer).toHaveBeenCalledWith(t.tx, [
@@ -312,6 +312,22 @@ describe('InstitutionService', () => {
         patch({ version: 2, address: { line1: '12 Lake Road', countryId: 'c1', stateId: 's2' } }),
       );
       expect(t.requirePlace).toHaveBeenCalledOnce();
+      // The stored place goes with it, so parts that are not new are not checked as shown again.
+      expect(t.requirePlace).toHaveBeenCalledWith(
+        t.tx,
+        expect.objectContaining({ stateId: 's2' }),
+        'address',
+        { countryId: 'c1', stateId: 's1', cityId: null },
+      );
+    });
+
+    it('names the position in the request when a category beside one it already has is hidden', async () => {
+      const t = build();
+      t.offeredIds.mockResolvedValue(['k1']);
+      await t.service.update(owner, 'inst-1', patch({ version: 2, classesOffered: ['k1', 'k9'] }));
+      expect(t.requireAllShown).toHaveBeenLastCalledWith(t.tx, 'class_categories', [
+        { id: 'k9', field: 'classesOffered[1]' },
+      ]);
     });
   });
 

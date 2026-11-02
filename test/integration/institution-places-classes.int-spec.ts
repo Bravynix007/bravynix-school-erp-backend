@@ -371,6 +371,67 @@ describe('INS-02 to INS-04 the place and the classes offered (API design 10.4c)'
       });
     });
 
+    it('names the position of a hidden category in the request when the list also holds one the Institution has', async () => {
+      const kept = category('NURSERY').id;
+      const created = await made({ classesOffered: [kept] });
+      const hidden = await scratchEntry('class-categories', 'class_categories', {
+        code: `T${newId().slice(-8).toUpperCase()}`,
+        name: `Scratch ${newId().slice(-6)}`,
+      });
+      await api('delete', `/v1/platform/masters/class-categories/${hidden.id}`, admin);
+      const res = await patch(created.id, { version: 1, classesOffered: [kept, hidden.id] });
+      expect(res.status).toBe(422);
+      expect(res.body.errors?.[0]).toMatchObject({
+        field: 'classesOffered[1]',
+        code: 'REFERENCE_INACTIVE',
+      });
+      expect(await offeredRows(created.id)).toEqual([kept]);
+    });
+
+    it('changes only the city while the stored state is hidden, checking only the new city', async () => {
+      const country = await scratchEntry('countries', 'countries', {
+        name: `Scratch ${newId().slice(-6)}`,
+        iso2: 'ZW',
+      });
+      const state = await scratchEntry('states', 'states', {
+        countryId: country.id,
+        name: `State ${newId().slice(-6)}`,
+      });
+      const city = await scratchEntry('cities', 'cities', {
+        stateId: state.id,
+        name: `City ${newId().slice(-6)}`,
+      });
+      const place = { countryId: country.id, stateId: state.id };
+      const created = await made({ address: { line1: 'a', ...place } });
+      await api('delete', `/v1/platform/masters/states/${state.id}`, admin);
+      const res = await patch(created.id, {
+        version: 1,
+        address: { line1: 'a', ...place, cityId: city.id },
+      });
+      expect(res.status).toBe(200);
+      expect((res.body.data as unknown as Institution).address).toMatchObject({ cityId: city.id });
+    });
+
+    it('accepts IDs in upper case, as the path does, and still sees a repeat in another case', async () => {
+      const nursery = category('NURSERY').id;
+      const created = await made({
+        address: {
+          line1: 'a',
+          countryId: india.id.toUpperCase(),
+          stateId: karnataka.id.toUpperCase(),
+        },
+        classesOffered: [nursery.toUpperCase()],
+      });
+      expect(created.address).toMatchObject({ countryId: india.id, stateId: karnataka.id });
+      expect(created.classesOffered.map((c) => c.id)).toEqual([nursery]);
+      const twice = await patch(created.id, {
+        version: 1,
+        classesOffered: [nursery, nursery.toUpperCase()],
+      });
+      expect(twice.status).toBe(400);
+      expect(twice.body.errors?.[0]).toMatchObject({ field: 'classesOffered' });
+    });
+
     it('keeps a place the Institution already has after its entry is hidden, and refuses it as a new link', async () => {
       const country = await scratchEntry('countries', 'countries', {
         name: `Scratch ${newId().slice(-6)}`,
