@@ -7,6 +7,7 @@ import type { ColumnType, Generated } from 'kysely';
 declare module '../../platform/database/schema.js' {
   interface Database {
     academic_years: AcademicYearsTable;
+    subjects: SubjectsTable;
   }
 }
 
@@ -26,4 +27,19 @@ export interface AcademicYearsTable {
   start_date: string;
   end_date: string;
   is_current: Generated<boolean>;
+}
+
+/** One subject of a Society, shared by its Institutions. A subject is deactivated (`status` 0), never deleted. */
+export interface SubjectsTable {
+  id: Generated<string>;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  created_by: string | null;
+  updated_at: ColumnType<Date, never, Date>;
+  updated_by: string | null;
+  version: Generated<number>;
+  /** 1 active, 0 deactivated. */
+  status: Generated<number>;
+  society_id: string;
+  name: string;
+  code: string | null;
 }
