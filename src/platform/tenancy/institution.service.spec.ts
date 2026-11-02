@@ -288,6 +288,27 @@ describe('InstitutionService', () => {
       );
     });
 
+    it('answers 409 CATEGORY_IN_USE when the database refuses to untick a category a class is in', async () => {
+      const t = build();
+      t.offeredIds.mockResolvedValue(['k1']);
+      t.withdraw.mockRejectedValueOnce(
+        Object.assign(new Error('fk'), {
+          code: '23503',
+          constraint: 'fk_classes_offered_category',
+        }),
+      );
+      const error = await refusal(
+        t.service.update(owner, 'inst-1', patch({ version: 2, classesOffered: ['k2'] })),
+      );
+      expect(error).toMatchObject({ status: 409, code: 'CATEGORY_IN_USE' });
+      expect(error.options.errors).toEqual([expect.objectContaining({ field: 'classesOffered' })]);
+      const other = new Error('boom');
+      t.withdraw.mockRejectedValueOnce(other);
+      await expect(
+        t.service.update(owner, 'inst-1', patch({ version: 2, classesOffered: ['k2'] })),
+      ).rejects.toBe(other);
+    });
+
     it('writes nothing for the classes it already has, in any order', async () => {
       const t = build();
       t.offeredIds.mockResolvedValue(['k1', 'k2']);
@@ -479,6 +500,11 @@ describe('InstitutionService', () => {
         expect.any(Function),
       );
       expect(t.findWithBlocks).toHaveBeenCalledWith(t.tx, 'inst-1');
+      // The classes offered are read inside the Institution's own scope.
+      expect(t.transaction).toHaveBeenLastCalledWith(
+        expect.objectContaining({ societyId: 'society-1', institutionIds: ['inst-1'] }),
+        expect.any(Function),
+      );
       expect(result).toMatchObject({
         id: 'inst-1',
         societyId: 'society-1',
