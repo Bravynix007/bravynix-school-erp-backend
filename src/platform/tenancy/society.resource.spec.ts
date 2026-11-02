@@ -32,7 +32,7 @@ const people = new Map([
 
 describe('Society resource (API design 10.4b)', () => {
   it('shows every empty field as null, and the address as three nulls', () => {
-    expect(societyResource(row(), people)).toMatchObject({
+    expect(societyResource(row(), people, '0.00')).toMatchObject({
       description: null,
       email: null,
       phone: null,
@@ -41,6 +41,7 @@ describe('Society resource (API design 10.4b)', () => {
       address: { line1: null, line2: null, pincode: null },
       blockedSections: [],
       institutionCount: 2,
+      outstandingDuesAmount: '0.00',
       version: 3,
     });
   });
@@ -49,6 +50,7 @@ describe('Society resource (API design 10.4b)', () => {
     const resource = societyResource(
       row({ country_code: '91', phone_number: '9876543210', owners_blocked: true }),
       people,
+      '0.00',
     );
     expect(resource.phone).toEqual({ countryCode: '91', number: '9876543210' });
     expect(resource.blockedSections).toEqual(['owners']);

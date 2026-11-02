@@ -150,10 +150,9 @@ export class SocietyService {
     );
     const owners = await this.grants.societyOwners(id);
     return {
-      ...(await this.resource(row)),
+      ...(await this.resource(row, owed)),
       institutions: institutionsOf(institutions),
       owners,
-      outstandingDuesAmount: owed,
     };
   }
 
@@ -185,37 +184,40 @@ export class SocietyService {
       });
     for (const owner of owners) this.owners.welcome(owner, row);
     return {
-      ...(await this.resource(row)),
+      ...(await this.resource(row, OWES_NOTHING)),
       institutions: [],
       owners: await this.grants.societyOwners(id),
-      outstandingDuesAmount: OWES_NOTHING,
     };
   }
 
   async update(principal: Principal, id: string, body: UpdateSocietyDto): Promise<SocietyResource> {
-    const row = await this.database.transaction(platformTenant(principal, id), async (tx) => {
-      const current = await this.lockedAt(tx, id, body.version);
-      requireActive(current);
-      const wanted: SocietyChanges = {
-        ...(body.name === undefined ? {} : { name: body.name }),
-        ...profileColumns(body),
-      };
-      // A request that changes nothing writes nothing: no new version, no audit entry.
-      const changes = Object.fromEntries(
-        Object.entries(wanted).filter(
-          ([column, value]) => current[column as keyof SocietyRow] !== value,
-        ),
-      ) as SocietyChanges;
-      if (Object.keys(changes).length === 0) return current;
-      await this.societies.update(tx, id, { ...changes, ...updateStamp(principal.personId) });
-      const updated = await this.mustFind(tx, id);
-      await this.record(tx, 'society.update', updated, {
-        before: auditView(current),
-        after: auditView(updated),
-      });
-      return updated;
-    });
-    return this.resource(row);
+    const { row, owed } = await this.database.transaction(
+      platformTenant(principal, id),
+      async (tx) => {
+        const current = await this.lockedAt(tx, id, body.version);
+        requireActive(current);
+        const wanted: SocietyChanges = {
+          ...(body.name === undefined ? {} : { name: body.name }),
+          ...profileColumns(body),
+        };
+        // A request that changes nothing writes nothing: no new version, no audit entry.
+        const changes = Object.fromEntries(
+          Object.entries(wanted).filter(
+            ([column, value]) => current[column as keyof SocietyRow] !== value,
+          ),
+        ) as SocietyChanges;
+        const stillDue = (await this.dues.outstanding(tx, [id])).get(id) ?? OWES_NOTHING;
+        if (Object.keys(changes).length === 0) return { row: current, owed: stillDue };
+        await this.societies.update(tx, id, { ...changes, ...updateStamp(principal.personId) });
+        const updated = await this.mustFind(tx, id);
+        await this.record(tx, 'society.update', updated, {
+          before: auditView(current),
+          after: auditView(updated),
+        });
+        return { row: updated, owed: stillDue };
+      },
+    );
+    return this.resource(row, owed);
   }
 
   /** Deactivates; the Society's people lose access at once (see `GrantDirectory.endAccessInSociety`). */
@@ -254,8 +256,8 @@ export class SocietyService {
     return row;
   }
 
-  private async resource(row: SocietyRow): Promise<SocietyResource> {
-    return societyResource(row, await this.people.describe(peopleOf([row])));
+  private async resource(row: SocietyRow, owed: string): Promise<SocietyResource> {
+    return societyResource(row, await this.people.describe(peopleOf([row])), owed);
   }
 
   /** The audit entry carries the Society's ID, so its owners see it in AUD-01 (API design 20.3). */

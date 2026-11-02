@@ -88,7 +88,7 @@ describe('DueRepository', () => {
       expect(queries).toEqual([]);
       expect(await repository.outstandingBySociety(tx, ['s1', 's2'])).toEqual(new Map());
       expect(queries[0]!.sql).toBe(
-        'select "society_id", sum(total_amount)::numeric(14,2)::text as "total" from "platform_dues" where "society_id" in ($1, $2) and "due_status" = $3 group by "society_id"',
+        'select "society_id", sum(total_amount)::text as "total" from "platform_dues" where "society_id" in ($1, $2) and "due_status" = $3 group by "society_id"',
       );
       expect(queries[0]!.parameters).toEqual(['s1', 's2', 1]);
     });
@@ -97,7 +97,7 @@ describe('DueRepository', () => {
       const { tx, queries } = recorder();
       await ignoringNoRows(repository.outstandingTotal(tx));
       expect(queries[0]!.sql).toBe(
-        'select coalesce(sum(total_amount), 0)::numeric(14,2)::text as "total" from "platform_dues" where "due_status" = $1',
+        'select coalesce(sum(total_amount), 0.00)::text as "total" from "platform_dues" where "due_status" = $1',
       );
       expect(queries[0]!.parameters).toEqual([1]);
     });
@@ -106,7 +106,7 @@ describe('DueRepository', () => {
       const { tx, queries } = recorder();
       await ignoringNoRows(repository.collectedBetween(tx, '2026-11-01', '2026-12-01'));
       expect(queries[0]!.sql).toBe(
-        'select coalesce(sum(total_amount), 0)::numeric(14,2)::text as "total" from "platform_dues" where "due_status" = $1 and "paid_date" >= $2 and "paid_date" < $3',
+        'select coalesce(sum(total_amount), 0.00)::text as "total" from "platform_dues" where "due_status" = $1 and "paid_date" >= $2 and "paid_date" < $3',
       );
       expect(queries[0]!.parameters).toEqual([2, '2026-11-01', '2026-12-01']);
     });

@@ -178,6 +178,28 @@ describe('SocietyService', () => {
       expect(error.status).toBe(404);
     });
 
+    it('answers with what the Society owes, read in the same transaction, changed or not', async () => {
+      const t = build();
+      t.outstanding.mockResolvedValue(new Map([['society-1', '8000.00']]));
+      const same = await t.service.update(
+        principal,
+        'society-1',
+        patch({ version: 2, name: 'Sunrise', description: 'Old', email: null }),
+      );
+      expect(same.outstandingDuesAmount).toBe('8000.00');
+      expect(t.outstanding).toHaveBeenCalledWith(t.tx, ['society-1']);
+
+      t.find
+        .mockResolvedValueOnce(society())
+        .mockResolvedValueOnce(society({ version: 3, name: 'New' }));
+      const changed = await t.service.update(
+        principal,
+        'society-1',
+        patch({ version: 2, name: 'New' }),
+      );
+      expect(changed.outstandingDuesAmount).toBe('8000.00');
+    });
+
     it('writes nothing, and keeps the version, when the request changes nothing', async () => {
       const t = build();
       const result = await t.service.update(

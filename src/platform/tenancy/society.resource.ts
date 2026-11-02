@@ -21,6 +21,8 @@ export interface SocietyResource extends AuthorStamps {
   /** `['owners']` while the Society's Owners are blocked, else empty. */
   blockedSections: 'owners'[];
   institutionCount: number;
+  /** What the Society still owes BravyNix: the total of its dues that are still Due (PLT-03, PLT-04, PLT-05). */
+  outstandingDuesAmount: string;
   version: number;
 }
 
@@ -38,8 +40,6 @@ export interface SocietySummary extends AuthorStamps {
 }
 
 export interface SocietyDetail extends SocietyResource {
-  /** The same figure on the profile, the "dues summary" of PLT-04. */
-  outstandingDuesAmount: string;
   institutions: {
     id: string;
     code: string;
@@ -59,7 +59,11 @@ export function peopleOf(rows: readonly SocietyRow[]): string[] {
     .filter((id): id is string => id !== null);
 }
 
-export function societyResource(row: SocietyRow, people: People): SocietyResource {
+export function societyResource(
+  row: SocietyRow,
+  people: People,
+  outstandingDuesAmount: string,
+): SocietyResource {
   return {
     id: row.id,
     code: row.code,
@@ -76,6 +80,7 @@ export function societyResource(row: SocietyRow, people: People): SocietyResourc
     status: row.status,
     blockedSections: row.owners_blocked ? ['owners'] : [],
     institutionCount: row.institution_count,
+    outstandingDuesAmount,
     version: row.version,
     ...authorStamps(row, people),
   };

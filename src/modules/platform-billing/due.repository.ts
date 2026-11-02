@@ -72,7 +72,7 @@ export class DueRepository {
     if (societyIds.length === 0) return new Map();
     const rows = await tx
       .selectFrom('platform_dues')
-      .select(['society_id', sql<string>`sum(total_amount)::numeric(14,2)::text`.as('total')])
+      .select(['society_id', sql<string>`sum(total_amount)::text`.as('total')])
       .where('society_id', 'in', societyIds)
       .where('due_status', '=', DueStatus.Due)
       .groupBy('society_id')
@@ -102,7 +102,7 @@ export class DueRepository {
     ) => SelectQueryBuilder<Database, 'platform_dues', object>,
   ): Promise<string> {
     const { total } = await narrow(tx.selectFrom('platform_dues'))
-      .select(sql<string>`coalesce(sum(total_amount), 0)::numeric(14,2)::text`.as('total'))
+      .select(sql<string>`coalesce(sum(total_amount), 0.00)::text`.as('total'))
       .executeTakeFirstOrThrow();
     return total;
   }

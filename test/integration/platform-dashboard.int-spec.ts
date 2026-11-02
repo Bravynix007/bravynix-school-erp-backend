@@ -81,7 +81,12 @@ describe('PLT-01 dashboard and the outstanding dues of PLT-02 and PLT-04 (API de
   };
 
   /** A due of `students` × 50.00 for its own period, so one Institution can have several. */
-  const raise = async (institutionId: string, students: number, year: number) => {
+  const raise = async (
+    institutionId: string,
+    students: number,
+    year: number,
+    extra: object = {},
+  ) => {
     const res = await request(t.app.getHttpServer())
       .post(duesPath)
       .set('Authorization', `Bearer ${admin}`)
@@ -92,6 +97,7 @@ describe('PLT-01 dashboard and the outstanding dues of PLT-02 and PLT-04 (API de
         periodEndDate: `${year + 1}-03-31`,
         studentCount: students,
         studentCountNote: 'Counted from the register',
+        ...extra,
       });
     expect(res.status).toBe(201);
     return res.body.data as { id: string; totalAmount: string };
@@ -224,11 +230,14 @@ describe('PLT-01 dashboard and the outstanding dues of PLT-02 and PLT-04 (API de
       const { institutionId } = await world();
       const before = await read();
       const a = await raise(institutionId, 100, 2031); // 5000.00
-      const b = await raise(institutionId, 200, 2032); // 10000.00
+      const b = await raise(institutionId, 200, 2032, {
+        adjustmentAmount: '-500.00',
+        adjustmentNote: 'Early payment',
+      }); // 10000.00 less 500.00
       const c = await raise(institutionId, 300, 2033); // 15000.00
       expect(
         cents((await read()).duesOutstandingAmount) - cents(before.duesOutstandingAmount),
-      ).toBe(3_000_000);
+      ).toBe(2_950_000);
 
       await pay(a.id, '2035-06-01');
       const cancelled = await api('post', `${duesPath}/${c.id}/cancel`, admin, {
@@ -238,9 +247,9 @@ describe('PLT-01 dashboard and the outstanding dues of PLT-02 and PLT-04 (API de
       expect(cancelled.status).toBe(200);
       const after = await read();
       expect(cents(after.duesOutstandingAmount) - cents(before.duesOutstandingAmount)).toBe(
-        1_000_000,
+        950_000,
       );
-      expect(b.totalAmount).toBe('10000.00');
+      expect(b.totalAmount).toBe('9500.00');
     });
 
     it('counts a payment in the month of its paid date, by India’s calendar, and nothing outside the two months', async () => {
@@ -248,7 +257,10 @@ describe('PLT-01 dashboard and the outstanding dues of PLT-02 and PLT-04 (API de
       const before = await read();
       const dues = [
         await raise(institutionId, 100, 2030), // 5000.00, paid two months ago
-        await raise(institutionId, 200, 2031), // 10000.00, paid on the last day of last month
+        await raise(institutionId, 200, 2031, {
+          adjustmentAmount: '-500.00',
+          adjustmentNote: 'Early payment',
+        }), // 10000.00 less 500.00, paid on the last day of last month
         await raise(institutionId, 300, 2032), // 15000.00, paid on the first day of this month
         await raise(institutionId, 400, 2033), // 20000.00, paid on the last day of this month
       ];
@@ -266,7 +278,7 @@ describe('PLT-01 dashboard and the outstanding dues of PLT-02 and PLT-04 (API de
       const after = await read();
       expect(
         cents(after.duesCollectedLastMonthAmount) - cents(before.duesCollectedLastMonthAmount),
-      ).toBe(1_000_000);
+      ).toBe(950_000);
       expect(
         cents(after.duesCollectedThisMonthAmount) - cents(before.duesCollectedThisMonthAmount),
       ).toBe(1_500_000);
@@ -289,6 +301,34 @@ describe('PLT-01 dashboard and the outstanding dues of PLT-02 and PLT-04 (API de
   });
 
   describe('PLT-02 and PLT-04 outstanding dues', () => {
+    it('answers PLT-05 with the amount too, whether or not the update changed anything', async () => {
+      const { societyId, institutionId } = await world();
+      await raise(institutionId, 100, 2031); // 5000.00
+      const changed = await api('patch', `/v1/platform/societies/${societyId}`, admin, {
+        version: 1,
+        name: 'Renamed Trust',
+      });
+      expect(changed.status).toBe(200);
+      expect(changed.body.data.outstandingDuesAmount).toBe('5000.00');
+      const same = await api('patch', `/v1/platform/societies/${societyId}`, admin, {
+        version: 2,
+        name: 'Renamed Trust',
+      });
+      expect(same.status).toBe(200);
+      expect(same.body.data.outstandingDuesAmount).toBe('5000.00');
+    });
+
+    it('keeps a deactivated Society’s dues in the total', async () => {
+      const { societyId, institutionId } = await world();
+      await raise(institutionId, 100, 2031); // 5000.00
+      const before = await read();
+      const ended = await api('delete', `/v1/platform/societies/${societyId}`, admin);
+      expect(ended.status).toBe(200);
+      expect((await read()).duesOutstandingAmount).toBe(before.duesOutstandingAmount);
+      const detail = await api('get', `/v1/platform/societies/${societyId}`, admin);
+      expect(detail.body.data.outstandingDuesAmount).toBe('5000.00');
+    });
+
     it('is 0.00 for a Society with no dues, on the list, the detail and the create answer', async () => {
       const created = await api('post', '/v1/platform/societies', admin, {
         name: 'Fresh Trust',
@@ -315,7 +355,10 @@ describe('PLT-01 dashboard and the outstanding dues of PLT-02 and PLT-04 (API de
       const a = await world();
       const b = await world();
       const owes = await raise(a.institutionId, 100, 2031); // 5000.00
-      await raise(a.institutionId, 200, 2032); // 10000.00
+      await raise(a.institutionId, 200, 2032, {
+        adjustmentAmount: '-500.00',
+        adjustmentNote: 'Early payment',
+      }); // 10000.00 less 500.00
       const paid = await raise(a.institutionId, 300, 2033);
       const cancelled = await raise(a.institutionId, 400, 2034);
       await raise(b.institutionId, 20, 2031); // 1000.00
@@ -331,15 +374,15 @@ describe('PLT-01 dashboard and the outstanding dues of PLT-02 and PLT-04 (API de
           (line) => [line.id, line.outstandingDuesAmount],
         ),
       );
-      expect(amounts.get(a.societyId)).toBe('15000.00');
+      expect(amounts.get(a.societyId)).toBe('14500.00');
       expect(amounts.get(b.societyId)).toBe('1000.00');
 
       const detail = await api('get', `/v1/platform/societies/${a.societyId}`, admin);
-      expect(detail.body.data.outstandingDuesAmount).toBe('15000.00');
+      expect(detail.body.data.outstandingDuesAmount).toBe('14500.00');
 
       await pay(owes.id, '2035-06-01');
       const again = await api('get', `/v1/platform/societies/${a.societyId}`, admin);
-      expect(again.body.data.outstandingDuesAmount).toBe('10000.00');
+      expect(again.body.data.outstandingDuesAmount).toBe('9500.00');
     });
   });
 });
