@@ -39,3 +39,16 @@ export function addressColumns(address: AddressInput | null) {
     pincode: address?.pincode ?? null,
   };
 }
+
+/** The place of an Institution's address as table columns; replaced with the address, so a missing part is `null`. */
+export function placeColumns(place: {
+  countryId?: string | null;
+  stateId?: string | null;
+  cityId?: string | null;
+}) {
+  return {
+    country_id: place.countryId ?? null,
+    state_id: place.stateId ?? null,
+    city_id: place.cityId ?? null,
+  };
+}
