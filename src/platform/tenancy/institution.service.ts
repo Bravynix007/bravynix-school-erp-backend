@@ -193,11 +193,7 @@ export class InstitutionService {
       platformTenant(principal, row.society_id, [id]),
       (tx) => this.offered(tx, id),
     );
-    return platformInstitution(
-      row,
-      await this.people.describe(authorIdsOf([row])),
-      offered,
-    );
+    return platformInstitution(row, await this.people.describe(authorIdsOf([row])), offered);
   }
 
   /** INS-03: inside the caller's scope only; an Institution whose staff are blocked answers 423 to its staff. */
@@ -227,7 +223,7 @@ export class InstitutionService {
         requireActive(society);
         const classesOffered = body.classesOffered ?? [];
         await this.masters.requirePlace(tx, body.address, 'address');
-        await this.requireCategories(tx, classesOffered);
+        await this.requireCategories(tx, classesOffered, classesOffered);
         await this.institutions.insert(tx, {
           id,
           society_id: societyId,
@@ -281,10 +277,14 @@ export class InstitutionService {
         body.address !== undefined &&
         ('country_id' in changes || 'state_id' in changes || 'city_id' in changes)
       ) {
-        await this.masters.requirePlace(tx, body.address, 'address');
+        await this.masters.requirePlace(tx, body.address, 'address', {
+          countryId: current.country_id,
+          stateId: current.state_id,
+          cityId: current.city_id,
+        });
       }
       const { added, removed } = diffOffered(before, body.classesOffered);
-      await this.requireCategories(tx, added);
+      await this.requireCategories(tx, body.classesOffered ?? [], added);
       if (Object.keys(changes).length === 0 && added.length === 0 && removed.length === 0) {
         return { row: current, offered: before };
       }
@@ -355,12 +355,22 @@ export class InstitutionService {
     return this.masters.classCategories(tx, await this.institutions.offeredIds(tx, institutionId));
   }
 
-  /** A category a request adds exists (404) and is shown (422 `REFERENCE_INACTIVE`, naming `classesOffered[i]`). */
-  private requireCategories(tx: Tx, ids: readonly string[]): Promise<void> {
+  /**
+   * A category a request adds exists (404) and is shown (422 `REFERENCE_INACTIVE`). The field is the position in
+   * the request's own list (`classesOffered[1]`), and a category the Institution already offers is not checked
+   * again: it may stay after it is hidden.
+   */
+  private requireCategories(
+    tx: Tx,
+    requested: readonly string[],
+    added: readonly string[],
+  ): Promise<void> {
     return this.masters.requireAllShown(
       tx,
       'class_categories',
-      ids.map((id, i) => ({ id, field: `classesOffered[${i}]` })),
+      requested
+        .map((id, i) => ({ id, field: `classesOffered[${i}]` }))
+        .filter((entry) => added.includes(entry.id)),
     );
   }
 

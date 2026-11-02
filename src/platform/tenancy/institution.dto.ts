@@ -21,6 +21,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { RequiredAddressDto } from '../../common/validation/address.dto.js';
+import { LowerCaseUuid } from '../../common/validation/lower-case-uuid.js';
 import { PhoneDto } from '../../common/validation/phone.dto.js';
 import { VersionDto } from '../../common/validation/version.dto.js';
 import { WhenPresent } from '../../common/validation/when-present.js';
@@ -52,16 +53,19 @@ export class LocationDto {
 export class InstitutionAddressDto extends RequiredAddressDto {
   @ApiPropertyOptional({ format: 'uuid', nullable: true })
   @IsOptional()
+  @LowerCaseUuid()
   @IsUUID()
   countryId?: string | null;
 
   @ApiPropertyOptional({ format: 'uuid', nullable: true, description: 'A state of the country' })
   @IsOptional()
+  @LowerCaseUuid()
   @IsUUID()
   stateId?: string | null;
 
   @ApiPropertyOptional({ format: 'uuid', nullable: true, description: 'A city of the state' })
   @IsOptional()
+  @LowerCaseUuid()
   @IsUUID()
   cityId?: string | null;
 }
@@ -127,6 +131,7 @@ class InstitutionProfileDto {
       'The class categories the Institution offers (platform masters). On a change the list replaces the old one; it cannot be cleared with null.',
   })
   @WhenPresent()
+  @LowerCaseUuid()
   @IsArray()
   @ArrayMaxSize(50)
   @ArrayUnique()

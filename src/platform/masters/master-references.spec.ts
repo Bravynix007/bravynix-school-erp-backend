@@ -80,6 +80,30 @@ describe('MasterReferences.requirePlace', () => {
     await expect(Promise.all(accepted)).resolves.toHaveLength(5);
   });
 
+  it('checks as shown only the parts that are new, but always that the parts fit together', async () => {
+    const t = build({ ...shown, state: 0 }, { state: 'country', city: 'state' });
+    // The Institution already holds the hidden state, so only the new city is looked up.
+    await t.references.requirePlace(
+      tx,
+      { countryId: 'country', stateId: 'state', cityId: 'city' },
+      'address',
+      { countryId: 'country', stateId: 'state', cityId: null },
+    );
+    expect(t.statusesOf.mock.calls.map((call) => [call[1], call[2]])).toEqual([
+      ['cities', ['city']],
+    ]);
+    // A new part that does not fit is still refused.
+    const mismatch = await refusal(
+      t.references.requirePlace(tx, { countryId: 'other', stateId: 'state' }, 'address', {
+        countryId: 'country',
+        stateId: 'state',
+      }),
+    );
+    expect(mismatch.options.errors).toEqual([
+      expect.objectContaining({ field: 'address.stateId', code: 'INVALID_VALUE' }),
+    ]);
+  });
+
   it('wants the parent of a part, naming the field under the prefix', async () => {
     const t = build(shown, { state: 'country', city: 'state' });
     const noCountry = await refusal(t.references.requirePlace(tx, { stateId: 'state' }, 'address'));

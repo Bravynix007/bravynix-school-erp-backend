@@ -13,6 +13,7 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
+import { LowerCaseUuid } from '../../common/validation/lower-case-uuid.js';
 import { VersionDto } from '../../common/validation/version.dto.js';
 import { WhenPresent } from '../../common/validation/when-present.js';
 
@@ -166,6 +167,7 @@ export class UpdateCountryDto extends VersionDto {
 
 export class CreateStateDto {
   @ApiProperty({ format: 'uuid', description: 'The country; never changed' })
+  @LowerCaseUuid()
   @IsUUID()
   countryId!: string;
 
@@ -181,6 +183,7 @@ export class CreateStateDto {
 
 export class CreateCityDto {
   @ApiProperty({ format: 'uuid', description: 'The state; never changed' })
+  @LowerCaseUuid()
   @IsUUID()
   stateId!: string;
 
@@ -228,6 +231,7 @@ export class UpdateClassCategoryDto extends VersionDto {
 
 export class CreatePredefinedClassDto extends DisplayOrderDto {
   @ApiProperty({ format: 'uuid', description: 'The class category; never changed' })
+  @LowerCaseUuid()
   @IsUUID()
   classCategoryId!: string;
 
