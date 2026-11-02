@@ -6,7 +6,7 @@ import type { AuditService } from '../audit/index.js';
 import type { DatabaseService, TenantContext, Tx } from '../database/index.js';
 import type { PersonDirectory } from '../identity/index.js';
 import type { CreateAccessBlockDto } from './access-block.dto.js';
-import type { AccessBlockRepository, AccessBlockRow } from './access-block.repository.js';
+import type { AccessBlockRepository, PlatformBlockRow } from './access-block.repository.js';
 import { AccessBlockService } from './access-block.service.js';
 import type { InstitutionRepository, InstitutionRow } from './institution.repository.js';
 import type { RequestScope, ScopeService } from './scope.service.js';
@@ -17,7 +17,7 @@ const owner = { personId: 'owner-1', roleCode: 2, societyId: 'society-1' } as un
 const tx = {} as Tx;
 const now = '2026-10-27T10:00:00.000Z';
 
-const block = (overrides: Partial<AccessBlockRow> = {}): AccessBlockRow => ({
+const block = (overrides: Partial<PlatformBlockRow> = {}): PlatformBlockRow => ({
   id: 'block-1',
   created_at: new Date(now),
   created_by: 'admin-1',
@@ -29,6 +29,8 @@ const block = (overrides: Partial<AccessBlockRow> = {}): AccessBlockRow => ({
   reason: 'Dues',
   lifted_at: null,
   lifted_by: null,
+  society_name: 'Sunrise Trust',
+  institution_name: null,
   ...overrides,
 });
 
@@ -38,15 +40,18 @@ function build(
     institution?: Partial<InstitutionRow> | null;
   } = {},
 ) {
-  const society = options.society === undefined ? { status: 1 } : options.society;
+  const society =
+    options.society === undefined ? { status: 1, name: 'Sunrise Trust' } : options.society;
   const institution =
     options.institution === undefined
-      ? { status: 1, society_id: 'society-1' }
+      ? { status: 1, society_id: 'society-1', name: 'Green Valley School' }
       : options.institution;
   const transaction = vi.fn<DatabaseService['transaction']>((_tenant, work) => work(tx));
   const insert = vi
     .fn<AccessBlockRepository['insert']>()
-    .mockImplementation((_tx, values) => Promise.resolve(block(values as Partial<AccessBlockRow>)));
+    .mockImplementation((_tx, values) =>
+      Promise.resolve(block(values as Partial<PlatformBlockRow>)),
+    );
   const find = vi.fn<AccessBlockRepository['find']>().mockResolvedValue(block());
   const lift = vi
     .fn<AccessBlockRepository['lift']>()
@@ -118,12 +123,25 @@ describe('AccessBlockService.block (PLT-42)', () => {
         entityType: 'access_block',
       }),
     );
-    expect(resource).toMatchObject({ section: 'owners', institutionId: null, reason: 'Dues' });
+    expect(resource).toMatchObject({
+      section: 'owners',
+      societyName: 'Sunrise Trust',
+      institutionId: null,
+      institutionName: null,
+      reason: 'Dues',
+    });
   });
 
   it('runs a staff or students block in a context that names the Institution, so the audit row is admitted', async () => {
     const t = build();
-    await t.service.block(admin, dto({ section: 'staff', institutionId: 'inst-1' }));
+    const resource = await t.service.block(
+      admin,
+      dto({ section: 'staff', institutionId: 'inst-1' }),
+    );
+    expect(resource).toMatchObject({
+      societyName: 'Sunrise Trust',
+      institutionName: 'Green Valley School',
+    });
     expect(t.transaction.mock.calls[0]![0]).toMatchObject({ institutionIds: ['inst-1'] });
     expect(t.insert.mock.calls[0]![1]).toMatchObject({
       institution_id: 'inst-1',
@@ -259,6 +277,7 @@ describe('AccessBlockService.list (PLT-44)', () => {
       10,
     );
     expect(result.data).toHaveLength(1);
+    expect(result.data[0]).toMatchObject({ societyName: 'Sunrise Trust', institutionName: null });
     expect(result.options.meta).toMatchObject({ page: 2, limit: 10, totalItems: 1 });
   });
 

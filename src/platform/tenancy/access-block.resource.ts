@@ -1,6 +1,10 @@
 import { BlockSectionName, type BlockSection } from '../../common/auth/block-section.js';
 import { authorOf, type AuthorRef } from '../../common/http/author-stamps.js';
-import type { AccessBlockRow, SocietyBlockRow } from './access-block.repository.js';
+import type {
+  AccessBlockRow,
+  PlatformBlockRow,
+  SocietyBlockRow,
+} from './access-block.repository.js';
 import type { People } from './society.resource.js';
 
 /** A block as Super Admin sees it (PLT-42, PLT-44). */
@@ -8,7 +12,9 @@ export interface AccessBlockResource {
   id: string;
   section: 'owners' | 'staff' | 'students';
   societyId: string;
+  societyName: string;
   institutionId: string | null;
+  institutionName: string | null;
   reason: string;
   blockedAt: string;
   blockedBy: AuthorRef;
@@ -29,12 +35,14 @@ export function peopleOfBlocks(rows: readonly AccessBlockRow[]): string[] {
   return [...new Set(rows.map((row) => row.created_by))];
 }
 
-export function blockResource(row: AccessBlockRow, people: People): AccessBlockResource {
+export function blockResource(row: PlatformBlockRow, people: People): AccessBlockResource {
   return {
     id: row.id,
     section: BlockSectionName[row.section as BlockSection],
     societyId: row.society_id,
+    societyName: row.society_name,
     institutionId: row.institution_id,
+    institutionName: row.institution_name,
     reason: row.reason,
     blockedAt: row.created_at.toISOString(),
     blockedBy: authorOf(row.created_by, people),

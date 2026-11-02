@@ -164,7 +164,9 @@ describe('PLT-42 to PLT-44 and SOC-02 section blocks (API design 6.5, 10.4e)', (
         id: expect.any(String),
         section: 'owners',
         societyId,
+        societyName: 'Sunrise Trust',
         institutionId: null,
+        institutionName: null,
         reason: 'Annual fee unpaid',
         blockedAt: expect.stringMatching(/Z$/),
         blockedBy: { id: superAdmin.id, displayName: expect.any(String), roleName: 'Super Admin' },
@@ -448,6 +450,36 @@ describe('PLT-42 to PLT-44 and SOC-02 section blocks (API design 6.5, 10.4e)', (
       const second = await asAdmin('get', `${BLOCKS}?q=${tag}&limit=2&page=2`);
       expect(ids(second)).toEqual([a.body.data.id]);
       expect(second.body.meta).toEqual({ page: 2, limit: 2, totalItems: 3, totalPages: 2 });
+    });
+
+    it('names the Society, and the Institution when the block has one, so the console needs no second lookup', async () => {
+      const tag = newId().slice(-8);
+      const societyId = await society();
+      const inst = await institution(societyId);
+      const staff = await block('staff', societyId, inst.id, `Staff ${tag}`);
+      expect(staff.body.data).toMatchObject({
+        societyName: 'Sunrise Trust',
+        institutionId: inst.id,
+        institutionName: 'Green Valley School',
+      });
+      await block('owners', societyId, undefined, `Fees ${tag}`);
+      const res = await asAdmin('get', `${BLOCKS}?q=${tag}&sort=blockedAt`);
+      const rows = res.body.data as unknown as {
+        section: string;
+        societyId: string;
+        societyName: string;
+        institutionName: string | null;
+      }[];
+      expect(
+        rows.map(({ section, societyName, institutionName }) => ({
+          section,
+          societyName,
+          institutionName,
+        })),
+      ).toEqual([
+        { section: 'staff', societyName: 'Sunrise Trust', institutionName: 'Green Valley School' },
+        { section: 'owners', societyName: 'Sunrise Trust', institutionName: null },
+      ]);
     });
 
     it('answers 400 for an unknown sort, section or Society ID, and a short search', async () => {
