@@ -183,7 +183,15 @@ describe('PLT-19 and INS-01 to INS-05 Institutions', () => {
         email: 'office@gvs.example.org',
         phone: { countryCode: '91', number: '9876543210' },
         telephone: '080-1234567',
-        address: { line1: '12 Lake Road', line2: null, pincode: '560001' },
+        address: {
+          line1: '12 Lake Road',
+          line2: null,
+          pincode: '560001',
+          countryId: null,
+          stateId: null,
+          cityId: null,
+        },
+        classesOffered: [],
         location: { latitude: 12.971599, longitude: 77.594566 },
         status: 1,
         version: 1,
@@ -213,7 +221,14 @@ describe('PLT-19 and INS-01 to INS-05 Institutions', () => {
         phone: null,
         telephone: null,
         location: null,
-        address: { line1: '12 Lake Road', line2: null, pincode: null },
+        address: {
+          line1: '12 Lake Road',
+          line2: null,
+          pincode: null,
+          countryId: null,
+          stateId: null,
+          cityId: null,
+        },
       });
     });
 
@@ -501,7 +516,14 @@ describe('PLT-19 and INS-01 to INS-05 Institutions', () => {
       const path = `/v1/institutions/${inst.id}`;
       const edit = (body: object) => asOwner(societyId, 'patch', path, body);
       const replaced = await edit({ version: 1, address: { line1: 'C' } });
-      expect(replaced.body.data.address).toEqual({ line1: 'C', line2: null, pincode: null });
+      expect(replaced.body.data.address).toEqual({
+        line1: 'C',
+        line2: null,
+        pincode: null,
+        countryId: null,
+        stateId: null,
+        cityId: null,
+      });
       const cleared = await edit({ version: 2, phone: null, location: null });
       expect(cleared.body.data).toMatchObject({ phone: null, location: null, version: 3 });
       for (const address of [null, { line2: 'x' }, { line1: '' }]) {

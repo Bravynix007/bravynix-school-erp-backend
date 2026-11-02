@@ -72,25 +72,37 @@ export async function insertSubjects(
 }
 
 /**
- * Writes academic years. The table is scoped to its Institution, even for the table owner, so each year is written
- * with that Institution's scope set for the transaction. Safe to run twice: rows are keyed by their fixed IDs.
+ * Sets the scope an Institution's rows are written in. These tables are scoped to the Institution even for the
+ * table owner, so each row is written with that Institution's Society and ID set for the transaction. The
+ * Society is read as Super Admin. Returns the Society.
  */
+async function scopeTo(db: Kysely<unknown>, institutionId: string, what: string): Promise<string> {
+  await sql`select set_config('app.role_code', '1', true)`.execute(db);
+  const { rows } = await sql<{ society_id: string }>`
+    select society_id from institutions where id = ${institutionId}
+  `.execute(db);
+  const societyId = rows[0]?.society_id;
+  if (!societyId) throw new Error(`Seeded ${what} names an unknown Institution`);
+  await sql`
+    select set_config('app.society_id', ${societyId}, true),
+      set_config('app.institution_ids', ${institutionId}, true)
+  `.execute(db);
+  return societyId;
+}
+
+async function clearScope(db: Kysely<unknown>): Promise<void> {
+  await sql`
+    select set_config('app.society_id', '', true), set_config('app.institution_ids', '', true)
+  `.execute(db);
+}
+
+/** Writes academic years. Safe to run twice: rows are keyed by their fixed IDs. */
 export async function insertAcademicYears(
   db: Kysely<unknown>,
   years: readonly SeedAcademicYear[],
 ): Promise<void> {
   for (const year of years) {
-    // Institutions are read as Super Admin to learn the Society; the year is then written in that scope.
-    await sql`select set_config('app.role_code', '1', true)`.execute(db);
-    const { rows } = await sql<{ society_id: string }>`
-      select society_id from institutions where id = ${year.institutionId}
-    `.execute(db);
-    const societyId = rows[0]?.society_id;
-    if (!societyId) throw new Error(`Seeded academic year ${year.id} names an unknown Institution`);
-    await sql`
-      select set_config('app.society_id', ${societyId}, true),
-        set_config('app.institution_ids', ${year.institutionId}, true)
-    `.execute(db);
+    const societyId = await scopeTo(db, year.institutionId, `academic year ${year.id}`);
     await sql`
       insert into academic_years (id, society_id, institution_id, name, start_date, end_date, is_current)
       values (${year.id}, ${societyId}, ${year.institutionId}, ${year.name}, ${year.startDate},
@@ -98,12 +110,49 @@ export async function insertAcademicYears(
       on conflict (id) do nothing
     `.execute(db);
   }
-  await sql`
-    select set_config('app.society_id', '', true), set_config('app.institution_ids', '', true)
-  `.execute(db);
+  await clearScope(db);
 }
 
-/** The two-worlds scenario's years and subjects; runs after the identity seed, which writes the Institutions. */
+/** The class categories an Institution offers, by their codes in the platform masters (decision 24). */
+export interface SeedClassesOffered {
+  institutionId: string;
+  categories: readonly string[];
+}
+
+/** Two-worlds: A1 a school, A2 a pre-school, B1 a school with a Pre-University college, so every case has an Institution. */
+export const classesOffered: SeedClassesOffered[] = [
+  {
+    institutionId: institutions[0]!.id,
+    categories: ['LOWER_PRIMARY', 'HIGHER_PRIMARY', 'HIGH_SCHOOL'],
+  },
+  { institutionId: institutions[1]!.id, categories: ['PRE_SCHOOL', 'NURSERY', 'LOWER_PRIMARY'] },
+  {
+    institutionId: institutions[2]!.id,
+    categories: ['LOWER_PRIMARY', 'HIGHER_PRIMARY', 'HIGH_SCHOOL', 'PRE_UNIVERSITY'],
+  },
+];
+
+/**
+ * Writes what each Institution offers, so classes can be added to it at once. The categories are seeded by the
+ * migration. Safe to run twice: a category already offered is left as it is.
+ */
+export async function insertClassesOffered(
+  db: Kysely<unknown>,
+  offers: readonly SeedClassesOffered[],
+): Promise<void> {
+  for (const { institutionId, categories } of offers) {
+    const societyId = await scopeTo(db, institutionId, 'classes offered');
+    await sql`
+      insert into institution_class_categories (society_id, institution_id, class_category_id)
+      select ${societyId}, ${institutionId}, id from class_categories
+      where code in (${sql.join(categories.map((code) => sql.val(code)))})
+      on conflict do nothing
+    `.execute(db);
+  }
+  await clearScope(db);
+}
+
+/** The two-worlds scenario's years, subjects and classes offered; runs after the identity seed, which writes the Institutions. */
 export async function writeAcademicSeed(db: Kysely<unknown>): Promise<void> {
   if (db.isTransaction) return writeIn(db);
   await db.transaction().execute(writeIn);
@@ -112,4 +161,5 @@ export async function writeAcademicSeed(db: Kysely<unknown>): Promise<void> {
 async function writeIn(tx: Kysely<unknown>): Promise<void> {
   await insertAcademicYears(tx, academicYears);
   await insertSubjects(tx, subjects);
+  await insertClassesOffered(tx, classesOffered);
 }
