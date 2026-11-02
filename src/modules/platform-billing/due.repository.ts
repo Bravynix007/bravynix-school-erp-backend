@@ -49,6 +49,16 @@ export class DueRepository {
     return query.executeTakeFirst();
   }
 
+  /** Every due the transaction's tenant can read, newest first. An Owner's tenant reads their own Society's only. */
+  all(tx: Tx): Promise<DueRow[]> {
+    return tx
+      .selectFrom('platform_dues')
+      .selectAll()
+      .orderBy('created_at', 'desc')
+      .orderBy('id', 'desc')
+      .execute();
+  }
+
   async update(tx: Tx, id: string, changes: DueChanges): Promise<void> {
     await tx.updateTable('platform_dues').set(changes).where('id', '=', id).execute();
   }

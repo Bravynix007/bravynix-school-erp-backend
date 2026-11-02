@@ -40,6 +40,37 @@ export interface DueResource extends DueSummary, AuthorStamps {
   version: number;
 }
 
+/** A line of the Owner's list (BIL-01). The invoice file arrives with the Files module (Phase 4), so it is null until then. */
+export interface OwnerDueLine {
+  id: string;
+  invoiceNo: string;
+  institution: { id: string; name: string };
+  periodStartDate: string;
+  periodEndDate: string;
+  totalAmount: string;
+  dueStatus: number;
+  dueDate: string | null;
+  paidDate: string | null;
+  paymentMode: number | null;
+  paymentReference: string | null;
+  invoiceFile: null;
+}
+
+/** One due as its Owner reads it (BIL-02): what they were charged and how. BravyNix's own notes and stamps stay out. */
+export interface OwnerDue extends OwnerDueLine {
+  studentCount: number;
+  ratePerStudentAmount: string;
+  baseAmount: string;
+  adjustmentAmount: string;
+  adjustmentNote: string | null;
+}
+
+/** BIL-01: "You are due ₹X" and the dues, newest first. */
+export interface OwnerDues {
+  banner: { totalDueAmount: string; hasOpenDues: boolean };
+  dues: OwnerDueLine[];
+}
+
 /** PLT-24: what a due for a period starts from. The rate is null when none applies yet. */
 export interface DueQuote {
   institutionId: string;
@@ -104,4 +135,35 @@ export function peopleOfDues(rows: readonly DueRow[]): string[] {
       ),
     ),
   ];
+}
+
+export function ownerDueLine(
+  row: DueRow,
+  names: ReadonlyMap<string, InstitutionName>,
+): OwnerDueLine {
+  return {
+    id: row.id,
+    invoiceNo: row.invoice_no,
+    institution: { id: row.institution_id, name: names.get(row.institution_id)?.name ?? '' },
+    periodStartDate: row.period_start_date,
+    periodEndDate: row.period_end_date,
+    totalAmount: row.total_amount,
+    dueStatus: row.due_status,
+    dueDate: row.due_date,
+    paidDate: row.paid_date,
+    paymentMode: row.payment_mode,
+    paymentReference: row.payment_reference,
+    invoiceFile: null,
+  };
+}
+
+export function ownerDue(row: DueRow, names: ReadonlyMap<string, InstitutionName>): OwnerDue {
+  return {
+    ...ownerDueLine(row, names),
+    studentCount: row.student_count,
+    ratePerStudentAmount: row.rate_per_student_amount,
+    baseAmount: row.base_amount,
+    adjustmentAmount: row.adjustment_amount,
+    adjustmentNote: row.adjustment_note,
+  };
 }

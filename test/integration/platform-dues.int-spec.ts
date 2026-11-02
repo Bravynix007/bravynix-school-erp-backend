@@ -1353,11 +1353,12 @@ describe('PLT-24 to PLT-30 platform dues (PRD 9.3, API design 10.22)', () => {
     };
     const asSuperAdmin = { roleCode: 1, personId: superAdmin.id };
 
-    it('shows a due to Super Admin only: an Owner, an Admin and a request with no tenant read none, even their own Society’s', async () => {
+    it('shows a due to Super Admin and to the Owners of its Society only: an Admin, another Society’s Owner and a request with no tenant read none', async () => {
       const { societyId, institutionId } = await world();
       await raised(institutionId);
       expect((await read({ roleCode: 1, personId: superAdmin.id })).rows).toHaveLength(1);
-      expect((await read({ societyId, roleCode: 2 })).rows).toEqual([]);
+      expect((await read({ societyId, roleCode: 2 })).rows).toHaveLength(1);
+      expect((await read({ societyId: missing, roleCode: 2 })).rows).toEqual([]);
       expect(
         (await read({ societyId, roleCode: 3, institutionIds: [institutionId] })).rows,
       ).toEqual([]);

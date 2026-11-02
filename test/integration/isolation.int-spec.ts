@@ -279,8 +279,8 @@ describe('tenant isolation', () => {
       expect(await rates({})).toEqual([]);
     });
 
-    // Dues, like rates, are Super Admin's alone until the Owner's view arrives: one due in each Institution of each world, and nobody but Super Admin reads any.
-    it('shows Super Admin every due, and an Owner, an admin or a request with no tenant none, not even their own', async () => {
+    // Dues are Super Admin's, and each Society's Owner reads their own Society's (BIL-01): one due in each Institution of each world; an Admin and a request with no tenant read none.
+    it('shows Super Admin every due, an Owner their own Society’s only, and an admin or a request with no tenant none', async () => {
       await ownerDb.transaction().execute(async (tx) => {
         await sql`select set_config('app.role_code', '1', true)`.execute(tx);
         await sql`delete from platform_dues where invoice_no like 'ISO/%'`.execute(tx);
@@ -292,9 +292,13 @@ describe('tenant isolation', () => {
         expect((await dues({ roleCode: 1 })).map((row) => row.institution_id).toSorted()).toEqual(
           [a1.id, a2.id, b1.id].toSorted(),
         );
-        expect(await dues({ societyId: socA.id, roleCode: 2 })).toEqual([]);
-        expect(await dues({ societyId: socB.id, roleCode: 2, institutionIds: [b1.id] })).toEqual(
-          [],
+        const ownerOf = async (tenant: TenantContext) =>
+          (await dues(tenant)).map((row) => row.institution_id).toSorted();
+        expect(await ownerOf({ societyId: socA.id, roleCode: 2 })).toEqual(
+          [a1.id, a2.id].toSorted(),
+        );
+        expect(await ownerOf({ societyId: socB.id, roleCode: 2, institutionIds: [b1.id] })).toEqual(
+          [b1.id],
         );
         expect(await dues({ societyId: socA.id, roleCode: 3, institutionIds: [a1.id] })).toEqual(
           [],

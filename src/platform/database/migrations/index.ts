@@ -14,6 +14,7 @@ import * as m0012 from './2026_10_28_0012_billing_price_rates.js';
 import * as m0013 from './2026_11_01_0013_platform_idempotency_numbering.js';
 import * as m0014 from './2026_11_01_0014_billing_platform_dues.js';
 import * as m0015 from './2026_11_02_0015_billing_due_lifecycle.js';
+import * as m0016 from './2026_11_02_0016_billing_owner_view.js';
 
 /**
  * Every migration, in order. Listed explicitly (not read from disk) so the
@@ -39,6 +40,7 @@ const migrations: Record<string, Migration> = {
   '2026_11_01_0013_platform_idempotency_numbering': m0013,
   '2026_11_01_0014_billing_platform_dues': m0014,
   '2026_11_02_0015_billing_due_lifecycle': m0015,
+  '2026_11_02_0016_billing_owner_view': m0016,
 };
 
 export const migrationProvider: MigrationProvider = {

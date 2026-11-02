@@ -2,6 +2,7 @@ import { AppException } from '../../common/http/app-exception.js';
 import {
   dueAmounts,
   fromCents,
+  outstandingAmount,
   PAYMENT_MODES,
   rateAtPeriodStart,
   requireDue,
@@ -180,5 +181,26 @@ describe('requirePaidByToday', () => {
 describe('PAYMENT_MODES', () => {
   it('are cash, bank transfer, UPI and cheque (PRD 11.4)', () => {
     expect(PAYMENT_MODES).toEqual([1, 2, 3, 4]);
+  });
+});
+
+const due = (due_status: number, total_amount: string) => ({ due_status, total_amount });
+
+describe('outstandingAmount', () => {
+  it('adds up only the dues that are still Due, to the paisa', () => {
+    expect(
+      outstandingAmount([
+        due(1, '18000.00'),
+        due(2, '13750.00'),
+        due(0, '8100.00'),
+        due(1, '0.05'),
+        due(1, '19500.10'),
+      ]),
+    ).toBe('37500.15');
+  });
+
+  it('is 0.00 when nothing is Due', () => {
+    expect(outstandingAmount([])).toBe('0.00');
+    expect(outstandingAmount([due(2, '100.00'), due(0, '5.00')])).toBe('0.00');
   });
 });
