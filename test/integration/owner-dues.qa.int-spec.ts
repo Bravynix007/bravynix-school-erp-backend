@@ -270,7 +270,6 @@ describe('QA: BIL-01 and BIL-02 the Owner view, adversarial (PRD 9.3, API design
       );
       const after = await api('get', ownerDuesPath, token);
       const detail = await api('get', `${ownerDuesPath}/${due.id}`, token);
-      console.log('QA-Q1 revoked grant:', after.status, after.body.code, detail.status);
       expect([401, 403]).toContain(after.status);
       expect([401, 403, 404]).toContain(detail.status);
     });
@@ -297,7 +296,6 @@ describe('QA: BIL-01 and BIL-02 the Owner view, adversarial (PRD 9.3, API design
         expect([id.slice(0, 40), res.status]).toEqual([id.slice(0, 40), 404]);
       }
       const upper = await api('get', `${ownerDuesPath}/${own.id.toUpperCase()}`, a.owner.token);
-      console.log('QA-Q2 own ID in upper case:', upper.status);
       expect([200, 404]).toContain(upper.status);
     });
 
@@ -468,7 +466,6 @@ describe('QA: BIL-01 and BIL-02 the Owner view, adversarial (PRD 9.3, API design
       await raised(institutionId);
       expect((await api('delete', `/v1/platform/societies/${societyId}`, admin)).status).toBe(200);
       const res = await api('get', ownerDuesPath, owner.token);
-      console.log('QA-Q6 deactivated Society, Owner list:', res.status, res.body.code ?? '');
       expect(res.status).toBeLessThan(500);
     });
   });
