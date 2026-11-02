@@ -1,4 +1,5 @@
 import { authorStamps, type AuthorStamps } from '../../common/http/author-stamps.js';
+import type { ClassCategoryRef } from '../masters/index.js';
 import type { Phone } from '../../common/validation/phone.dto.js';
 import type { InstitutionListRow, InstitutionRow } from './institution.repository.js';
 import type { People } from './society.resource.js';
@@ -16,10 +17,25 @@ export interface InstitutionResource extends AuthorStamps {
   email: string | null;
   phone: Phone | null;
   telephone: string | null;
-  address: { line1: string; line2: string | null; pincode: string | null };
+  address: {
+    line1: string;
+    line2: string | null;
+    pincode: string | null;
+    countryId: string | null;
+    stateId: string | null;
+    cityId: string | null;
+  };
   location: { latitude: number; longitude: number } | null;
   status: number;
   version: number;
+}
+
+/**
+ * The Institution as its Society sees it (INS-02 to INS-04): the resource and the class categories it offers, in
+ * the order of the master list. Super Admin has no view of an Institution's setup (PLT-45 leaves them out).
+ */
+export interface InstitutionDetail extends InstitutionResource {
+  classesOffered: ClassCategoryRef[];
 }
 
 /** One row of the INS-01 switcher list. */
@@ -42,7 +58,7 @@ export interface InstitutionSummary extends InstitutionOption {
 }
 
 /** One Institution as Super Admin sees it (PLT-45): the resource, with its Society's name and its blocked sections. */
-export interface PlatformInstitution extends InstitutionResource {
+export interface PlatformInstitution extends InstitutionDetail {
   societyName: string;
   /** 1 active, 0 deactivated: the Institution's own `status` stays 1 when its Society is deactivated. */
   societyStatus: number;
@@ -65,7 +81,14 @@ export function institutionResource(row: InstitutionRow, people: People): Instit
         ? { countryCode: row.country_code, number: row.phone_number }
         : null,
     telephone: row.telephone,
-    address: { line1: row.address_line_1, line2: row.address_line_2, pincode: row.pincode },
+    address: {
+      line1: row.address_line_1,
+      line2: row.address_line_2,
+      pincode: row.pincode,
+      countryId: row.country_id,
+      stateId: row.state_id,
+      cityId: row.city_id,
+    },
     location:
       row.latitude !== null && row.longitude !== null
         ? { latitude: Number(row.latitude), longitude: Number(row.longitude) }
@@ -74,6 +97,14 @@ export function institutionResource(row: InstitutionRow, people: People): Instit
     version: row.version,
     ...authorStamps(row, people),
   };
+}
+
+export function institutionDetail(
+  row: InstitutionRow,
+  people: People,
+  classesOffered: ClassCategoryRef[],
+): InstitutionDetail {
+  return { ...institutionResource(row, people), classesOffered };
 }
 
 export function institutionOption(row: InstitutionRow, people: People): InstitutionOption {
@@ -105,9 +136,13 @@ export function institutionSummary(row: InstitutionListRow, people: People): Ins
   };
 }
 
-export function platformInstitution(row: InstitutionListRow, people: People): PlatformInstitution {
+export function platformInstitution(
+  row: InstitutionListRow,
+  people: People,
+  classesOffered: ClassCategoryRef[],
+): PlatformInstitution {
   return {
-    ...institutionResource(row, people),
+    ...institutionDetail(row, people, classesOffered),
     societyName: row.society_name,
     societyStatus: row.society_status,
     blockedSections: blockedSectionsOf(row),

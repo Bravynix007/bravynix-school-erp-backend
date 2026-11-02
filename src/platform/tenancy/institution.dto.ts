@@ -1,6 +1,9 @@
 import { ApiProperty, ApiPropertyOptional, IntersectionType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  ArrayUnique,
+  IsArray,
   IsDefined,
   IsEmail,
   IsIn,
@@ -40,6 +43,27 @@ export class LocationDto {
   @Min(-180)
   @Max(180)
   longitude!: number;
+}
+
+/**
+ * An Institution's address: the lines of any address, and the place from the platform masters (API design
+ * 10.4c). The place is optional, but a state needs its country and a city its state.
+ */
+export class InstitutionAddressDto extends RequiredAddressDto {
+  @ApiPropertyOptional({ format: 'uuid', nullable: true })
+  @IsOptional()
+  @IsUUID()
+  countryId?: string | null;
+
+  @ApiPropertyOptional({ format: 'uuid', nullable: true, description: 'A state of the country' })
+  @IsOptional()
+  @IsUUID()
+  stateId?: string | null;
+
+  @ApiPropertyOptional({ format: 'uuid', nullable: true, description: 'A city of the state' })
+  @IsOptional()
+  @IsUUID()
+  cityId?: string | null;
 }
 
 /** The optional profile fields, on create and on change. A body is JSON: no `@Type` on primitives. */
@@ -94,15 +118,29 @@ class InstitutionProfileDto {
   @ValidateNested()
   @Type(() => LocationDto)
   location?: LocationDto | null;
+
+  @ApiPropertyOptional({
+    type: [String],
+    format: 'uuid',
+    maxItems: 50,
+    description:
+      'The class categories the Institution offers (platform masters). On a change the list replaces the old one; it cannot be cleared with null.',
+  })
+  @WhenPresent()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ArrayUnique()
+  @IsUUID('all', { each: true })
+  classesOffered?: string[];
 }
 
 /** The address, where `null` is not a value: the first line is required (PRD 7.1). */
 class AddressChangeDto {
-  @ApiPropertyOptional({ type: RequiredAddressDto })
+  @ApiPropertyOptional({ type: InstitutionAddressDto })
   @WhenPresent()
   @ValidateNested()
-  @Type(() => RequiredAddressDto)
-  address?: RequiredAddressDto;
+  @Type(() => InstitutionAddressDto)
+  address?: InstitutionAddressDto;
 }
 
 /** INS-02 body. The Society is the Owner's own, so `societyId` is not a field: it answers FIELD_NOT_ALLOWED. */
@@ -119,11 +157,11 @@ export class CreateInstitutionDto extends InstitutionProfileDto {
   @MaxLength(50)
   code!: string;
 
-  @ApiProperty({ type: RequiredAddressDto })
+  @ApiProperty({ type: InstitutionAddressDto })
   @IsDefined()
   @ValidateNested()
-  @Type(() => RequiredAddressDto)
-  address!: RequiredAddressDto;
+  @Type(() => InstitutionAddressDto)
+  address!: InstitutionAddressDto;
 }
 
 /**
