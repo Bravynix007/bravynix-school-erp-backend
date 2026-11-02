@@ -45,6 +45,14 @@ export class InstitutionDirectory {
     };
   }
 
+  /** How many Societies, and how many Institutions in them, are active: the dashboard's figures. */
+  async activeCounts(tx: Tx): Promise<{ societies: number; institutions: number }> {
+    return {
+      societies: await this.societies.countActive(tx),
+      institutions: await this.institutions.countActive(tx),
+    };
+  }
+
   /** The names of these Institutions and their Societies, by Institution ID; an ID the caller cannot see is left out. */
   async names(tx: Tx, ids: readonly string[]): Promise<Map<string, InstitutionName>> {
     const institutions = await this.institutions.refs(tx, ids);

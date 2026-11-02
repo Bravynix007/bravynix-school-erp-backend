@@ -96,6 +96,18 @@ export class InstitutionRepository {
     return { rows, total };
   }
 
+  /** How many Institutions are active in an active Society. */
+  async countActive(tx: Tx): Promise<number> {
+    const { total } = await tx
+      .selectFrom('institutions')
+      .innerJoin('societies', 'societies.id', 'institutions.society_id')
+      .select((eb) => eb.fn.countAll<number>().as('total'))
+      .where('institutions.status', '=', 1)
+      .where('societies.status', '=', 1)
+      .executeTakeFirstOrThrow();
+    return Number(total);
+  }
+
   /** The name and Society of these Institutions, by ID. */
   async refs(
     tx: Tx,

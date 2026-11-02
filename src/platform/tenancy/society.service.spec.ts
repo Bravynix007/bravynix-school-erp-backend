@@ -5,6 +5,7 @@ import { FixedClock } from '../../common/time/clock.js';
 import type { AuditService } from '../audit/index.js';
 import { duplicateOn, type DatabaseService, type Tx } from '../database/index.js';
 import type { GrantDirectory, GrantedPerson, PersonDirectory } from '../identity/index.js';
+import type { SocietyDues } from './society-dues.js';
 import type { ListSocietiesQueryDto, UpdateSocietyDto } from './society.dto.js';
 import type { SocietyOwnerService } from './society-owner.service.js';
 import type { SocietyRepository, SocietyRow } from './society.repository.js';
@@ -65,6 +66,9 @@ function build(current: SocietyRow | null = society()) {
   const addIn = vi.fn<SocietyOwnerService['addIn']>().mockResolvedValue(granted);
   const welcome = vi.fn<SocietyOwnerService['welcome']>();
   const societyOwners = vi.fn<GrantDirectory['societyOwners']>().mockResolvedValue([]);
+  const outstanding = vi
+    .fn<SocietyDues['outstanding']>()
+    .mockResolvedValue(new Map<string, string>());
   const service = new SocietyService(
     { transaction } as unknown as DatabaseService,
     { find, update, insert, page, institutions } as unknown as SocietyRepository,
@@ -73,6 +77,7 @@ function build(current: SocietyRow | null = society()) {
     } as unknown as PersonDirectory,
     { endAccessInSociety, societyOwners } as unknown as GrantDirectory,
     { addIn, welcome } as unknown as SocietyOwnerService,
+    { outstanding } as unknown as SocietyDues,
     { record } as unknown as AuditService,
     new FixedClock('2026-10-26T10:00:00.000Z'),
   );
@@ -85,6 +90,7 @@ function build(current: SocietyRow | null = society()) {
     page,
     institutions,
     societyOwners,
+    outstanding,
     record,
     endAccessInSociety,
     addIn,
@@ -170,6 +176,28 @@ describe('SocietyService', () => {
         t.service.update(principal, 'society-1', patch({ version: 1, name: 'x' })),
       );
       expect(error.status).toBe(404);
+    });
+
+    it('answers with what the Society owes, read in the same transaction, changed or not', async () => {
+      const t = build();
+      t.outstanding.mockResolvedValue(new Map([['society-1', '8000.00']]));
+      const same = await t.service.update(
+        principal,
+        'society-1',
+        patch({ version: 2, name: 'Sunrise', description: 'Old', email: null }),
+      );
+      expect(same.outstandingDuesAmount).toBe('8000.00');
+      expect(t.outstanding).toHaveBeenCalledWith(t.tx, ['society-1']);
+
+      t.find
+        .mockResolvedValueOnce(society())
+        .mockResolvedValueOnce(society({ version: 3, name: 'New' }));
+      const changed = await t.service.update(
+        principal,
+        'society-1',
+        patch({ version: 2, name: 'New' }),
+      );
+      expect(changed.outstandingDuesAmount).toBe('8000.00');
     });
 
     it('writes nothing, and keeps the version, when the request changes nothing', async () => {
@@ -382,6 +410,18 @@ describe('SocietyService', () => {
       );
     });
 
+    it('shows what each Society still owes, and 0.00 for one that owes nothing', async () => {
+      const t = build();
+      t.page.mockResolvedValue({
+        rows: [society({ id: 'society-1' }), society({ id: 'society-2' })],
+        total: 2,
+      });
+      t.outstanding.mockResolvedValue(new Map([['society-2', '19500.00']]));
+      const result = await t.service.list(principal, query());
+      expect(t.outstanding).toHaveBeenCalledWith(t.tx, ['society-1', 'society-2']);
+      expect(result.data.map((line) => line.outstandingDuesAmount)).toEqual(['0.00', '19500.00']);
+    });
+
     it('refuses a sort field the list does not offer', async () => {
       const t = build();
       const error = await refusal(t.service.list(principal, query({ sort: 'email' })));
@@ -411,7 +451,15 @@ describe('SocietyService', () => {
         blockedSections: ['owners'],
         institutions: [{ id: 'i1', blockedSections: ['staff'] }],
         owners: [{ id: 'owner-1' }],
+        outstandingDuesAmount: '0.00',
       });
+    });
+
+    it('shows what the Society still owes BravyNix', async () => {
+      const t = build(society());
+      t.outstanding.mockResolvedValue(new Map([['society-1', '8000.00']]));
+      expect((await t.service.get(principal, 'society-1')).outstandingDuesAmount).toBe('8000.00');
+      expect(t.outstanding).toHaveBeenCalledWith(t.tx, ['society-1']);
     });
 
     it('answers 404 for an unknown Society', async () => {
