@@ -42,6 +42,8 @@ export interface InstitutionSummary extends InstitutionOption {
 /** One Institution as Super Admin sees it (PLT-45): the resource, with its Society's name and its blocked sections. */
 export interface PlatformInstitution extends InstitutionResource {
   societyName: string;
+  /** 1 active, 0 deactivated: the Institution's own `status` stays 1 when its Society is deactivated. */
+  societyStatus: number;
   blockedSections: ('staff' | 'students')[];
 }
 
@@ -111,6 +113,7 @@ export function platformInstitution(row: InstitutionListRow, people: People): Pl
   return {
     ...institutionResource(row, people),
     societyName: row.society_name,
+    societyStatus: row.society_status,
     blockedSections: blockedSectionsOf(row),
   };
 }

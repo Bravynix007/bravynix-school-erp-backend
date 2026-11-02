@@ -648,6 +648,7 @@ describe('PLT-19 and INS-01 to INS-05 Institutions', () => {
         id: made.id,
         societyId,
         societyName: 'Sunrise Trust',
+        societyStatus: 1,
         name: 'Green Valley',
         status: 1,
         version: 1,
@@ -659,6 +660,14 @@ describe('PLT-19 and INS-01 to INS-05 Institutions', () => {
       const ended = await asAdmin('get', `/v1/platform/institutions/${made.id}`);
       expect(ended.status).toBe(200);
       expect(ended.body.data.status).toBe(0);
+    });
+
+    it('shows the Society’s own status, because its Institutions keep theirs when it is deactivated', async () => {
+      const societyId = await society();
+      const made = await institution(societyId);
+      expect((await asAdmin('delete', `/v1/platform/societies/${societyId}`)).status).toBe(200);
+      const res = await asAdmin('get', `/v1/platform/institutions/${made.id}`);
+      expect(res.body.data).toMatchObject({ status: 1, societyStatus: 0 });
     });
 
     it('answers 404 for an unknown or malformed ID, 403 to an Owner and 401 without a token', async () => {
