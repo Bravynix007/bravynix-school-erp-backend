@@ -1,7 +1,7 @@
 import { sql, type Kysely } from 'kysely';
 import { institutions, societies } from './two-worlds.js';
 
-const yearId = (n: number): string => `00000000-0000-7000-8000-${n.toString().padStart(12, '0')}`;
+const seedId = (n: number): string => `00000000-0000-7000-8000-${n.toString().padStart(12, '0')}`;
 
 export interface SeedAcademicYear {
   id: string;
@@ -16,7 +16,7 @@ export interface SeedAcademicYear {
 export const seededYearId = (institutionKey: string): string => {
   const index = institutions.findIndex((i) => i.key === institutionKey);
   if (index < 0) throw new Error(`Unknown two-worlds Institution ${institutionKey}`);
-  return yearId(3101 + index);
+  return seedId(3101 + index);
 };
 
 export const seededYearName = '2026-2027';
@@ -49,7 +49,7 @@ export const commonSubjects: readonly { name: string; code: string }[] = [
 /** The two-worlds Societies' subjects: the same four in each, so a test can show one Society cannot see the other's. */
 export const subjects: SeedSubject[] = societies.flatMap((society, s) =>
   commonSubjects.map((subject, n) => ({
-    id: yearId(3201 + s * 10 + n),
+    id: seedId(3201 + s * 10 + n),
     societyId: society.id,
     ...subject,
   })),
