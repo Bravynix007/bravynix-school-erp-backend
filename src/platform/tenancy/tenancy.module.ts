@@ -1,5 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { TenantAccessGate } from '../../common/auth/tenant-access-gate.js';
+import { MastersModule } from '../masters/index.js';
 import { AccessBlockRepository } from './access-block.repository.js';
 import { AccessBlockService } from './access-block.service.js';
 import { InstitutionDirectory } from './institution-directory.js';
@@ -21,6 +22,7 @@ import { TenancyRepository } from './tenancy.repository.js';
 /** Global so the policy guard in the common module finds the real block check. */
 @Global()
 @Module({
+  imports: [MastersModule],
   controllers: [
     SocietyController,
     SocietyOwnerController,

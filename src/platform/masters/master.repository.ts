@@ -61,12 +61,39 @@ export class MasterRepository {
     return result.rows[0]!;
   }
 
-  /** The status of the entry a new one will belong to; `undefined` when there is none. */
-  async statusOf(tx: Tx, table: MasterTable, id: string): Promise<number | undefined> {
-    const result = await sql<{ status: number }>`
-      select status from ${sql.table(table)} where id = ${id}
+  /** The status of each of these entries that exists, by ID: what a record pointing at them needs to know. */
+  async statusesOf(
+    tx: Tx,
+    table: MasterTable,
+    ids: readonly string[],
+  ): Promise<Map<string, number>> {
+    if (ids.length === 0) return new Map();
+    const result = await sql<{ id: string; status: number }>`
+      select id, status from ${sql.table(table)} where id in (${sql.join(ids.map((id) => sql.val(id)))})
     `.execute(tx);
-    return result.rows[0]?.status;
+    return new Map(result.rows.map((row) => [row.id, row.status]));
+  }
+
+  /** The class categories with these IDs, hidden ones too, in the order of the list. */
+  async classCategories(
+    tx: Tx,
+    ids: readonly string[],
+  ): Promise<{ id: string; code: string; name: string }[]> {
+    if (ids.length === 0) return [];
+    const result = await sql<{ id: string; code: string; name: string }>`
+      select id, code, name from class_categories
+      where id in (${sql.join(ids.map((id) => sql.val(id)))}) order by display_order, id
+    `.execute(tx);
+    return result.rows;
+  }
+
+  /** The country of a state, or the state of a city; `undefined` when there is none. */
+  async parentOf(tx: Tx, table: 'states' | 'cities', id: string): Promise<string | undefined> {
+    const column = table === 'states' ? sql.ref('country_id') : sql.ref('state_id');
+    const result = await sql<{ parent: string }>`
+      select ${column} as parent from ${sql.table(table)} where id = ${id}
+    `.execute(tx);
+    return result.rows[0]?.parent;
   }
 
   /** The number of entries, hidden ones included: the last position of the list. */

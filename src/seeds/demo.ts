@@ -2,8 +2,10 @@ import { sql, type Kysely } from 'kysely';
 import {
   commonSubjects,
   insertAcademicYears,
+  insertClassesOffered,
   insertSubjects,
   type SeedAcademicYear,
+  type SeedClassesOffered,
   type SeedSubject,
 } from './academic-seed.js';
 import { DueStatus, dueAmounts } from '../modules/platform-billing/due.rules.js';
@@ -151,6 +153,13 @@ export const academicYears: SeedAcademicYear[] = [
     endDate: '2027-03-31',
     isCurrent: true,
   },
+];
+
+/** What each Institution offers: the two schools the primary and high school classes, the primary school the early years. */
+export const classesOffered: SeedClassesOffered[] = [
+  { institutionId: id(9201), categories: ['LOWER_PRIMARY', 'HIGHER_PRIMARY', 'HIGH_SCHOOL'] },
+  { institutionId: id(9202), categories: ['PRE_SCHOOL', 'NURSERY', 'LOWER_PRIMARY'] },
+  { institutionId: id(9203), categories: ['LOWER_PRIMARY', 'HIGHER_PRIMARY', 'HIGH_SCHOOL'] },
 ];
 
 /** Both Societies start with the common subjects; the first adds Hindi, so the lists differ. */
@@ -422,6 +431,7 @@ export async function writeDemoSeed(db: Kysely<unknown>): Promise<void> {
 
   await insertAcademicYears(db, academicYears);
   await insertSubjects(db, subjects);
+  await insertClassesOffered(db, classesOffered);
 
   for (const d of dues) {
     const institution = institutionOf(d.institution);

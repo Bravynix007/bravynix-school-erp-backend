@@ -4,6 +4,7 @@ import type { AuditService } from '../audit/index.js';
 import type { DatabaseService, Tx } from '../database/index.js';
 import { MASTER_SPECS } from './master.catalog.js';
 import type { MasterQueryDto } from './master.dto.js';
+import { MasterReferences } from './master-references.js';
 import type { MasterRepository } from './master.repository.js';
 import { listEtag, masterEntry, type MasterRow } from './master.resource.js';
 import { MasterService } from './master.service.js';
@@ -61,7 +62,11 @@ function build(current: MasterRow | null = row(), count = 12) {
     .mockImplementation((_tx, _spec, _id, changes) =>
       Promise.resolve(row({ ...current, ...changes, version: (current?.version ?? 1) + 1 })),
     );
-  const statusOf = vi.fn<MasterRepository['statusOf']>().mockResolvedValue(1);
+  const statusesOf = vi
+    .fn<MasterRepository['statusesOf']>()
+    .mockImplementation((_tx, _table, ids) =>
+      Promise.resolve(new Map(ids.map((entry) => [entry, 1]))),
+    );
   const countOf = vi.fn<MasterRepository['count']>().mockResolvedValue(count);
   const lockList = vi.fn<MasterRepository['lockList']>().mockResolvedValue();
   const shift = vi.fn<MasterRepository['shift']>().mockResolvedValue();
@@ -73,14 +78,15 @@ function build(current: MasterRow | null = row(), count = 12) {
       find,
       insert,
       update,
-      statusOf,
+      statusesOf,
       count: countOf,
       lockList,
       shift,
     } as unknown as MasterRepository,
+    new MasterReferences({ statusesOf } as unknown as MasterRepository),
     { record } as unknown as AuditService,
   );
-  return { service, transaction, list, find, insert, update, statusOf, lockList, shift, record };
+  return { service, transaction, list, find, insert, update, statusesOf, lockList, shift, record };
 }
 
 describe('MasterService', () => {
@@ -158,11 +164,11 @@ describe('MasterService', () => {
 
     it('is 404 for a parent that does not exist and 422 for a hidden one, writing nothing', async () => {
       const t = build();
-      t.statusOf.mockResolvedValueOnce(undefined);
+      t.statusesOf.mockResolvedValueOnce(new Map());
       expect(
         await fail(t.service.create(superAdmin, states, { countryId: id, name: 'Alpha' })),
       ).toMatchObject({ status: 404 });
-      t.statusOf.mockResolvedValueOnce(0);
+      t.statusesOf.mockResolvedValueOnce(new Map([[id, 0]]));
       expect(
         await fail(t.service.create(superAdmin, states, { countryId: id, name: 'Alpha' })),
       ).toMatchObject({
