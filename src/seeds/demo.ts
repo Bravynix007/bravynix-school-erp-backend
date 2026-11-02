@@ -1,4 +1,5 @@
 import { sql, type Kysely } from 'kysely';
+import { insertAcademicYears, type SeedAcademicYear } from './academic-seed.js';
 import { DueStatus, dueAmounts } from '../modules/platform-billing/due.rules.js';
 
 /**
@@ -107,6 +108,42 @@ export const institutions: DemoInstitution[] = [
     place: 'Mysuru',
     line1: '4 Temple Street',
     pincode: '570001',
+  },
+];
+
+/** Each Institution's current year, and for the first a finished one before it, so the year list shows history. */
+export const academicYears: SeedAcademicYear[] = [
+  {
+    id: id(9701),
+    institutionId: id(9201),
+    name: '2025-2026',
+    startDate: '2025-06-01',
+    endDate: '2026-03-31',
+    isCurrent: false,
+  },
+  {
+    id: id(9702),
+    institutionId: id(9201),
+    name: '2026-2027',
+    startDate: '2026-06-01',
+    endDate: '2027-03-31',
+    isCurrent: true,
+  },
+  {
+    id: id(9703),
+    institutionId: id(9202),
+    name: '2026-2027',
+    startDate: '2026-06-01',
+    endDate: '2027-03-31',
+    isCurrent: true,
+  },
+  {
+    id: id(9704),
+    institutionId: id(9203),
+    name: '2026-2027',
+    startDate: '2026-06-01',
+    endDate: '2027-03-31',
+    isCurrent: true,
   },
 ];
 
@@ -369,6 +406,8 @@ export async function writeDemoSeed(db: Kysely<unknown>): Promise<void> {
       on conflict (id) do nothing
     `.execute(db);
   }
+
+  await insertAcademicYears(db, academicYears);
 
   for (const d of dues) {
     const institution = institutionOf(d.institution);
