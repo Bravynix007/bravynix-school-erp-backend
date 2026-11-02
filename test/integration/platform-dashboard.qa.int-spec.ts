@@ -223,13 +223,6 @@ describe('QA: PLT-01 dashboard and Society outstanding dues, adversarial (API de
         `/v1/platform/societies?q=${encodeURIComponent('Sunrise')}&limit=100`,
         admin,
       );
-      console.log(
-        'QA-Q1 statuses (dashboard, detail, list):',
-        dashboard.status,
-        detail.status,
-        list.status,
-        dashboard.body.code ?? '',
-      );
       expect([dashboard.status, detail.status, list.status]).toEqual([200, 200, 200]);
       expect(detail.body.data.outstandingDuesAmount).toBe('1009999999998.99');
       expect(
@@ -398,7 +391,6 @@ describe('QA: PLT-01 dashboard and Society outstanding dues, adversarial (API de
       await raise(institutionId, 10, 2026);
       expect((await api('delete', `/v1/platform/societies/${societyId}`, admin)).status).toBe(200);
       const detail = await societyRow(societyId);
-      console.log('QA-Q5 deactivated Society owes:', detail.outstandingDuesAmount);
       expect(detail.outstandingDuesAmount).toBe('500.00');
     });
   });
