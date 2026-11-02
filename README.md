@@ -78,7 +78,7 @@ src/
 │   ├── i18n/               user-facing messages per code, 7 languages
 │   └── request-context/    request ID and per-request context
 ├── platform/               platform modules: database, email; identity, tenancy,
-│                           audit, files, notifications and jobs arrive next
+│                           masters; files, notifications and jobs arrive next
 ├── modules/                business modules, one folder each
 ├── health/                 /health/live and /health/ready
 ├── seeds/                  named data sets ("two worlds")

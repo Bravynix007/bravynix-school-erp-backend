@@ -35,6 +35,7 @@ const en: Catalogue = {
   PAYLOAD_TOO_LARGE: 'The request is too large',
   UNSUPPORTED_MEDIA_TYPE: 'Unsupported content type',
   IDEMPOTENCY_KEY_REUSED: 'This request key was already used for a different request',
+  REFERENCE_INACTIVE: 'This choice is no longer available',
   SECTION_BLOCKED: 'Access is blocked for your group, please contact your Society',
   APP_UPDATE_REQUIRED: 'Please update the app to continue',
   RATE_LIMITED: 'Too many requests, please try again shortly',
