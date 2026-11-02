@@ -96,6 +96,17 @@ export class InstitutionRepository {
     return { rows, total };
   }
 
+  /** One Institution with its blocked sections, for Super Admin (PLT-45); `undefined` when there is none. */
+  async findWithBlocks(tx: Tx, id: string): Promise<InstitutionListRow | undefined> {
+    return this.selectInstitution(tx)
+      .select([
+        institutionHasBlock(BlockSection.Staff).as('staff_blocked'),
+        institutionHasBlock(BlockSection.Students).as('students_blocked'),
+      ])
+      .where('institutions.id', '=', id)
+      .executeTakeFirst();
+  }
+
   /** How many Institutions are active in an active Society. */
   async countActive(tx: Tx): Promise<number> {
     const { total } = await tx

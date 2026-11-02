@@ -4,6 +4,7 @@ import {
   institutionResource,
   institutionSummary,
   peopleOfInstitutions,
+  platformInstitution,
 } from './institution.resource.js';
 
 const row = (overrides: Partial<InstitutionRow> = {}): InstitutionRow => ({
@@ -108,6 +109,17 @@ describe('Institution resource (API design 10.4c)', () => {
     expect(institutionSummary(listRow({ students_blocked: true }), people).blockedSections).toEqual(
       ['students'],
     );
+  });
+
+  it('gives Super Admin the whole resource with the Society’s name and the blocked sections', () => {
+    expect(platformInstitution(listRow({ staff_blocked: true }), people)).toMatchObject({
+      id: 'i1',
+      societyId: 's1',
+      societyName: 'Sunrise',
+      address: { line1: '12 Lake Road', line2: null, pincode: null },
+      version: 4,
+      blockedSections: ['staff'],
+    });
   });
 
   it('lists the people a row names', () => {

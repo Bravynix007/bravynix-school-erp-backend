@@ -1,14 +1,15 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { CurrentPrincipal } from '../../common/auth/current-principal.decorator.js';
 import { superAdminPolicy } from '../../common/auth/platform-policy.js';
+import { UuidParamPipe } from '../../common/http/uuid-param.pipe.js';
 import type { ApiResult } from '../../common/http/api-result.js';
 import { ListInstitutionsQueryDto } from './institution.dto.js';
-import type { InstitutionSummary } from './institution.resource.js';
+import type { InstitutionSummary, PlatformInstitution } from './institution.resource.js';
 import { InstitutionService } from './institution.service.js';
 
-/** PLT-19: Super Admin looks across Societies at their Institutions, read-only. */
+/** PLT-19 and PLT-45: Super Admin looks across Societies at their Institutions, read-only. */
 @ApiTags('Platform: Institutions')
 @Controller('platform/institutions')
 export class PlatformInstitutionController {
@@ -21,5 +22,14 @@ export class PlatformInstitutionController {
     @Query() query: ListInstitutionsQueryDto,
   ): Promise<ApiResult<InstitutionSummary[]>> {
     return this.institutions.list(principal, query);
+  }
+
+  @superAdminPolicy('PLT-45', 'Reads one Institution of any Society, with its blocked sections')
+  @Get(':institutionId')
+  get(
+    @CurrentPrincipal() principal: Principal,
+    @Param('institutionId', UuidParamPipe) institutionId: string,
+  ): Promise<PlatformInstitution> {
+    return this.institutions.platformGet(principal, institutionId);
   }
 }

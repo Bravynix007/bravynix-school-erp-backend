@@ -34,9 +34,11 @@ import {
   institutionResource,
   institutionSummary,
   peopleOfInstitutions,
+  platformInstitution,
   type InstitutionOption,
   type InstitutionResource,
   type InstitutionSummary,
+  type PlatformInstitution,
 } from './institution.resource.js';
 import { addressColumns, contactColumns } from './profile-columns.js';
 import { requireActive } from './record-rules.js';
@@ -145,6 +147,16 @@ export class InstitutionService {
       rows.map((row) => institutionSummary(row, people)),
       pageMeta(query.page, query.limit, total),
     );
+  }
+
+  /** PLT-45: one Institution of any Society, with its Society's name and its blocked sections. */
+  async platformGet(principal: Principal, id: string): Promise<PlatformInstitution> {
+    const row = await this.database.transaction(platformTenant(principal), async (tx) => {
+      const found = await this.institutions.findWithBlocks(tx, id);
+      if (!found) throw AppException.notFound();
+      return found;
+    });
+    return platformInstitution(row, await this.people.describe(peopleOfInstitutions([row])));
   }
 
   /** INS-03: inside the caller's scope only; an Institution whose staff are blocked answers 423 to its staff. */
