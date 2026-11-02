@@ -1,5 +1,6 @@
 import { Kysely, PostgresDialect, sql } from 'kysely';
 import { newId } from '../../src/common/ids/ids.js';
+import { DatabaseService } from '../../src/platform/database/index.js';
 import { createPool } from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
@@ -31,6 +32,7 @@ interface Subject {
 describe('SUB-01 to SUB-04 subjects (PRD 7.4, API design 10.4i)', () => {
   let ownerDb: Kysely<unknown>;
   let t: TestApp;
+  let database: DatabaseService;
   let fixtures: PlatformFixtures;
   let admin: string;
   let api: ReturnType<typeof apiCaller>;
@@ -97,6 +99,7 @@ describe('SUB-01 to SUB-04 subjects (PRD 7.4, API design 10.4i)', () => {
     });
     await writeIdentitySeed(ownerDb);
     t = await createTestApp({ imports: [FixtureModule] });
+    database = t.app.get(DatabaseService);
     fixtures = new PlatformFixtures(t, ownerDb);
     api = apiCaller(t);
   });
@@ -198,11 +201,12 @@ describe('SUB-01 to SUB-04 subjects (PRD 7.4, API design 10.4i)', () => {
 
   describe('SUB-01 list the subjects', () => {
     it('lists the active ones by name for the Owner and the Admin, and no other Society’s', async () => {
-      await added({ name: 'Science' });
+      await added({ name: 'science' });
+      await added({ name: 'Art' });
       await added({ name: 'English' });
       await added({ name: 'Art' }, otherOwner.token);
       for (const token of [owner.token, institutionAdmin.token]) {
-        expect((await list(token)).map((s) => s.name)).toEqual(['English', 'Science']);
+        expect((await list(token)).map((s) => s.name)).toEqual(['Art', 'English', 'science']);
       }
       expect((await list(otherOwner.token)).map((s) => s.name)).toEqual(['Art']);
     });
@@ -338,6 +342,36 @@ describe('SUB-01 to SUB-04 subjects (PRD 7.4, API design 10.4i)', () => {
     it('is not for Super Admin', async () => {
       const subject = await added({ name: 'Maths' });
       expect((await call('delete', `${SUBJECTS}/${subject.id}`, {}, admin)).status).toBe(403);
+    });
+  });
+
+  describe('the database itself', () => {
+    it('keeps a Society’s subject in that Society, even past the application', async () => {
+      const subject = await added({ name: 'Maths' });
+      const inA = { personId: owner.person, roleCode: 2, societyId: societyA };
+      await expect(
+        database.transaction(inA, (tx) =>
+          tx
+            .updateTable('subjects')
+            .set({ society_id: societyB })
+            .where('id', '=', subject.id)
+            .execute(),
+        ),
+      ).rejects.toMatchObject({ code: '42501' });
+      const seenByB = await database.transaction(
+        { personId: otherOwner.person, roleCode: 2, societyId: societyB },
+        (tx) => tx.selectFrom('subjects').select('id').execute(),
+      );
+      expect(seenByB).toEqual([]);
+    });
+
+    it('gives the application no right to delete a subject', async () => {
+      const subject = await added({ name: 'Maths' });
+      await expect(
+        database.transaction({ personId: owner.person, roleCode: 2, societyId: societyA }, (tx) =>
+          tx.deleteFrom('subjects').where('id', '=', subject.id).execute(),
+        ),
+      ).rejects.toMatchObject({ code: '42501' });
     });
   });
 });

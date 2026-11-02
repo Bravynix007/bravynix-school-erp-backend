@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { ApiResult } from '../../common/http/api-result.js';
+import { authorIdsOf } from '../../common/http/author-stamps.js';
 import { AppException } from '../../common/http/app-exception.js';
+import { newId } from '../../common/ids/ids.js';
 import { requireVersion } from '../../common/http/require-version.js';
 import { AuditService, type AuditValues } from '../../platform/audit/index.js';
 import {
@@ -16,7 +18,7 @@ import {
 import { PersonDirectory } from '../../platform/identity/index.js';
 import type { CreateSubjectDto, UpdateSubjectDto } from './subject.dto.js';
 import { SubjectRepository, type SubjectChanges, type SubjectRow } from './subject.repository.js';
-import { peopleOfSubjects, subjectResource, type SubjectResource } from './subject.resource.js';
+import { subjectResource, type SubjectResource } from './subject.resource.js';
 
 /** What the audit log keeps of a subject. */
 function auditView(row: SubjectRow): AuditValues {
@@ -50,7 +52,7 @@ export class SubjectService {
     const rows = await this.database.transaction(tenant, (tx) =>
       this.subjects.active(tx, societyId),
     );
-    const people = await this.people.describe(peopleOfSubjects(rows));
+    const people = await this.people.describe(authorIdsOf(rows));
     return ApiResult.list(
       rows.map((row) => subjectResource(row, people)),
       null,
@@ -63,6 +65,7 @@ export class SubjectService {
     const row = await this.database
       .transaction(tenant, async (tx) => {
         const created = await this.subjects.insert(tx, {
+          id: newId(),
           society_id: societyId,
           name: body.name,
           code: body.code ?? null,
@@ -142,7 +145,7 @@ export class SubjectService {
   }
 
   private async resource(row: SubjectRow): Promise<SubjectResource> {
-    return subjectResource(row, await this.people.describe(peopleOfSubjects([row])));
+    return subjectResource(row, await this.people.describe(authorIdsOf([row])));
   }
 
   /** The entry carries the Society and no Institution: a subject belongs to the whole Society (API design 20.3). */
