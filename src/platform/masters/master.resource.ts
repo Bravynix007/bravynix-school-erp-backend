@@ -27,14 +27,3 @@ export function listEtag(entries: readonly MasterEntry[]): string {
   const digest = createHash('sha256').update(JSON.stringify(entries)).digest('base64url');
   return `W/"${digest.slice(0, 22)}"`;
 }
-
-const bare = (tag: string): string => tag.trim().replace(/^W\//, '');
-
-/** Whether an `If-None-Match` header names this tag (weak comparison, RFC 9110 13.1.2); `*` names any. */
-export function isNotModified(ifNoneMatch: string | undefined, etag: string): boolean {
-  if (ifNoneMatch === undefined) return false;
-  return ifNoneMatch
-    .split(',')
-    .map((tag) => tag.trim())
-    .some((tag) => tag === '*' || bare(tag) === bare(etag));
-}

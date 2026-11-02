@@ -1,7 +1,7 @@
 import { AppException } from '../../common/http/app-exception.js';
 import { FieldErrorCode } from '../../common/http/error-codes.js';
 import { fieldError } from '../../common/validation/field-error.js';
-import type { MasterSpec } from './master.catalog.js';
+import { MASTER_SPECS, type MasterSpec } from './master.catalog.js';
 
 /** The entries that move by one place to make room: positions `from` to `to`, down (`1`) or up (`-1`) the list. */
 export interface Shift {
@@ -44,6 +44,11 @@ export function planMove(current: number, target: number, count: number): Shift 
     : { range: { from: current + 1, to: target }, by: -1 };
 }
 
+/** Every filter any master takes, so one a master does not have can be told from an unknown parameter. */
+const FILTER_NAMES = [
+  ...new Set(Object.values(MASTER_SPECS).flatMap((spec) => spec.filters.map(({ api }) => api))),
+];
+
 /**
  * The query filters of a list against what the master takes. A filter the master does not have is
  * `FIELD_NOT_ALLOWED`, a required one that is missing is `REQUIRED` (API design 10.4g).
@@ -53,9 +58,9 @@ export function listFilters(
   query: Readonly<Record<string, unknown>>,
 ): { column: string; value: string }[] {
   const known = new Set(spec.filters.map(({ api }) => api));
-  const errors = ['countryId', 'stateId', 'classCategoryId']
-    .filter((name) => query[name] !== undefined && !known.has(name))
-    .map((name) => fieldError(name, FieldErrorCode.FIELD_NOT_ALLOWED));
+  const errors = FILTER_NAMES.filter((name) => query[name] !== undefined && !known.has(name)).map(
+    (name) => fieldError(name, FieldErrorCode.FIELD_NOT_ALLOWED),
+  );
   for (const filter of spec.filters) {
     if (filter.required && query[filter.api] === undefined) {
       errors.push(fieldError(filter.api, FieldErrorCode.REQUIRED));

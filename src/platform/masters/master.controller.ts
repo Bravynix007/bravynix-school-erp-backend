@@ -1,4 +1,4 @@
-import { Controller, Get, Headers, Param, Query } from '@nestjs/common';
+import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ApiParam, ApiTags } from '@nestjs/swagger';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { CurrentPrincipal } from '../../common/auth/current-principal.decorator.js';
@@ -29,8 +29,7 @@ export class MasterController {
     @CurrentPrincipal() principal: Principal,
     @Param('masterType', MasterTypePipe) spec: MasterSpec,
     @Query() query: MasterQueryDto,
-    @Headers('if-none-match') ifNoneMatch: string | undefined,
   ): Promise<ApiResult<MasterEntry[] | null>> {
-    return this.masters.list(principal, spec, query, ifNoneMatch);
+    return this.masters.list(principal, spec, query);
   }
 }

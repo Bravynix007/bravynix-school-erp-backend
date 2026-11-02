@@ -4,12 +4,14 @@ import {
   CreateCityDto,
   CreateClassCategoryDto,
   CreateCountryDto,
+  CreateDesignationDto,
   CreatePredefinedClassDto,
   CreatePredefinedSectionDto,
   CreateStateDto,
   MasterQueryDto,
   UpdateClassCategoryDto,
   UpdateCountryDto,
+  UpdateDesignationDto,
   UpdatePredefinedClassDto,
   UpdateStateDto,
 } from './master.dto.js';
@@ -157,6 +159,48 @@ describe('the bodies of PLT-32', () => {
     expect(
       await problems(body(UpdatePredefinedClassDto, { version: 1, numericValue: null })),
     ).toEqual([]);
+  });
+});
+
+describe('null on a field that cannot be empty', () => {
+  it.each([
+    [UpdateDesignationDto, 'name'],
+    [UpdateDesignationDto, 'status'],
+    [UpdateDesignationDto, 'displayOrder'],
+    [UpdateCountryDto, 'name'],
+    [UpdateStateDto, 'status'],
+    [UpdatePredefinedClassDto, 'displayOrder'],
+  ] as const)('is INVALID_TYPE on an edit of %j: %s', async (dto, field) => {
+    expect(await problems(body(dto, { version: 1, [field]: null }))).toContainEqual({
+      field,
+      code: 'INVALID_TYPE',
+    });
+  });
+
+  it('is INVALID_TYPE for displayOrder on an add', async () => {
+    expect(
+      await problems(
+        body(CreateDesignationDto, { code: 'TEACHER', name: 'Teacher', displayOrder: null }),
+      ),
+    ).toContainEqual({ field: 'displayOrder', code: 'INVALID_TYPE' });
+  });
+});
+
+describe('names', () => {
+  it('take one space for any run of white space inside them, on an add and on an edit', async () => {
+    const added = await body(CreateDesignationDto, {
+      code: 'TEACHER',
+      name: 'Head  of\tthe\u00a0School',
+    });
+    expect(added.name).toBe('Head of the School');
+    const edited = await body(UpdateDesignationDto, { version: 1, name: 'Vice   Principal' });
+    expect(edited.name).toBe('Vice Principal');
+  });
+
+  it('are still refused when they are not text', async () => {
+    expect(await problems(body(CreateDesignationDto, { code: 'TEACHER', name: 5 }))).toContainEqual(
+      { field: 'name', code: 'INVALID_TYPE' },
+    );
   });
 });
 

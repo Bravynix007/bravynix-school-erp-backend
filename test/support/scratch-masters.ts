@@ -1,7 +1,16 @@
 import { sql, type Kysely } from 'kysely';
 
-const ORDERED = ['class_categories', 'predefined_classes', 'predefined_sections', 'designations'];
-const ALL = ['countries', 'states', 'cities', ...ORDERED];
+/** Every master, children first: a city before its state, a state before its country, a class before its category. */
+const ALL = [
+  'cities',
+  'states',
+  'countries',
+  'predefined_classes',
+  'class_categories',
+  'predefined_sections',
+  'designations',
+];
+const ORDERED = ALL.slice(3);
 
 /**
  * Takes away the entries a test added to the platform masters and closes the gaps they left in the lists,
@@ -16,8 +25,7 @@ export async function removeScratchMasters(
     for (const table of ALL)
       await sql`alter table ${sql.table(table)} no force row level security`.execute(tx);
     await sql`set constraints all deferred`.execute(tx);
-    // Children first: a city before its state, a state before its country.
-    for (const table of ['cities', 'states', 'countries', 'predefined_classes', ...ORDERED]) {
+    for (const table of ALL) {
       const ids = scratch.filter((entry) => entry.table === table).map((entry) => entry.id);
       if (ids.length) {
         await sql`delete from ${sql.table(table)} where id in (${sql.join(ids)})`.execute(tx);

@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { sql } from 'kysely';
 import type { Tx } from '../database/index.js';
-import type { MasterSpec } from './master.catalog.js';
+import type { MasterSpec, MasterTable } from './master.catalog.js';
 import type { MasterRow } from './master.resource.js';
 
 /**
@@ -62,7 +62,7 @@ export class MasterRepository {
   }
 
   /** The status of the entry a new one will belong to; `undefined` when there is none. */
-  async statusOf(tx: Tx, table: string, id: string): Promise<number | undefined> {
+  async statusOf(tx: Tx, table: MasterTable, id: string): Promise<number | undefined> {
     const result = await sql<{ status: number }>`
       select status from ${sql.table(table)} where id = ${id}
     `.execute(tx);

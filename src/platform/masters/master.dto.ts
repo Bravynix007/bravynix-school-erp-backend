@@ -12,6 +12,7 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
 import { VersionDto } from '../../common/validation/version.dto.js';
 
@@ -22,6 +23,18 @@ import { VersionDto } from '../../common/validation/version.dto.js';
  * so the update bodies leave them out and a request that sends them is told
  * FIELD_NOT_ALLOWED.
  */
+
+/**
+ * A change may leave a field out, but naming it `null` is refused: these fields cannot be empty. (`@IsOptional`
+ * would let `null` through to the database.)
+ */
+const WhenPresent = () => ValidateIf((_dto, value: unknown) => value !== undefined);
+
+/** Any run of white space inside a name (a tab or no-break space too) is one space, so names that only look alike are `DUPLICATE`. */
+const OneSpace = () =>
+  Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.replace(/\s+/gu, ' ') : value,
+  );
 
 /** Upper case letters, digits and `_`, starting with a letter: `PRE_UNIVERSITY`. */
 const CODE = /^[A-Z][A-Z0-9_]*$/;
@@ -35,7 +48,7 @@ class DisplayOrderDto {
     description:
       'Position in the list, hidden entries counted. On add, the entry is inserted there (default: last); on edit it moves there.',
   })
-  @IsOptional()
+  @WhenPresent()
   @IsInt()
   @Min(1)
   @Max(32767)
@@ -49,7 +62,7 @@ function statusField() {
       enum: [0, 1],
       description: '0 hides the entry from pickers, 1 shows it',
     })(target, key);
-    IsOptional()(target, key);
+    WhenPresent()(target, key);
     IsInt()(target, key);
     IsIn([0, 1])(target, key);
   };
@@ -63,7 +76,7 @@ function moveToField() {
       maximum: 32767,
       description: 'Moves the entry to this position, hidden entries counted',
     })(target, key);
-    IsOptional()(target, key);
+    WhenPresent()(target, key);
     IsInt()(target, key);
     Min(1)(target, key);
     Max(32767)(target, key);
@@ -73,6 +86,7 @@ function moveToField() {
 function nameField(max: number) {
   return (target: object, key: string) => {
     ApiProperty({ minLength: 1, maxLength: max })(target, key);
+    OneSpace()(target, key);
     IsString()(target, key);
     MinLength(1)(target, key);
     MaxLength(max)(target, key);
@@ -82,7 +96,8 @@ function nameField(max: number) {
 function optionalNameField(max: number) {
   return (target: object, key: string) => {
     ApiPropertyOptional({ minLength: 1, maxLength: max })(target, key);
-    IsOptional()(target, key);
+    WhenPresent()(target, key);
+    OneSpace()(target, key);
     IsString()(target, key);
     MinLength(1)(target, key);
     MaxLength(max)(target, key);

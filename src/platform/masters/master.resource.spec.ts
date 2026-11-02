@@ -1,5 +1,5 @@
 import { MASTER_SPECS } from './master.catalog.js';
-import { isNotModified, listEtag, masterEntry, type MasterRow } from './master.resource.js';
+import { listEtag, masterEntry, type MasterRow } from './master.resource.js';
 
 const row: MasterRow = {
   id: '0192f3b0-0000-7000-8000-000000000001',
@@ -48,22 +48,5 @@ describe('listEtag', () => {
     expect(listEtag([{ ...entry!, name: 'Other' }])).not.toBe(listEtag(entries));
     expect(listEtag([{ ...entry!, version: 4 }])).not.toBe(listEtag(entries));
     expect(listEtag([])).not.toBe(listEtag(entries));
-  });
-});
-
-describe('isNotModified', () => {
-  const etag = 'W/"abc"';
-
-  it('matches the tag, weak or strong, among several', () => {
-    expect(isNotModified('W/"abc"', etag)).toBe(true);
-    expect(isNotModified('"abc"', etag)).toBe(true);
-    expect(isNotModified('"zzz", W/"abc"', etag)).toBe(true);
-    expect(isNotModified('*', etag)).toBe(true);
-  });
-
-  it('does not match another tag or no header', () => {
-    expect(isNotModified('W/"abd"', etag)).toBe(false);
-    expect(isNotModified('', etag)).toBe(false);
-    expect(isNotModified(undefined, etag)).toBe(false);
   });
 });

@@ -20,13 +20,7 @@ import type { MasterQueryDto } from './master.dto.js';
 import { parseMasterBody } from './master-body.js';
 import type { MasterSpec } from './master.catalog.js';
 import { MasterRepository } from './master.repository.js';
-import {
-  isNotModified,
-  listEtag,
-  masterEntry,
-  type MasterEntry,
-  type MasterRow,
-} from './master.resource.js';
+import { listEtag, masterEntry, type MasterEntry, type MasterRow } from './master.resource.js';
 import { listFilters, planInsert, planMove } from './master.rules.js';
 
 /** How long a signed-in person's app may keep a list without asking again (SDD 14.2). */
@@ -62,7 +56,8 @@ export class MasterService {
   ) {}
 
   /**
-   * MST-01. A list is revalidated with `If-None-Match`: the same entries answer 304 with no body. Super
+   * MST-01. The `ETag` set here is what lets a list be revalidated with `If-None-Match`: Express answers
+   * 304 with no body when it matches (weak comparison, and `*`), so nothing is compared in this service. Super
    * Admin asking for hidden entries is managing the list, so it is never served from a cache without
    * asking; everyone else may keep it five minutes.
    */
@@ -70,8 +65,7 @@ export class MasterService {
     principal: Principal,
     spec: MasterSpec,
     query: MasterQueryDto,
-    ifNoneMatch: string | undefined,
-  ): Promise<ApiResult<MasterEntry[] | null>> {
+  ): Promise<ApiResult<MasterEntry[]>> {
     const includeHidden = query.includeHidden ?? false;
     if (includeHidden && principal.roleCode !== RoleCode.SuperAdmin) throw AppException.forbidden();
     const filters = listFilters(spec, query as Record<string, unknown>);
@@ -90,9 +84,6 @@ export class MasterService {
       'Cache-Control': includeHidden ? 'private, no-cache' : `private, max-age=${MAX_AGE_SECONDS}`,
       Vary: 'Authorization',
     };
-    if (isNotModified(ifNoneMatch, etag)) {
-      return new ApiResult(null, { status: HttpStatus.NOT_MODIFIED, headers });
-    }
     return new ApiResult(entries, { status: HttpStatus.OK, headers });
   }
 

@@ -22,6 +22,8 @@ const missing = '00000000-0000-7000-8000-00000000ffff';
 
 const code = () => `T${newId().slice(-10).toUpperCase().replaceAll('-', '')}`;
 const name = () => `Scratch ${newId().slice(-8)}`;
+const short = () => newId().slice(-8).toUpperCase();
+const sectionBody = () => ({ code: `C${short()}`, name: `N${short()}`.slice(0, 10) });
 
 type Method = 'get' | 'post' | 'patch' | 'delete';
 
@@ -219,8 +221,16 @@ describe('MST-01 and PLT-31 to PLT-33 platform masters (API design 10.4g, DDD 9.
     it('lets the app keep a list five minutes and revalidate it with the tag', async () => {
       const first = await api('get', '/v1/masters/class-categories', owner.token);
       expect(first.headers['cache-control']).toBe('private, max-age=300');
-      expect(first.headers['vary']).toBe('Authorization');
+      expect(first.headers['vary']).toBe('Origin, Authorization');
       const etag = first.headers['etag'] as string;
+      // Express answers 304 from the tag set here, whichever form of it the app sends back.
+      for (const sent of [etag, etag.replace(/^W\//, ''), '*']) {
+        const revalidated = await request(t.app.getHttpServer())
+          .get('/v1/masters/class-categories')
+          .set('Authorization', `Bearer ${owner.token}`)
+          .set('If-None-Match', sent);
+        expect(revalidated.status).toBe(304);
+      }
       expect(etag).toMatch(/^W\/"[A-Za-z0-9_-]{22}"$/);
 
       const again = await request(t.app.getHttpServer())
@@ -244,6 +254,17 @@ describe('MST-01 and PLT-31 to PLT-33 platform masters (API design 10.4g, DDD 9.
       expect(changed.status).toBe(200);
       expect(changed.headers['etag']).not.toBe(etag);
       expect(changed.body.data).toHaveLength(8);
+    });
+
+    it('adds Authorization to the CORS Vary: Origin, and does not replace it', async () => {
+      const res = await request(t.app.getHttpServer())
+        .get('/v1/masters/class-categories')
+        .set('Authorization', `Bearer ${owner.token}`)
+        .set('Origin', 'http://localhost:3001');
+      expect(res.status).toBe(200);
+      expect(res.headers['access-control-allow-origin']).toBe('http://localhost:3001');
+      const vary = String(res.headers['vary']).split(/,\s*/);
+      expect(vary).toEqual(expect.arrayContaining(['Origin', 'Authorization']));
     });
 
     it('keeps hidden entries from everyone but Super Admin, who asks for them', async () => {
@@ -327,6 +348,69 @@ describe('MST-01 and PLT-31 to PLT-33 platform masters (API design 10.4g, DDD 9.
       expect(await list('designations')).toHaveLength(12);
     });
 
+    it('counts hidden entries: an entry added after a hidden one goes after it, not on top of it', async () => {
+      const hidden = await created('designations', 'designations', { code: code(), name: name() });
+      expect(hidden.displayOrder).toBe(13);
+      expect(
+        (await asAdmin('delete', `/v1/platform/masters/designations/${hidden.id}`)).status,
+      ).toBe(200);
+      const next = await created('designations', 'designations', { code: code(), name: name() });
+      expect(next.displayOrder).toBe(14);
+      const all = await list('designations', '?includeHidden=true');
+      expect(all.map((entry) => entry.displayOrder)).toEqual(all.map((_, i) => i + 1));
+    });
+
+    it('keeps one list whole when adds, moves and a hide arrive together: no 5xx, positions 1 to N', async () => {
+      const own = [];
+      for (let i = 0; i < 4; i++) {
+        own.push(await created('predefined-sections', 'predefined_sections', sectionBody()));
+      }
+      const base = '/v1/platform/masters/predefined-sections';
+      const requests = [
+        ...[1, 3, 5, 7, 9, 11].map((displayOrder) =>
+          asAdmin('post', base, { ...sectionBody(), displayOrder }),
+        ),
+        ...own
+          .slice(0, 3)
+          .map((entry, i) =>
+            asAdmin('patch', `${base}/${entry.id}`, { version: 1, displayOrder: 2 + i * 2 }),
+          ),
+        asAdmin('delete', `${base}/${own[3]!.id}`),
+      ];
+      const results = await Promise.all(requests);
+      let added = 0;
+      for (const res of results) {
+        expect(res.status).toBeLessThan(500);
+        if (res.status === 201) {
+          added++;
+          scratch.push({ table: 'predefined_sections', id: res.body.data.id });
+        }
+      }
+      expect(added).toBeGreaterThan(0);
+      const all = await list('predefined-sections', '?includeHidden=true');
+      expect(all).toHaveLength(10 + own.length + added);
+      expect(all.map((entry) => entry.displayOrder)).toEqual(all.map((_, i) => i + 1));
+    });
+
+    it('lists the places by name, whatever the letter case and the order they were added in', async () => {
+      const country = await created('countries', 'countries', {
+        name: name(),
+        iso2: 'ZY',
+        phoneCode: '998',
+        currency: 'ZZY',
+      });
+      for (const stateName of ['beta', 'Alpha', 'gamma']) {
+        await created('states', 'states', { countryId: country.id, name: stateName });
+      }
+      const states = await list('states', `?countryId=${country.id}`);
+      expect(states.map((state) => state.name)).toEqual(['Alpha', 'beta', 'gamma']);
+      for (const cityName of ['delta', 'Charlie', 'bravo']) {
+        await created('cities', 'cities', { stateId: states[0]!.id, name: cityName });
+      }
+      const cities = await list('cities', `?stateId=${states[0]!.id}`);
+      expect(cities.map((city) => city.name)).toEqual(['bravo', 'Charlie', 'delta']);
+    });
+
     it('adds places under their parent, by name', async () => {
       const country = await created('countries', 'countries', {
         name: name(),
@@ -387,6 +471,17 @@ describe('MST-01 and PLT-31 to PLT-33 platform masters (API design 10.4g, DDD 9.
       });
       expect(india.status).toBe(409);
       expect(india.body.errors?.[0]).toMatchObject({ field: 'iso2' });
+    });
+
+    it('treats names that differ only in the white space inside them as the same name', async () => {
+      const base = name();
+      await created('designations', 'designations', { code: code(), name: base });
+      const res = await asAdmin('post', '/v1/platform/masters/designations', {
+        code: code(),
+        name: base.replace(' ', '  \t '),
+      });
+      expect(res.status).toBe(409);
+      expect(res.body.errors?.[0]).toMatchObject({ field: 'name', code: 'DUPLICATE' });
     });
 
     it('names the field of every body error', async () => {
@@ -464,6 +559,24 @@ describe('MST-01 and PLT-31 to PLT-33 platform masters (API design 10.4g, DDD 9.
       expect(res.status).toBe(200);
       expect(res.body.data).toMatchObject({ version: 1 });
       expect(await audit(entry.id)).toHaveLength(1);
+    });
+
+    it('refuses null for a field that cannot be empty: INVALID_TYPE, not a server error', async () => {
+      const entry = await created('designations', 'designations', { code: code(), name: name() });
+      const path = `/v1/platform/masters/designations/${entry.id}`;
+      for (const field of ['name', 'status', 'displayOrder']) {
+        const res = await asAdmin('patch', path, { version: 1, [field]: null });
+        expect(res.status).toBe(400);
+        expect(res.body.errors?.[0]).toMatchObject({ field, code: 'INVALID_TYPE' });
+      }
+      const add = await asAdmin('post', '/v1/platform/masters/designations', {
+        code: code(),
+        name: name(),
+        displayOrder: null,
+      });
+      expect(add.status).toBe(400);
+      expect(add.body.errors?.[0]).toMatchObject({ field: 'displayOrder', code: 'INVALID_TYPE' });
+      expect((await list('designations')).find((d) => d.id === entry.id)!.version).toBe(1);
     });
 
     it('never changes a code, an ISO code or a parent, and needs the version', async () => {
