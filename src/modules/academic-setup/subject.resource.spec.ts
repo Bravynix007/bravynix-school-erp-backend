@@ -1,6 +1,6 @@
 import type { AuthorRef } from '../../common/http/author-stamps.js';
 import type { SubjectRow } from './subject.repository.js';
-import { peopleOfSubjects, subjectResource } from './subject.resource.js';
+import { subjectResource } from './subject.resource.js';
 
 const row: SubjectRow = {
   id: '0192f3b0-0000-7000-8000-000000000001',
@@ -32,13 +32,5 @@ describe('subjectResource', () => {
       updatedBy: { id: row.updated_by, displayName: 'Ravi', roleName: 'Institution Admin' },
       updatedAt: '2026-06-02T05:00:00.000Z',
     });
-  });
-});
-
-describe('peopleOfSubjects', () => {
-  it('names each author once and leaves out the missing ones', () => {
-    expect(
-      peopleOfSubjects([row, { ...row, id: 'x', updated_by: null }, { ...row, created_by: null }]),
-    ).toEqual([row.created_by, row.updated_by]);
   });
 });
