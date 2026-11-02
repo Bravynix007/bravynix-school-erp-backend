@@ -40,3 +40,16 @@ export function authorStamps(
     updatedAt: row.updated_at.toISOString(),
   };
 }
+
+/** Everyone the rows name as author, each once, for one lookup of their names (`PersonDirectory.describe`). */
+export function authorIdsOf(
+  rows: readonly { created_by: string | null; updated_by: string | null }[],
+): string[] {
+  return [
+    ...new Set(
+      rows
+        .flatMap((row) => [row.created_by, row.updated_by])
+        .filter((id): id is string => id !== null),
+    ),
+  ];
+}

@@ -33,14 +33,3 @@ export function academicYearResource(
     ...authorStamps(row, people),
   };
 }
-
-/** Everyone the years name, for one lookup. */
-export function peopleOfYears(rows: readonly AcademicYearRow[]): string[] {
-  return [
-    ...new Set(
-      rows
-        .flatMap((row) => [row.created_by, row.updated_by])
-        .filter((id): id is string => id !== null),
-    ),
-  ];
-}

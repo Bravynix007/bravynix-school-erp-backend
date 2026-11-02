@@ -47,13 +47,6 @@ export interface PlatformInstitution extends InstitutionResource {
   blockedSections: ('staff' | 'students')[];
 }
 
-/** Everyone an Institution row names, for one lookup. */
-export function peopleOfInstitutions(rows: readonly InstitutionRow[]): string[] {
-  return rows
-    .flatMap((row) => [row.created_by, row.updated_by])
-    .filter((id): id is string => id !== null);
-}
-
 export function institutionResource(row: InstitutionRow, people: People): InstitutionResource {
   return {
     id: row.id,

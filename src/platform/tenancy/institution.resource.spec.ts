@@ -3,7 +3,6 @@ import {
   institutionOption,
   institutionResource,
   institutionSummary,
-  peopleOfInstitutions,
   platformInstitution,
 } from './institution.resource.js';
 
@@ -122,14 +121,5 @@ describe('Institution resource (API design 10.4c)', () => {
       version: 4,
       blockedSections: ['staff'],
     });
-  });
-
-  it('lists the people a row names', () => {
-    expect(peopleOfInstitutions([row(), row({ updated_by: 'p3' })]).toSorted()).toEqual([
-      'p1',
-      'p1',
-      'p2',
-      'p3',
-    ]);
   });
 });

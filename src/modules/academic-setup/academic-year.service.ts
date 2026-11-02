@@ -3,6 +3,8 @@ import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { ApiResult } from '../../common/http/api-result.js';
 import { AppException } from '../../common/http/app-exception.js';
 import { ErrorCode } from '../../common/http/error-codes.js';
+import { authorIdsOf } from '../../common/http/author-stamps.js';
+import { newId } from '../../common/ids/ids.js';
 import { requireVersion } from '../../common/http/require-version.js';
 import { AuditService, type AuditValues } from '../../platform/audit/index.js';
 import {
@@ -23,11 +25,7 @@ import {
   type AcademicYearChanges,
   type AcademicYearRow,
 } from './academic-year.repository.js';
-import {
-  academicYearResource,
-  peopleOfYears,
-  type AcademicYearResource,
-} from './academic-year.resource.js';
+import { academicYearResource, type AcademicYearResource } from './academic-year.resource.js';
 import { requireYearDates, translateYearError } from './academic-year.rules.js';
 
 /** What the audit log keeps of a year. */
@@ -66,7 +64,7 @@ export class AcademicYearService {
     const rows = await this.database.transaction(tenant, (tx) =>
       this.years.active(tx, query.institutionId),
     );
-    const people = await this.people.describe(peopleOfYears(rows));
+    const people = await this.people.describe(authorIdsOf(rows));
     return ApiResult.list(
       rows.map((row) => academicYearResource(row, people)),
       null,
@@ -84,6 +82,7 @@ export class AcademicYearService {
       .transaction(context.tenant, async (tx) => {
         await this.years.lockInstitution(tx, body.institutionId);
         const created = await this.years.insert(tx, {
+          id: newId(),
           society_id: context.societyId,
           institution_id: body.institutionId,
           name: body.name,
@@ -219,7 +218,7 @@ export class AcademicYearService {
   }
 
   private async resource(row: AcademicYearRow): Promise<AcademicYearResource> {
-    return academicYearResource(row, await this.people.describe(peopleOfYears([row])));
+    return academicYearResource(row, await this.people.describe(authorIdsOf([row])));
   }
 
   /** The entry carries the Society and the Institution, so the Society's Owners see it (API design 20.3). */

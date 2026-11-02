@@ -1,6 +1,6 @@
 import type { AuthorRef } from '../../common/http/author-stamps.js';
 import type { AcademicYearRow } from './academic-year.repository.js';
-import { academicYearResource, peopleOfYears } from './academic-year.resource.js';
+import { academicYearResource } from './academic-year.resource.js';
 
 const row: AcademicYearRow = {
   id: '0192f3b0-0000-7000-8000-000000000001',
@@ -37,13 +37,5 @@ describe('academicYearResource', () => {
       updatedBy: { id: null, displayName: 'System', roleName: null },
       updatedAt: '2026-06-02T05:00:00.000Z',
     });
-  });
-});
-
-describe('peopleOfYears', () => {
-  it('lists each person once and leaves out an empty author', () => {
-    const other = { ...row, id: 'x', created_by: row.created_by, updated_by: 'someone' };
-    expect(peopleOfYears([row, other])).toEqual([row.created_by, 'someone']);
-    expect(peopleOfYears([])).toEqual([]);
   });
 });
