@@ -188,10 +188,7 @@ describe('QA: PLT-45 one Institution for Super Admin, adversarial (API design 10
       const res = await one(made.id);
       expect(res.status).toBe(200);
       expect(res.body.data).toMatchObject({ id: made.id, societyId, societyName: 'Sunrise Trust' });
-      console.log(
-        'QA-Q2 Institution status after its Society was deactivated:',
-        res.body.data.status,
-      );
+      expect(res.body.data.status).toBe(1);
     });
   });
 
@@ -212,8 +209,7 @@ describe('QA: PLT-45 one Institution for Super Admin, adversarial (API design 10
         expect([id.slice(0, 40), res.status]).toEqual([id.slice(0, 40), 404]);
       }
       const upper = await one(made.id.toUpperCase());
-      console.log('QA-Q3 upper-case ID:', upper.status);
-      expect([200, 404]).toContain(upper.status);
+      expect(upper.status).toBe(200);
     });
 
     it('is read only: POST, PATCH, PUT and DELETE on the path are not served', async () => {
