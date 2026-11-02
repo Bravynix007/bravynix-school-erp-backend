@@ -12,13 +12,13 @@ import {
   Matches,
   MaxLength,
   MinLength,
-  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { NewPersonDto } from '../identity/index.js';
 import { AddressDto } from '../../common/validation/address.dto.js';
 import { PhoneDto } from '../../common/validation/phone.dto.js';
 import { VersionDto } from '../../common/validation/version.dto.js';
+import { WhenPresent } from '../../common/validation/when-present.js';
 import { TenantRootListQueryDto } from './tenant-root-list.query.js';
 
 const WEBSITE = /^https?:\/\/\S+$/i;
@@ -99,7 +99,7 @@ export class CreateSocietyDto extends SocietyProfileDto {
  */
 export class UpdateSocietyDto extends IntersectionType(VersionDto, SocietyProfileDto) {
   @ApiPropertyOptional({ maxLength: 255 })
-  @ValidateIf((_dto, value: unknown) => value !== undefined)
+  @WhenPresent()
   @IsString()
   @IsNotEmpty()
   @MaxLength(255)

@@ -14,6 +14,7 @@ import { DatabaseModule } from './platform/database/database.module.js';
 import { EmailModule } from './platform/email/email.module.js';
 import { IdempotencyModule } from './platform/idempotency/idempotency.module.js';
 import { IdentityModule } from './platform/identity/identity.module.js';
+import { MastersModule } from './platform/masters/index.js';
 import { NumberingModule } from './platform/numbering/numbering.module.js';
 import { TenancyModule } from './platform/tenancy/tenancy.module.js';
 
@@ -66,6 +67,7 @@ import { TenancyModule } from './platform/tenancy/tenancy.module.js';
     AuditModule,
     IdentityModule,
     TenancyModule,
+    MastersModule,
     IdempotencyModule,
     NumberingModule,
     HealthModule,

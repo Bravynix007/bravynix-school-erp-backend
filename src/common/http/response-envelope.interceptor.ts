@@ -53,7 +53,9 @@ export class ResponseEnvelopeInterceptor implements NestInterceptor {
     // here too keeps it if a later interceptor copies the body.
     response.status(status);
     for (const [name, headerValue] of Object.entries(result.options.headers ?? {})) {
-      response.setHeader(name, headerValue);
+      // `Vary` is added to, not replaced: CORS has already set `Vary: Origin` on this response.
+      if (name.toLowerCase() === 'vary') response.vary(headerValue);
+      else response.setHeader(name, headerValue);
     }
     if (!response.getHeader('Cache-Control')) response.setHeader('Cache-Control', 'no-store');
     const code = result.options.code ?? ResultCode.OK;

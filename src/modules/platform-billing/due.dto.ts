@@ -13,10 +13,10 @@ import {
   Matches,
   Max,
   Min,
-  ValidateIf,
 } from 'class-validator';
 import { PageQueryDto } from '../../common/pagination/pagination.js';
 import { VersionDto } from '../../common/validation/version.dto.js';
+import { WhenPresent } from '../../common/validation/when-present.js';
 import { DueStatus, PAYMENT_MODES } from './due.rules.js';
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
@@ -32,8 +32,6 @@ const IsCalendarDate = () =>
 const IsStudentCount = () => applyDecorators(IsInt(), Min(0), Max(MAX_STUDENT_COUNT));
 const IsNote = () => applyDecorators(IsString(), Length(1, 500));
 const IsAdjustment = () => applyDecorators(IsString(), Matches(SIGNED_MONEY));
-/** A change may leave a field out; naming it as `null` is refused unless the field can be cleared. */
-const WhenPresent = () => ValidateIf((_dto, value: unknown) => value !== undefined);
 
 /** PLT-26 body (API design 10.22). `invoiceFileId` arrives with the Files module. */
 export class RaiseDueDto {

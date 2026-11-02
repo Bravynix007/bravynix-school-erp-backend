@@ -11,6 +11,15 @@ import type {
   UserTotpFactorsTable,
   UsersTable,
 } from '../identity/identity.tables.js';
+import type {
+  CitiesTable,
+  ClassCategoriesTable,
+  CountriesTable,
+  DesignationsTable,
+  PredefinedClassesTable,
+  PredefinedSectionsTable,
+  StatesTable,
+} from '../masters/masters.tables.js';
 import type { NumberSequencesTable } from '../numbering/numbering.tables.js';
 import type { IdempotencyKeysTable } from '../idempotency/idempotency.tables.js';
 import type {
@@ -41,4 +50,11 @@ export interface Database {
   access_blocks: AccessBlocksTable;
   idempotency_keys: IdempotencyKeysTable;
   number_sequences: NumberSequencesTable;
+  countries: CountriesTable;
+  states: StatesTable;
+  cities: CitiesTable;
+  class_categories: ClassCategoriesTable;
+  predefined_classes: PredefinedClassesTable;
+  predefined_sections: PredefinedSectionsTable;
+  designations: DesignationsTable;
 }
