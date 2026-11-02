@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { ApiResult } from '../../common/http/api-result.js';
 import { AppException } from '../../common/http/app-exception.js';
+import { authorIdsOf } from '../../common/http/author-stamps.js';
 import { changedColumns } from '../../common/http/changed-columns.js';
 import { newId } from '../../common/ids/ids.js';
 import { requireVersion } from '../../common/http/require-version.js';
@@ -23,7 +24,7 @@ import type {
   UpdateClassDto,
 } from './class.dto.js';
 import { ClassRepository, type ClassRow, type ClassView } from './class.repository.js';
-import { classResource, peopleOf, type ClassResource } from './class.resource.js';
+import { classResource, type ClassResource } from './class.resource.js';
 import {
   defaultClassName,
   requireClassAllowed,
@@ -221,7 +222,7 @@ export class ClassService {
   }
 
   private async resources(views: readonly ClassView[]): Promise<ClassResource[]> {
-    const people = await this.people.describe(peopleOf(views));
+    const people = await this.people.describe(authorIdsOf(views));
     return views.map((view) => classResource(view, people));
   }
 

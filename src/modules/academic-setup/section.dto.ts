@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsInt, IsOptional, IsString, IsUUID, Length, Max, Min } from 'class-validator';
+import { LowerCaseUuid } from '../../common/validation/lower-case-uuid.js';
 import { VersionDto } from '../../common/validation/version.dto.js';
 import { WhenPresent } from '../../common/validation/when-present.js';
 
@@ -9,10 +10,12 @@ export const MAX_CAPACITY = 32_767;
 /** SEC-02 body (API design 10.4j). */
 export class CreateSectionDto {
   @ApiProperty({ format: 'uuid' })
+  @LowerCaseUuid()
   @IsUUID()
   classId!: string;
 
   @ApiProperty({ format: 'uuid', description: 'A predefined section of the platform masters' })
+  @LowerCaseUuid()
   @IsUUID()
   predefinedSectionId!: string;
 

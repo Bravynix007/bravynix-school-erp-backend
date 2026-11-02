@@ -1,6 +1,6 @@
 import type { AuthorRef } from '../../common/http/author-stamps.js';
 import type { ClassView } from './class.repository.js';
-import { classResource, peopleOf } from './class.resource.js';
+import { classResource } from './class.resource.js';
 
 const view: ClassView = {
   id: '0192f3b0-0000-7000-8000-000000000001',
@@ -47,13 +47,5 @@ describe('classResource', () => {
       createdAt: '2026-06-01T05:00:00.000Z',
       updatedAt: '2026-06-02T05:00:00.000Z',
     });
-  });
-});
-
-describe('peopleOf', () => {
-  it('names each author once and leaves out the missing ones', () => {
-    expect(
-      peopleOf([view, { ...view, id: 'x', updated_by: null }, { ...view, created_by: null }]),
-    ).toEqual([view.created_by, view.updated_by]);
   });
 });

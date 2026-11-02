@@ -10,6 +10,7 @@ import {
   Length,
   ValidateNested,
 } from 'class-validator';
+import { LowerCaseUuid } from '../../common/validation/lower-case-uuid.js';
 import { VersionDto } from '../../common/validation/version.dto.js';
 import { WhenPresent } from '../../common/validation/when-present.js';
 
@@ -19,6 +20,7 @@ export const MAX_BULK_CLASSES = 50;
 /** CLS-01 query: the Institution whose classes are listed (API design 6.5). */
 export class ListClassesQueryDto {
   @ApiProperty({ format: 'uuid' })
+  @LowerCaseUuid()
   @IsUUID()
   institutionId!: string;
 }
@@ -26,6 +28,7 @@ export class ListClassesQueryDto {
 /** One class to add: the part CLS-02 and CLS-03 share. */
 export class ClassInputDto {
   @ApiProperty({ format: 'uuid', description: 'A predefined class of the platform masters' })
+  @LowerCaseUuid()
   @IsUUID()
   predefinedClassId!: string;
 
@@ -59,6 +62,7 @@ export class ClassInputDto {
 /** CLS-02 body (API design 10.4j). */
 export class CreateClassDto extends ClassInputDto {
   @ApiProperty({ format: 'uuid' })
+  @LowerCaseUuid()
   @IsUUID()
   institutionId!: string;
 }
@@ -66,6 +70,7 @@ export class CreateClassDto extends ClassInputDto {
 /** CLS-03 body: up to 50 classes, all or nothing. */
 export class CreateClassesDto {
   @ApiProperty({ format: 'uuid' })
+  @LowerCaseUuid()
   @IsUUID()
   institutionId!: string;
 

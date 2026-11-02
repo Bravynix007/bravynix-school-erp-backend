@@ -169,7 +169,7 @@ export interface SeedClass {
 }
 
 /** The seeded class `n` of the two-worlds list, so a test can find its row. */
-export const seededClassId = (n: number): string => yearId(3301 + n);
+export const seededClassId = (n: number): string => seedId(3301 + n);
 
 /** Two-worlds: A1 a first and a ninth class, A2 a Nursery, B1 a Pre-University class with its stream, so every case has one. */
 const twoWorldsClasses: readonly {
@@ -190,7 +190,7 @@ export const classes: SeedClass[] = twoWorldsClasses.map((entry, n) => ({
   predefinedCode: entry.predefinedCode,
   streamName: entry.streamName,
   sections: entry.sections.map((code, k) => ({
-    id: yearId(3500 + n * 10 + k),
+    id: seedId(3500 + n * 10 + k),
     predefinedCode: code,
     capacity: 40,
   })),
