@@ -1,5 +1,5 @@
 import type { SocietyRow } from './society.repository.js';
-import { institutionsOf, peopleOf, societyResource, societySummary } from './society.resource.js';
+import { institutionsOf, societyResource, societySummary } from './society.resource.js';
 
 const row = (overrides: Partial<SocietyRow> = {}): SocietyRow => ({
   id: 's1',
@@ -70,15 +70,6 @@ describe('Society resource (API design 10.4b)', () => {
       updatedBy: people.get('p2'),
       updatedAt: '2026-10-02T00:00:00.000Z',
     });
-  });
-
-  it('lists the people a row names, once each is for the lookup to fold', () => {
-    expect(peopleOf([row(), row({ updated_by: 'p3' })]).toSorted()).toEqual([
-      'p1',
-      'p1',
-      'p2',
-      'p3',
-    ]);
   });
 
   it('names the blocked sections of each Institution in the detail', () => {

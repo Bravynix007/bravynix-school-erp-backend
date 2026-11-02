@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { requireVersion } from '../../common/http/require-version.js';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { ApiResult } from '../../common/http/api-result.js';
+import { authorIdsOf } from '../../common/http/author-stamps.js';
 import { AppException } from '../../common/http/app-exception.js';
 import { newId } from '../../common/ids/ids.js';
 import { pageMeta, pageOffset, parseSort } from '../../common/pagination/pagination.js';
@@ -33,7 +34,6 @@ import {
   institutionOption,
   institutionResource,
   institutionSummary,
-  peopleOfInstitutions,
   platformInstitution,
   type InstitutionOption,
   type InstitutionResource,
@@ -118,7 +118,7 @@ export class InstitutionService {
         : await this.database.transaction(scope.tenant, (tx) =>
             this.institutions.activeAmong(tx, scope.societyId!, scope.tenant.institutionIds ?? []),
           );
-    const people = await this.people.describe(peopleOfInstitutions(rows));
+    const people = await this.people.describe(authorIdsOf(rows));
     return ApiResult.list(
       rows.map((row) => institutionOption(row, people)),
       null,
@@ -142,7 +142,7 @@ export class InstitutionService {
         pageOffset(query.page, query.limit),
       ),
     );
-    const people = await this.people.describe(peopleOfInstitutions(rows));
+    const people = await this.people.describe(authorIdsOf(rows));
     return ApiResult.list(
       rows.map((row) => institutionSummary(row, people)),
       pageMeta(query.page, query.limit, total),
@@ -156,7 +156,7 @@ export class InstitutionService {
       if (!found) throw AppException.notFound();
       return found;
     });
-    return platformInstitution(row, await this.people.describe(peopleOfInstitutions([row])));
+    return platformInstitution(row, await this.people.describe(authorIdsOf([row])));
   }
 
   /** INS-03: inside the caller's scope only; an Institution whose staff are blocked answers 423 to its staff. */
@@ -269,7 +269,7 @@ export class InstitutionService {
   }
 
   private async resource(row: InstitutionRow): Promise<InstitutionResource> {
-    return institutionResource(row, await this.people.describe(peopleOfInstitutions([row])));
+    return institutionResource(row, await this.people.describe(authorIdsOf([row])));
   }
 
   /** The audit entry carries the Society's and the Institution's IDs, so the Society's owners see it (API design 20.3). */

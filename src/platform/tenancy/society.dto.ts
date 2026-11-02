@@ -5,7 +5,6 @@ import {
   ArrayMinSize,
   IsArray,
   IsEmail,
-  IsISO8601,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -16,13 +15,13 @@ import {
 } from 'class-validator';
 import { NewPersonDto } from '../identity/index.js';
 import { AddressDto } from '../../common/validation/address.dto.js';
+import { IsCalendarDate } from '../../common/validation/calendar-date.js';
 import { PhoneDto } from '../../common/validation/phone.dto.js';
 import { VersionDto } from '../../common/validation/version.dto.js';
 import { WhenPresent } from '../../common/validation/when-present.js';
 import { TenantRootListQueryDto } from './tenant-root-list.query.js';
 
 const WEBSITE = /^https?:\/\/\S+$/i;
-const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
 /** The profile fields a Society has, on create and on change. A body is JSON: no `@Type` on primitives. */
 class SocietyProfileDto {
@@ -54,8 +53,7 @@ class SocietyProfileDto {
 
   @ApiPropertyOptional({ nullable: true, example: '1998-06-01' })
   @IsOptional()
-  @Matches(DATE_ONLY)
-  @IsISO8601({ strict: true })
+  @IsCalendarDate()
   foundedDate?: string | null;
 
   @ApiPropertyOptional({ type: AddressDto, nullable: true })

@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { requireVersion } from '../../common/http/require-version.js';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { ApiResult } from '../../common/http/api-result.js';
+import { authorIdsOf } from '../../common/http/author-stamps.js';
 import { AppException } from '../../common/http/app-exception.js';
 import { ErrorCode } from '../../common/http/error-codes.js';
 import { fieldError } from '../../common/validation/field-error.js';
@@ -32,7 +33,6 @@ import { SocietyOwnerService } from './society-owner.service.js';
 import { SocietyRepository, type SocietyChanges, type SocietyRow } from './society.repository.js';
 import {
   institutionsOf,
-  peopleOf,
   societyResource,
   societySummary,
   type SocietyDetail,
@@ -128,7 +128,7 @@ export class SocietyService {
         };
       },
     );
-    const people = await this.people.describe(peopleOf(rows));
+    const people = await this.people.describe(authorIdsOf(rows));
     return ApiResult.list(
       rows.map((row) => societySummary(row, people, owed.get(row.id) ?? OWES_NOTHING)),
       pageMeta(query.page, query.limit, total),
@@ -257,7 +257,7 @@ export class SocietyService {
   }
 
   private async resource(row: SocietyRow, owed: string): Promise<SocietyResource> {
-    return societyResource(row, await this.people.describe(peopleOf([row])), owed);
+    return societyResource(row, await this.people.describe(authorIdsOf([row])), owed);
   }
 
   /** The audit entry carries the Society's ID, so its owners see it in AUD-01 (API design 20.3). */

@@ -52,13 +52,6 @@ export interface SocietyDetail extends SocietyResource {
 
 export type People = ReadonlyMap<string, AuthorRef>;
 
-/** Everyone a Society row names, for one lookup. */
-export function peopleOf(rows: readonly SocietyRow[]): string[] {
-  return rows
-    .flatMap((row) => [row.created_by, row.updated_by])
-    .filter((id): id is string => id !== null);
-}
-
 export function societyResource(
   row: SocietyRow,
   people: People,

@@ -229,9 +229,9 @@ describe('AY-01 to AY-05 academic years (PRD 7.2, API design 10.4h)', () => {
     });
 
     it('refuses a name used by an active year, whatever the letter case', async () => {
-      await added(first);
+      await added(first, { name: 'AY 2026-27' });
       const res = await add(owner.token, first, {
-        name: '2026-2027'.toLowerCase(),
+        name: 'ay 2026-27',
         startDate: '2030-06-01',
         endDate: '2031-03-31',
       });
@@ -422,22 +422,21 @@ describe('AY-01 to AY-05 academic years (PRD 7.2, API design 10.4h)', () => {
       expect((await call('post', `${YEARS}/${one.id}/make-current`, {})).status).toBe(400);
     });
 
-    it('never leaves two current years when asked twice at once', async () => {
+    it('never leaves two current years, and never answers 5xx, when asked several times at once', async () => {
       await added(first);
-      const two = await added(first, {
-        name: '2027-2028',
-        startDate: '2027-06-01',
-        endDate: '2028-03-31',
-      });
-      const three = await added(first, {
-        name: '2028-2029',
-        startDate: '2028-06-01',
-        endDate: '2029-03-31',
-      });
-      await Promise.all([
-        call('post', `${YEARS}/${two.id}/make-current`, { version: 1 }),
-        call('post', `${YEARS}/${three.id}/make-current`, { version: 1 }),
-      ]);
+      const later = await Promise.all(
+        [2027, 2028, 2029, 2030].map((from) =>
+          added(first, {
+            name: `${from}-${from + 1}`,
+            startDate: `${from}-06-01`,
+            endDate: `${from + 1}-03-31`,
+          }),
+        ),
+      );
+      const answers = await Promise.all(
+        later.map((year) => call('post', `${YEARS}/${year.id}/make-current`, { version: 1 })),
+      );
+      for (const answer of answers) expect([200, 409]).toContain(answer.status);
       expect((await years(first)).filter((year) => year.isCurrent)).toHaveLength(1);
     });
 
@@ -545,6 +544,37 @@ describe('AY-01 to AY-05 academic years (PRD 7.2, API design 10.4h)', () => {
             tx.updateTable('academic_years').set({ status: 0 }).where('id', '=', year.id).execute(),
         ),
       ).rejects.toMatchObject({ code: '23514' });
+    });
+
+    it('refuses a second current year past the application', async () => {
+      await added(first);
+      const two = await added(first, {
+        name: '2027-2028',
+        startDate: '2027-06-01',
+        endDate: '2028-03-31',
+      });
+      await expect(
+        database.transaction(
+          { personId: owner.person, roleCode: 2, societyId: societyA, institutionIds: [first] },
+          (tx) =>
+            tx
+              .updateTable('academic_years')
+              .set({ is_current: true })
+              .where('id', '=', two.id)
+              .execute(),
+        ),
+      ).rejects.toMatchObject({ code: '23505', constraint: 'uq_academic_years_current' });
+    });
+
+    it('shows a scope that holds one Institution none of the years of its sibling', async () => {
+      const year = await added(first);
+      const sibling = await added(second);
+      const onlySecond = await database.transaction(
+        { personId: owner.person, roleCode: 2, societyId: societyA, institutionIds: [second] },
+        (tx) => tx.selectFrom('academic_years').select('id').execute(),
+      );
+      expect(onlySecond).toEqual([{ id: sibling.id }]);
+      expect(onlySecond).not.toContainEqual({ id: year.id });
     });
 
     it('has no delete right', async () => {

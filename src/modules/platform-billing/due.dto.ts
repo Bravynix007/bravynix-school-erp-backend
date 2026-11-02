@@ -5,7 +5,6 @@ import {
   IsArray,
   IsIn,
   IsInt,
-  IsISO8601,
   IsOptional,
   IsString,
   IsUUID,
@@ -14,12 +13,11 @@ import {
   Max,
   Min,
 } from 'class-validator';
+import { IsCalendarDate } from '../../common/validation/calendar-date.js';
 import { PageQueryDto } from '../../common/pagination/pagination.js';
 import { VersionDto } from '../../common/validation/version.dto.js';
 import { WhenPresent } from '../../common/validation/when-present.js';
 import { DueStatus, PAYMENT_MODES } from './due.rules.js';
-
-const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
 /** A signed adjustment: a plain decimal string with exactly two decimals (API design 7.5). */
 const SIGNED_MONEY = /^-?\d{1,8}\.\d{2}$/;
@@ -27,8 +25,6 @@ const SIGNED_MONEY = /^-?\d{1,8}\.\d{2}$/;
 /** The most students one due may count; the amount columns hold the rest. */
 export const MAX_STUDENT_COUNT = 1_000_000;
 
-const IsCalendarDate = () =>
-  applyDecorators(IsString(), Matches(DATE_ONLY), IsISO8601({ strict: true }));
 const IsStudentCount = () => applyDecorators(IsInt(), Min(0), Max(MAX_STUDENT_COUNT));
 const IsNote = () => applyDecorators(IsString(), Length(1, 500));
 const IsAdjustment = () => applyDecorators(IsString(), Matches(SIGNED_MONEY));

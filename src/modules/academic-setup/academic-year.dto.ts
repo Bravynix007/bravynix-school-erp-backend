@@ -1,13 +1,8 @@
-import { applyDecorators } from '@nestjs/common';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsISO8601, IsString, IsUUID, Length, Matches } from 'class-validator';
+import { IsString, IsUUID, Length } from 'class-validator';
+import { IsCalendarDate } from '../../common/validation/calendar-date.js';
 import { VersionDto } from '../../common/validation/version.dto.js';
 import { WhenPresent } from '../../common/validation/when-present.js';
-
-const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
-
-const IsCalendarDate = () =>
-  applyDecorators(IsString(), Matches(DATE_ONLY), IsISO8601({ strict: true }));
 
 /** AY-01 query: the Institution whose years are listed (API design 6.5). */
 export class ListAcademicYearsQueryDto {
