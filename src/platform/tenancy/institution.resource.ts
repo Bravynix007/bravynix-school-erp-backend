@@ -35,6 +35,8 @@ export interface InstitutionOption extends AuthorStamps {
 export interface InstitutionSummary extends InstitutionOption {
   societyId: string;
   societyName: string;
+  /** 1 active, 0 deactivated, so a picker can leave out the Institutions of a deactivated Society. */
+  societyStatus: number;
   status: number;
   blockedSections: ('staff' | 'students')[];
 }
@@ -104,6 +106,7 @@ export function institutionSummary(row: InstitutionListRow, people: People): Ins
     ...institutionOption(row, people),
     societyId: row.society_id,
     societyName: row.society_name,
+    societyStatus: row.society_status,
     status: row.status,
     blockedSections: blockedSectionsOf(row),
   };

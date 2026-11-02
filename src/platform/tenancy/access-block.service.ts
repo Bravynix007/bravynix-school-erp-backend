@@ -21,7 +21,11 @@ import {
   type CreateAccessBlockDto,
   type ListAccessBlocksQueryDto,
 } from './access-block.dto.js';
-import { AccessBlockRepository, type AccessBlockRow } from './access-block.repository.js';
+import {
+  AccessBlockRepository,
+  type AccessBlockRow,
+  type PlatformBlockRow,
+} from './access-block.repository.js';
 import {
   blockResource,
   peopleOfBlocks,
@@ -73,15 +77,17 @@ export class AccessBlockService {
     const institutionId = this.institutionOf(body);
     const tenant = platformTenant(principal, body.societyId, institutionId ? [institutionId] : []);
     const row = await this.database
-      .transaction(tenant, async (tx) => {
+      .transaction(tenant, async (tx): Promise<PlatformBlockRow> => {
         const society = await this.societies.find(tx, body.societyId);
         if (!society) throw AppException.notFound();
         requireActive(society);
+        let institutionName: string | null = null;
         if (institutionId) {
           const institution = await this.institutions.find(tx, institutionId);
           // An Institution of another Society is as unknown as a missing one.
           if (institution?.society_id !== body.societyId) throw AppException.notFound();
           requireActive(institution);
+          institutionName = institution.name;
         }
         const created = await this.blocks.insert(tx, {
           society_id: body.societyId,
@@ -92,7 +98,7 @@ export class AccessBlockService {
           updated_by: principal.personId,
         });
         await this.record(tx, 'access.block', created, body.reason, { after: auditView(created) });
-        return created;
+        return { ...created, society_name: society.name, institution_name: institutionName };
       })
       .catch((error: unknown) => {
         throw isDuplicateOn(error, 'uq_access_blocks_active') ? duplicateOn('section') : error;
@@ -178,7 +184,7 @@ export class AccessBlockService {
     return body.institutionId;
   }
 
-  private async resource(row: AccessBlockRow): Promise<AccessBlockResource> {
+  private async resource(row: PlatformBlockRow): Promise<AccessBlockResource> {
     return blockResource(row, await this.people.describe(peopleOfBlocks([row])));
   }
 

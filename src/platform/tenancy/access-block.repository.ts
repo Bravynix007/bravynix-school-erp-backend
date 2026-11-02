@@ -1,11 +1,17 @@
 import { Injectable } from '@nestjs/common';
-import { sql, type ExpressionBuilder, type Insertable, type Selectable } from 'kysely';
+import type { ExpressionBuilder, Insertable, Selectable } from 'kysely';
 import { containsPattern, type SortKey } from '../../common/pagination/pagination.js';
 import type { Database, Tx } from '../database/index.js';
 import type { AccessBlocksTable } from './tenancy.tables.js';
 
 export type AccessBlockRow = Selectable<AccessBlocksTable>;
 export type NewAccessBlock = Insertable<AccessBlocksTable>;
+
+/** A block with the names of its Society and Institution, for Super Admin (PLT-42, PLT-44). */
+export type PlatformBlockRow = AccessBlockRow & {
+  society_name: string;
+  institution_name: string | null;
+};
 
 /** An active block of the caller's Society, with the Institution's name (SOC-02). */
 export type SocietyBlockRow = AccessBlockRow & { institution_name: string | null };
@@ -51,10 +57,15 @@ export class AccessBlockRepository {
     sort: readonly SortKey<AccessBlockSortField>[],
     limit: number,
     offset: number,
-  ): Promise<{ rows: AccessBlockRow[]; total: number }> {
-    let query = this.active(tx).selectAll().where(this.matching(filter));
-    for (const key of sort) query = query.orderBy(sql.ref('created_at'), key.direction);
-    const rows = await query.orderBy('id').limit(limit).offset(offset).execute();
+  ): Promise<{ rows: PlatformBlockRow[]; total: number }> {
+    let query = this.active(tx)
+      .innerJoin('societies', 'societies.id', 'access_blocks.society_id')
+      .leftJoin('institutions', 'institutions.id', 'access_blocks.institution_id')
+      .selectAll('access_blocks')
+      .select(['societies.name as society_name', 'institutions.name as institution_name'])
+      .where(this.matching(filter));
+    for (const key of sort) query = query.orderBy('access_blocks.created_at', key.direction);
+    const rows = await query.orderBy('access_blocks.id').limit(limit).offset(offset).execute();
     const { total } = await this.active(tx)
       .select((eb) => eb.fn.countAll<number>().as('total'))
       .where(this.matching(filter))
@@ -77,10 +88,12 @@ export class AccessBlockRepository {
   private matching(filter: AccessBlockFilter) {
     return (eb: ExpressionBuilder<Database, 'access_blocks'>) => {
       const conditions = [];
-      if (filter.q) conditions.push(eb('reason', 'ilike', containsPattern(filter.q)));
-      if (filter.societyId) conditions.push(eb('society_id', '=', filter.societyId));
-      if (filter.institutionId) conditions.push(eb('institution_id', '=', filter.institutionId));
-      if (filter.sections?.length) conditions.push(eb('section', 'in', filter.sections));
+      if (filter.q) conditions.push(eb('access_blocks.reason', 'ilike', containsPattern(filter.q)));
+      if (filter.societyId) conditions.push(eb('access_blocks.society_id', '=', filter.societyId));
+      if (filter.institutionId)
+        conditions.push(eb('access_blocks.institution_id', '=', filter.institutionId));
+      if (filter.sections?.length)
+        conditions.push(eb('access_blocks.section', 'in', filter.sections));
       return eb.and(conditions);
     };
   }

@@ -687,6 +687,25 @@ describe('PLT-19 and INS-01 to INS-05 Institutions', () => {
   });
 
   describe('PLT-19 list', () => {
+    it('shows each Institution’s Society status, so a picker can leave out a deactivated Society', async () => {
+      const tag = newId().slice(-8);
+      const live = await society();
+      const ended = await society();
+      const one = await institution(live, { name: `Live ${tag}`, code: `l-${tag}` });
+      const two = await institution(ended, { name: `Ended ${tag}`, code: `e-${tag}` });
+      expect((await asAdmin('delete', `/v1/platform/societies/${ended}`)).status).toBe(200);
+      const res = await listAll(`q=${tag}`);
+      const rows = res.body.data as unknown as {
+        id: string;
+        status: number;
+        societyStatus: number;
+      }[];
+      expect(rows.map(({ id, status, societyStatus }) => ({ id, status, societyStatus }))).toEqual([
+        { id: two.id, status: 1, societyStatus: 0 },
+        { id: one.id, status: 1, societyStatus: 1 },
+      ]);
+    });
+
     it('pages, filters and sorts across Societies', async () => {
       const tag = newId().slice(-8);
       const s1 = await society();
@@ -710,6 +729,7 @@ describe('PLT-19 and INS-01 to INS-05 Institutions', () => {
         id: a.id,
         societyId: s1,
         societyName: 'Sunrise Trust',
+        societyStatus: 1,
         code: `a-${tag}`,
         name: `Alpha ${tag}`,
         place: null,
