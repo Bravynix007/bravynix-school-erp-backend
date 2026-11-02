@@ -4,6 +4,7 @@ import { runMigrations } from '../../src/platform/database/migrator.js';
 import {
   admins,
   asha,
+  classes,
   classesOffered,
   dues,
   institutions,
@@ -159,6 +160,30 @@ describe('the demo seed', () => {
         { code: 'SVHS', categories: ['LOWER_PRIMARY', 'HIGHER_PRIMARY', 'HIGH_SCHOOL'] },
         { code: 'SVPS', categories: ['PRE_SCHOOL', 'NURSERY', 'LOWER_PRIMARY'] },
       ]);
+    });
+  });
+
+  it('gives each Institution its classes and their sections, each in a category it offers, written once however often it runs', async () => {
+    await withDemo(2, async (tx) => {
+      await sql`alter table classes no force row level security`.execute(tx);
+      await sql`alter table sections no force row level security`.execute(tx);
+      const rows = await sql<{ code: string; classes: number; sections: number }>`
+        select i.code, count(distinct c.id)::int as classes, count(s.id)::int as sections
+        from classes c join institutions i on i.id = c.institution_id
+        left join sections s on s.class_id = c.id
+        where c.id in (${sql.join(classes.map((row) => sql`${row.id}`))})
+        group by i.code order by i.code
+      `.execute(tx);
+      expect(rows.rows).toEqual([
+        { code: 'LPS', classes: 3, sections: 4 },
+        { code: 'SVHS', classes: 3, sections: 6 },
+        { code: 'SVPS', classes: 4, sections: 4 },
+      ]);
+      const names = await sql<{ display_name: string }>`
+        select display_name from classes where institution_id = ${classes[0]!.institutionId}
+        order by display_name
+      `.execute(tx);
+      expect(names.rows.map((row) => row.display_name)).toEqual(['10th', '8th', '9th']);
     });
   });
 

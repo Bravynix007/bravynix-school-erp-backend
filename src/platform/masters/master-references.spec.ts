@@ -15,12 +15,16 @@ function build(statuses: Record<string, number> = {}, parents: Record<string, st
     .fn<MasterRepository['parentOf']>()
     .mockImplementation((_tx, _table, id) => Promise.resolve(parents[id]));
   const classCategories = vi.fn<MasterRepository['classCategories']>().mockResolvedValue([]);
+  const predefinedClass = vi.fn<MasterRepository['predefinedClass']>();
+  const predefinedSection = vi.fn<MasterRepository['predefinedSection']>();
   const references = new MasterReferences({
     statusesOf,
     parentOf,
     classCategories,
+    predefinedClass,
+    predefinedSection,
   } as unknown as MasterRepository);
-  return { references, statusesOf, parentOf, classCategories };
+  return { references, statusesOf, parentOf, classCategories, predefinedClass, predefinedSection };
 }
 
 async function refusal(work: Promise<unknown>): Promise<AppException> {
@@ -165,5 +169,65 @@ describe('MasterReferences.classCategories', () => {
     const t = build();
     await t.references.classCategories(tx, ['a']);
     expect(t.classCategories).toHaveBeenCalledWith(tx, ['a']);
+  });
+});
+
+describe('MasterReferences.requirePredefinedClass and requirePredefinedSection', () => {
+  const found = {
+    id: 'p1',
+    code: 'C09',
+    name: '9th',
+    status: 1,
+    categoryId: 'c1',
+    categoryCode: 'HIGH_SCHOOL',
+  };
+
+  it('gives a shown predefined class with its category, without its status', async () => {
+    const t = build();
+    t.predefinedClass.mockResolvedValue(found);
+    expect(await t.references.requirePredefinedClass(tx, 'p1', 'predefinedClassId')).toEqual({
+      id: 'p1',
+      code: 'C09',
+      name: '9th',
+      categoryId: 'c1',
+      categoryCode: 'HIGH_SCHOOL',
+    });
+  });
+
+  it('is 404 for one that is not there and 422 REFERENCE_INACTIVE naming the field for a hidden one', async () => {
+    const t = build();
+    t.predefinedClass.mockResolvedValueOnce(undefined);
+    expect(
+      (
+        await refusal(
+          t.references.requirePredefinedClass(tx, 'gone', 'classes[1].predefinedClassId'),
+        )
+      ).status,
+    ).toBe(404);
+    t.predefinedClass.mockResolvedValueOnce({ ...found, status: 0 });
+    const hidden = await refusal(
+      t.references.requirePredefinedClass(tx, 'p1', 'classes[1].predefinedClassId'),
+    );
+    expect(hidden).toMatchObject({ status: 422, code: 'REFERENCE_INACTIVE' });
+    expect(hidden.options.errors).toEqual([
+      expect.objectContaining({ field: 'classes[1].predefinedClassId' }),
+    ]);
+  });
+
+  it('does the same for a predefined section', async () => {
+    const t = build();
+    t.predefinedSection.mockResolvedValueOnce({ id: 's1', code: 'A', name: 'A', status: 1 });
+    expect(await t.references.requirePredefinedSection(tx, 's1', 'predefinedSectionId')).toEqual({
+      id: 's1',
+      code: 'A',
+      name: 'A',
+    });
+    t.predefinedSection.mockResolvedValueOnce(undefined);
+    expect((await refusal(t.references.requirePredefinedSection(tx, 'x', 'f'))).status).toBe(404);
+    t.predefinedSection.mockResolvedValueOnce({ id: 's1', code: 'A', name: 'A', status: 0 });
+    expect(await refusal(t.references.requirePredefinedSection(tx, 's1', 'f'))).toMatchObject({
+      status: 422,
+      code: 'REFERENCE_INACTIVE',
+    });
   });
 });

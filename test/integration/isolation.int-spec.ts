@@ -179,8 +179,10 @@ describe('tenant isolation', () => {
       expect((await tenantTables()).map((table) => table.name)).toEqual([
         'academic_years',
         'audit_logs',
+        'classes',
         'institution_class_categories',
         'institutions',
+        'sections',
         'societies',
         'subjects',
       ]);
