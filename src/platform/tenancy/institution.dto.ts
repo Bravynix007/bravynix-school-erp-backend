@@ -15,12 +15,12 @@ import {
   MaxLength,
   Min,
   MinLength,
-  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { RequiredAddressDto } from '../../common/validation/address.dto.js';
 import { PhoneDto } from '../../common/validation/phone.dto.js';
 import { VersionDto } from '../../common/validation/version.dto.js';
+import { WhenPresent } from '../../common/validation/when-present.js';
 import { TenantRootListQueryDto } from './tenant-root-list.query.js';
 
 /** PRD 11.4: 1 CBSE, 2 ICSE, 3 State Board, 4 IB, 5 IGCSE, 6 Other. */
@@ -99,7 +99,7 @@ class InstitutionProfileDto {
 /** The address, where `null` is not a value: the first line is required (PRD 7.1). */
 class AddressChangeDto {
   @ApiPropertyOptional({ type: RequiredAddressDto })
-  @ValidateIf((_dto, value: unknown) => value !== undefined)
+  @WhenPresent()
   @ValidateNested()
   @Type(() => RequiredAddressDto)
   address?: RequiredAddressDto;
@@ -137,7 +137,7 @@ export class UpdateInstitutionDto extends IntersectionType(
   AddressChangeDto,
 ) {
   @ApiPropertyOptional({ maxLength: 255 })
-  @ValidateIf((_dto, value: unknown) => value !== undefined)
+  @WhenPresent()
   @IsString()
   @IsNotEmpty()
   @MaxLength(255)

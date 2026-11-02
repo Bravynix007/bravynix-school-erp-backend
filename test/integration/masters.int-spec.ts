@@ -378,14 +378,11 @@ describe('MST-01 and PLT-31 to PLT-33 platform masters (API design 10.4g, DDD 9.
         asAdmin('delete', `${base}/${own[3]!.id}`),
       ];
       const results = await Promise.all(requests);
-      let added = 0;
-      for (const res of results) {
-        expect(res.status).toBeLessThan(500);
-        if (res.status === 201) {
-          added++;
-          scratch.push({ table: 'predefined_sections', id: res.body.data.id });
-        }
-      }
+      // Every entry that was added is queued for clean-up before anything is asserted, so a failure leaves nothing behind.
+      const addedIds = results.filter((res) => res.status === 201).map((res) => res.body.data.id);
+      for (const id of addedIds) scratch.push({ table: 'predefined_sections', id });
+      const added = addedIds.length;
+      for (const res of results) expect(res.status).toBeLessThan(500);
       expect(added).toBeGreaterThan(0);
       const all = await list('predefined-sections', '?includeHidden=true');
       expect(all).toHaveLength(10 + own.length + added);

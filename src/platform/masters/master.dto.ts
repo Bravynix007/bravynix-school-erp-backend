@@ -12,9 +12,9 @@ import {
   MaxLength,
   Min,
   MinLength,
-  ValidateIf,
 } from 'class-validator';
 import { VersionDto } from '../../common/validation/version.dto.js';
+import { WhenPresent } from '../../common/validation/when-present.js';
 
 /*
  * PLT-31 and PLT-32 bodies, one pair per master (API design 10.4g). A body is
@@ -23,12 +23,6 @@ import { VersionDto } from '../../common/validation/version.dto.js';
  * so the update bodies leave them out and a request that sends them is told
  * FIELD_NOT_ALLOWED.
  */
-
-/**
- * A change may leave a field out, but naming it `null` is refused: these fields cannot be empty. (`@IsOptional`
- * would let `null` through to the database.)
- */
-const WhenPresent = () => ValidateIf((_dto, value: unknown) => value !== undefined);
 
 /** Any run of white space inside a name (a tab or no-break space too) is one space, so names that only look alike are `DUPLICATE`. */
 const OneSpace = () =>
