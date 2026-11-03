@@ -6,6 +6,7 @@ import {
   IsArray,
   IsEmail,
   IsNotEmpty,
+  IsObject,
   IsOptional,
   IsString,
   Matches,
@@ -40,6 +41,7 @@ class SocietyProfileDto {
 
   @ApiPropertyOptional({ type: PhoneDto, nullable: true })
   @IsOptional()
+  @IsObject()
   @ValidateNested()
   @Type(() => PhoneDto)
   phone?: PhoneDto | null;
@@ -58,6 +60,7 @@ class SocietyProfileDto {
 
   @ApiPropertyOptional({ type: AddressDto, nullable: true })
   @IsOptional()
+  @IsObject()
   @ValidateNested()
   @Type(() => AddressDto)
   address?: AddressDto | null;
@@ -85,6 +88,7 @@ export class CreateSocietyDto extends SocietyProfileDto {
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(3)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => NewPersonDto)
   owners?: NewPersonDto[];
