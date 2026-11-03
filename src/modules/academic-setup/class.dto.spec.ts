@@ -125,3 +125,14 @@ describe('UpdateClassDto', () => {
     expect(await problems(body(UpdateClassDto, value))).toContainEqual({ field, code });
   });
 });
+
+describe('CreateClassesDto items', () => {
+  it.each([[[]], [[{ predefinedClassId }]], ['C09'], [null]])(
+    'refuses the item %j as INVALID_TYPE, so it never reaches the service',
+    async (item) => {
+      expect(
+        await problems(body(CreateClassesDto, { institutionId, classes: [item] })),
+      ).toContainEqual({ field: 'classes', code: 'INVALID_TYPE' });
+    },
+  );
+});

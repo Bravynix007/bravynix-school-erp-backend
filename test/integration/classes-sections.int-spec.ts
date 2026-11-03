@@ -462,6 +462,17 @@ describe('CLS-01 to CLS-05 and SEC-01 to SEC-04 classes and sections (PRD 7.3, A
       ]);
     });
 
+    it('refuses an item that is not an object, such as a list, a string or null', async () => {
+      const item = { predefinedClassId: predefined('C09').id };
+      for (const wrong of [[], [item], 'C09', null]) {
+        const res = await bulk([wrong] as object[]);
+        expect(res.status).toBe(400);
+        expect(res.body.errors).toContainEqual(
+          expect.objectContaining({ field: 'classes', code: 'INVALID_TYPE' }),
+        );
+      }
+    });
+
     it('is for an Owner or an Admin of the Institution only', async () => {
       const one = [{ predefinedClassId: predefined('C09').id }];
       expect((await bulk(one, admin)).status).toBe(403);

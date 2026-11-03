@@ -4,6 +4,7 @@ import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -78,6 +79,7 @@ export class CreateClassesDto {
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(MAX_BULK_CLASSES)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => ClassInputDto)
   classes!: ClassInputDto[];
