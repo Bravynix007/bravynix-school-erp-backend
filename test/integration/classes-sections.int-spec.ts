@@ -1010,6 +1010,35 @@ describe('CLS-01 to CLS-05 and SEC-01 to SEC-04 classes and sections (PRD 7.3, A
       ).rejects.toMatchObject({ code: '23514' });
     });
 
+    it.each(['classes', 'sections'] as const)(
+      'lets an update of every %s row that reads no column touch only the caller’s Society',
+      async (table) => {
+        // With no WHERE the statement reads no column, so the SELECT policy never checks a row: only the update
+        // policy keeps it to the caller's Society.
+        const mineClass = await classAdded(first);
+        const theirClass = await classAdded(other, {}, otherOwner.token);
+        const mine = table === 'classes' ? mineClass : await sectionAdded(mineClass.id);
+        const theirs =
+          table === 'classes'
+            ? theirClass
+            : await sectionAdded(theirClass.id, {}, otherOwner.token);
+        const touched = await database.transaction(tenantOf(owner, societyA, [first]), (tx) =>
+          tx.updateTable(table).set({ updated_at: new Date() }).executeTakeFirst(),
+        );
+        expect(Number(touched.numUpdatedRows)).toBe(1);
+        const versionOf = (society: string, institution: string, id: string) =>
+          ownerDb.transaction().execute(async (tx) => {
+            await sql`select set_config('app.society_id', ${society}, true),
+              set_config('app.institution_ids', ${institution}, true)`.execute(tx);
+            const rows = await sql<{ version: number }>`
+              select version from ${sql.table(table)} where id = ${id}`.execute(tx);
+            return rows.rows[0]?.version;
+          });
+        expect(await versionOf(societyA, first, mine.id)).toBe(2);
+        expect(await versionOf(societyB, other, theirs.id)).toBe(1);
+      },
+    );
+
     it('gives the application no right to delete a class or a section', async () => {
       const created = await classAdded(first);
       const added = await sectionAdded(created.id);

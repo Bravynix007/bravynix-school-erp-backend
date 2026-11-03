@@ -2,7 +2,12 @@ import { HttpStatus } from '@nestjs/common';
 import { AppException } from '../../common/http/app-exception.js';
 import { ErrorCode, FieldErrorCode } from '../../common/http/error-codes.js';
 import { fieldError } from '../../common/validation/field-error.js';
-import { duplicateOn, isDuplicateOn, PgErrorCode } from '../../platform/database/index.js';
+import {
+  duplicateOn,
+  isDuplicateOn,
+  isViolationOf,
+  PgErrorCode,
+} from '../../platform/database/index.js';
 
 /** The one category whose classes have streams (PRD 7.3; the stream of a Senior Secondary class is a section name). */
 export const STREAM_CATEGORY = 'PRE_UNIVERSITY';
@@ -56,8 +61,7 @@ export function translateClassError(error: unknown, hasStream: boolean, prefix =
   }
   if (isDuplicateOn(error, 'uq_classes_institution_name'))
     return duplicateOn(`${prefix}displayName`);
-  const { code, constraint } = (error ?? {}) as { code?: unknown; constraint?: unknown };
-  if (code === PgErrorCode.foreignKeyViolation && constraint === 'fk_classes_offered_category') {
+  if (isViolationOf(error, PgErrorCode.foreignKeyViolation, 'fk_classes_offered_category')) {
     return new AppException(HttpStatus.UNPROCESSABLE_ENTITY, ErrorCode.CLASS_NOT_OFFERED, {
       errors: [fieldError(`${prefix}predefinedClassId`, ErrorCode.CLASS_NOT_OFFERED)],
     });

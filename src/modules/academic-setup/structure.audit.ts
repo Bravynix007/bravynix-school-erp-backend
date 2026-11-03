@@ -1,4 +1,4 @@
-import type { AuditValues } from '../../platform/audit/index.js';
+import type { AuditEntry, AuditValues } from '../../platform/audit/index.js';
 import type { ClassRow } from './class.repository.js';
 import type { SectionRow } from './section.repository.js';
 
@@ -21,5 +21,24 @@ export function sectionAuditView(row: SectionRow): AuditValues {
     display_name: row.display_name,
     capacity: row.capacity,
     status: row.status,
+  };
+}
+
+/**
+ * The audit entry of a change to a section: it carries the Society and the Institution, so the Society's Owners see
+ * it (API design 20.3). Made here so a section closed with its class is recorded exactly as one closed alone.
+ */
+export function sectionAuditEntry(
+  action: string,
+  row: SectionRow,
+  values: { before?: AuditValues; after?: AuditValues },
+): AuditEntry {
+  return {
+    action,
+    institutionId: row.institution_id,
+    societyId: row.society_id,
+    entityType: 'section',
+    entityId: row.id,
+    ...values,
   };
 }

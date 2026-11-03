@@ -32,7 +32,8 @@ import {
   translateClassError,
 } from './class.rules.js';
 import { SectionRepository } from './section.repository.js';
-import { classAuditView, sectionAuditView } from './structure.audit.js';
+import { classAuditView, sectionAuditEntry, sectionAuditView } from './structure.audit.js';
+import { institutionOfActive } from './row-context.js';
 
 /**
  * CLS-01 to CLS-05 (API design 10.4j): the classes of one Institution. Society Owners and Institution Admins of the
@@ -120,15 +121,13 @@ export class ClassService {
           status: 0,
           ...updateStamp(principal.personId),
         });
-        await this.audit.record(tx, {
-          action: 'section.deactivated',
-          institutionId: closed.institution_id,
-          societyId: closed.society_id,
-          entityType: 'section',
-          entityId: closed.id,
-          before: sectionAuditView(section),
-          after: sectionAuditView(closed),
-        });
+        await this.audit.record(
+          tx,
+          sectionAuditEntry('section.deactivated', closed, {
+            before: sectionAuditView(section),
+            after: sectionAuditView(closed),
+          }),
+        );
       }
       const updated = await this.classes.update(tx, id, {
         status: 0,
@@ -208,10 +207,9 @@ export class ClassService {
    * Society, or an Institution outside their scope, and for a deactivated one).
    */
   private async contextOf(principal: Principal, id: string): Promise<InstitutionContext> {
-    const { tenant } = await this.scope.forPrincipal(principal);
-    const found = await this.database.transaction(tenant, (tx) => this.classes.find(tx, id));
-    if (!found || found.status === 0) throw AppException.notFound();
-    return this.scope.requireInstitution(principal, found.institution_id);
+    return institutionOfActive(this.scope, this.database, principal, (tx) =>
+      this.classes.find(tx, id),
+    );
   }
 
   /** The class, locked for the change; 404 when it is gone or deactivated. */

@@ -1,4 +1,4 @@
-import { duplicateOn, isDuplicateOn } from './duplicate.js';
+import { duplicateOn, isDuplicateOn, isViolationOf } from './duplicate.js';
 
 const violation = (constraint: unknown, code = '23505') =>
   Object.assign(new Error('duplicate key'), { code, constraint });
@@ -15,6 +15,14 @@ describe('duplicates', () => {
     expect(isDuplicateOn(violation(undefined), 'uq_societies_code')).toBe(false);
     expect(isDuplicateOn(null, 'uq_societies_code')).toBe(false);
     expect(isDuplicateOn('boom', 'uq_societies_code')).toBe(false);
+  });
+
+  it('recognises a violation of one kind of the named constraint, exactly', () => {
+    expect(isViolationOf(violation('fk_a', '23503'), '23503', 'fk_a')).toBe(true);
+    expect(isViolationOf(violation('fk_a_other', '23503'), '23503', 'fk_a')).toBe(false);
+    expect(isViolationOf(violation('fk_a', '23505'), '23503', 'fk_a')).toBe(false);
+    expect(isViolationOf(null, '23503', 'fk_a')).toBe(false);
+    expect(isViolationOf('boom', '23503', 'fk_a')).toBe(false);
   });
 
   it('names the taken field in a 409 DUPLICATE', () => {

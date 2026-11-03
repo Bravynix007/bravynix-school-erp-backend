@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { changedColumns } from '../../common/http/changed-columns.js';
 import { requireVersion } from '../../common/http/require-version.js';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { ApiResult } from '../../common/http/api-result.js';
@@ -201,11 +202,7 @@ export class SocietyService {
           ...profileColumns(body),
         };
         // A request that changes nothing writes nothing: no new version, no audit entry.
-        const changes = Object.fromEntries(
-          Object.entries(wanted).filter(
-            ([column, value]) => current[column as keyof SocietyRow] !== value,
-          ),
-        ) as SocietyChanges;
+        const changes = changedColumns(current, wanted) as SocietyChanges;
         const stillDue = (await this.dues.outstanding(tx, [id])).get(id) ?? OWES_NOTHING;
         if (Object.keys(changes).length === 0) return { row: current, owed: stillDue };
         await this.societies.update(tx, id, { ...changes, ...updateStamp(principal.personId) });

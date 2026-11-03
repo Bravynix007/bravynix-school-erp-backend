@@ -21,7 +21,8 @@ import { translateSectionError } from './class.rules.js';
 import type { CreateSectionDto, UpdateSectionDto } from './section.dto.js';
 import { SectionRepository, type SectionRow, type SectionView } from './section.repository.js';
 import { sectionResource, type SectionResource } from './section.resource.js';
-import { sectionAuditView } from './structure.audit.js';
+import { sectionAuditEntry, sectionAuditView } from './structure.audit.js';
+import { institutionOfActive } from './row-context.js';
 
 /**
  * SEC-01 to SEC-04 (API design 10.4j): the sections of a class. Who may do what is the same as for classes, and
@@ -129,18 +130,16 @@ export class SectionService {
 
   /** The Institution of an active class named by its ID, which the caller must reach (404 otherwise). */
   private async classContext(principal: Principal, classId: string): Promise<InstitutionContext> {
-    const { tenant } = await this.scope.forPrincipal(principal);
-    const found = await this.database.transaction(tenant, (tx) => this.classes.find(tx, classId));
-    if (!found || found.status === 0) throw AppException.notFound();
-    return this.scope.requireInstitution(principal, found.institution_id);
+    return institutionOfActive(this.scope, this.database, principal, (tx) =>
+      this.classes.find(tx, classId),
+    );
   }
 
   /** The Institution of an active section named by its ID alone (404 as for a class). */
   private async contextOf(principal: Principal, id: string): Promise<InstitutionContext> {
-    const { tenant } = await this.scope.forPrincipal(principal);
-    const found = await this.database.transaction(tenant, (tx) => this.sections.find(tx, id));
-    if (!found || found.status === 0) throw AppException.notFound();
-    return this.scope.requireInstitution(principal, found.institution_id);
+    return institutionOfActive(this.scope, this.database, principal, (tx) =>
+      this.sections.find(tx, id),
+    );
   }
 
   /** The section, locked for the change; 404 when it is gone or deactivated. */
@@ -155,20 +154,12 @@ export class SectionService {
     return views.map((view) => sectionResource(view, people));
   }
 
-  /** The entry carries the Society and the Institution, so the Society's Owners see it (API design 20.3). */
   private record(
     tx: Tx,
     action: string,
     row: SectionRow,
     values: { before?: AuditValues; after?: AuditValues },
   ): Promise<string> {
-    return this.audit.record(tx, {
-      action,
-      institutionId: row.institution_id,
-      societyId: row.society_id,
-      entityType: 'section',
-      entityId: row.id,
-      ...values,
-    });
+    return this.audit.record(tx, sectionAuditEntry(action, row, values));
   }
 }

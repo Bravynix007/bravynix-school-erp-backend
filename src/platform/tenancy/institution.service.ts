@@ -1,4 +1,5 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
+import { changedColumns } from '../../common/http/changed-columns.js';
 import { requireVersion } from '../../common/http/require-version.js';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { ApiResult } from '../../common/http/api-result.js';
@@ -15,6 +16,7 @@ import {
   duplicateOn,
   insertStamp,
   isDuplicateOn,
+  isViolationOf,
   PgErrorCode,
   platformTenant,
   updateStamp,
@@ -103,8 +105,7 @@ function diffOffered(
  * rule even when classes are added at the same time: 409 `CATEGORY_IN_USE`, naming the field.
  */
 function translateOfferError(error: unknown): unknown {
-  const { code, constraint } = (error ?? {}) as { code?: unknown; constraint?: unknown };
-  if (code === PgErrorCode.foreignKeyViolation && constraint === 'fk_classes_offered_category') {
+  if (isViolationOf(error, PgErrorCode.foreignKeyViolation, 'fk_classes_offered_category')) {
     return new AppException(HttpStatus.CONFLICT, ErrorCode.CATEGORY_IN_USE, {
       errors: [fieldError('classesOffered', ErrorCode.CATEGORY_IN_USE)],
     });
@@ -285,11 +286,7 @@ export class InstitutionService {
           ...profileColumns(body),
         };
         // A request that changes nothing writes nothing: no new version, no audit entry.
-        const changes = Object.fromEntries(
-          Object.entries(wanted).filter(
-            ([column, value]) => current[column as keyof InstitutionRow] !== value,
-          ),
-        ) as InstitutionChanges;
+        const changes = changedColumns(current, wanted) as InstitutionChanges;
         // A place already on the Institution stays even if its entry has been hidden since; only a new link is checked.
         if (
           body.address !== undefined &&
