@@ -10,6 +10,7 @@ import {
   IsInt,
   IsNotEmpty,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -106,6 +107,7 @@ class InstitutionProfileDto {
 
   @ApiPropertyOptional({ type: PhoneDto, nullable: true })
   @IsOptional()
+  @IsObject()
   @ValidateNested()
   @Type(() => PhoneDto)
   phone?: PhoneDto | null;
@@ -119,6 +121,7 @@ class InstitutionProfileDto {
 
   @ApiPropertyOptional({ type: LocationDto, nullable: true })
   @IsOptional()
+  @IsObject()
   @ValidateNested()
   @Type(() => LocationDto)
   location?: LocationDto | null;
@@ -143,6 +146,7 @@ class InstitutionProfileDto {
 class AddressChangeDto {
   @ApiPropertyOptional({ type: InstitutionAddressDto })
   @WhenPresent()
+  @IsObject()
   @ValidateNested()
   @Type(() => InstitutionAddressDto)
   address?: InstitutionAddressDto;
@@ -164,6 +168,7 @@ export class CreateInstitutionDto extends InstitutionProfileDto {
 
   @ApiProperty({ type: InstitutionAddressDto })
   @IsDefined()
+  @IsObject()
   @ValidateNested()
   @Type(() => InstitutionAddressDto)
   address!: InstitutionAddressDto;
