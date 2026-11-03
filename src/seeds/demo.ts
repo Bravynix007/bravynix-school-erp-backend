@@ -1,5 +1,11 @@
 import { sql, type Kysely } from 'kysely';
-import { insertAcademicYears, type SeedAcademicYear } from './academic-seed.js';
+import {
+  commonSubjects,
+  insertAcademicYears,
+  insertSubjects,
+  type SeedAcademicYear,
+  type SeedSubject,
+} from './academic-seed.js';
 import { DueStatus, dueAmounts } from '../modules/platform-billing/due.rules.js';
 
 /**
@@ -145,6 +151,13 @@ export const academicYears: SeedAcademicYear[] = [
     endDate: '2027-03-31',
     isCurrent: true,
   },
+];
+
+/** Both Societies start with the common subjects; the first adds Hindi, so the lists differ. */
+export const subjects: SeedSubject[] = [
+  ...commonSubjects.map((subject, n) => ({ id: id(9801 + n), societyId: id(9101), ...subject })),
+  { id: id(9805), societyId: id(9101), name: 'Hindi', code: 'HIN' },
+  ...commonSubjects.map((subject, n) => ({ id: id(9811 + n), societyId: id(9102), ...subject })),
 ];
 
 /** Who is the Owner of which Society, in seat order. Asha owns both, so her app offers a choice. */
@@ -408,6 +421,7 @@ export async function writeDemoSeed(db: Kysely<unknown>): Promise<void> {
   }
 
   await insertAcademicYears(db, academicYears);
+  await insertSubjects(db, subjects);
 
   for (const d of dues) {
     const institution = institutionOf(d.institution);

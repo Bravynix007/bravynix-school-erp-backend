@@ -17,6 +17,7 @@ import * as m0015 from './2026_11_02_0015_billing_due_lifecycle.js';
 import * as m0016 from './2026_11_02_0016_billing_owner_view.js';
 import * as m0017 from './2026_11_02_0017_masters_platform_masters.js';
 import * as m0018 from './2026_11_02_0018_academic_years.js';
+import * as m0019 from './2026_11_02_0019_subjects.js';
 
 /**
  * Every migration, in order. Listed explicitly (not read from disk) so the
@@ -45,6 +46,7 @@ const migrations: Record<string, Migration> = {
   '2026_11_02_0016_billing_owner_view': m0016,
   '2026_11_02_0017_masters_platform_masters': m0017,
   '2026_11_02_0018_academic_years': m0018,
+  '2026_11_02_0019_subjects': m0019,
 };
 
 export const migrationProvider: MigrationProvider = {

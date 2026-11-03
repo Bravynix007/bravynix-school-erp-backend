@@ -181,6 +181,7 @@ describe('tenant isolation', () => {
         'audit_logs',
         'institutions',
         'societies',
+        'subjects',
       ]);
     });
 
