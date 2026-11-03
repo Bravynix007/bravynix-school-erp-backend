@@ -201,12 +201,13 @@ describe('SUB-01 to SUB-04 subjects (PRD 7.4, API design 10.4i)', () => {
 
   describe('SUB-01 list the subjects', () => {
     it('lists the active ones by name for the Owner and the Admin, and no other Society’s', async () => {
-      await added({ name: 'science' });
+      // A byte sort puts the capitals first (Art, Chemistry, biology); the list ignores letter case.
+      await added({ name: 'biology' });
       await added({ name: 'Art' });
-      await added({ name: 'English' });
+      await added({ name: 'Chemistry' });
       await added({ name: 'Art' }, otherOwner.token);
       for (const token of [owner.token, institutionAdmin.token]) {
-        expect((await list(token)).map((s) => s.name)).toEqual(['Art', 'English', 'science']);
+        expect((await list(token)).map((s) => s.name)).toEqual(['Art', 'biology', 'Chemistry']);
       }
       expect((await list(otherOwner.token)).map((s) => s.name)).toEqual(['Art']);
     });
@@ -363,6 +364,24 @@ describe('SUB-01 to SUB-04 subjects (PRD 7.4, API design 10.4i)', () => {
         (tx) => tx.selectFrom('subjects').select('id').execute(),
       );
       expect(seenByB).toEqual([]);
+    });
+
+    it('lets an update that reads no column touch only the caller’s Society', async () => {
+      // With no WHERE the statement reads no column, so the SELECT policy never checks a row: only the update
+      // policy keeps it to the caller's Society.
+      const mine = await added({ name: 'Maths' });
+      const theirs = await added({ name: 'Maths' }, otherOwner.token);
+      const touched = await database.transaction(
+        { personId: owner.person, roleCode: 2, societyId: societyA },
+        (tx) => tx.updateTable('subjects').set({ updated_at: new Date() }).executeTakeFirst(),
+      );
+      expect(Number(touched.numUpdatedRows)).toBe(1);
+      const stored = await ownerDb.transaction().execute(async (tx) => {
+        await sql`select set_config('app.society_id', ${societyB}, true)`.execute(tx);
+        return sql<{ id: string; version: number }>`select id, version from subjects`.execute(tx);
+      });
+      expect(stored.rows).toEqual([{ id: theirs.id, version: 1 }]);
+      expect(mine.id).not.toBe(theirs.id);
     });
 
     it('gives the application no right to delete a subject', async () => {
