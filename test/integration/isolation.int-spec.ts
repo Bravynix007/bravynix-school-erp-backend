@@ -4,6 +4,7 @@ import { AuditService } from '../../src/platform/audit/index.js';
 import { DatabaseService, type TenantContext } from '../../src/platform/database/index.js';
 import { createPool } from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
+import { writeAcademicSeed } from '../../src/seeds/academic-seed.js';
 import { seededRateId, writeBillingSeed } from '../../src/seeds/billing-seed.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { institutions, personaByKey, societies } from '../../src/seeds/two-worlds.js';
@@ -119,6 +120,7 @@ describe('tenant isolation', () => {
     });
     await writeIdentitySeed(ownerDb);
     await writeBillingSeed(ownerDb);
+    await writeAcademicSeed(ownerDb);
     await clearLoginState(ownerDb);
     // Role 3 grants need a staff record, which arrives with the People module.
     for (const caller of Object.values(callers)) {
@@ -175,6 +177,7 @@ describe('tenant isolation', () => {
   describe('every tenant table, read as the app role', () => {
     it('covers the tables built so far', async () => {
       expect((await tenantTables()).map((table) => table.name)).toEqual([
+        'academic_years',
         'audit_logs',
         'institutions',
         'societies',

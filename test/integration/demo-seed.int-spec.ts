@@ -107,6 +107,24 @@ describe('the demo seed', () => {
     });
   });
 
+  it('gives every Institution one current academic year, written once however often it runs', async () => {
+    await withDemo(2, async (tx) => {
+      // The table is scoped to an Institution even for its owner; lifting that for this rolled-back transaction.
+      await sql`alter table academic_years no force row level security`.execute(tx);
+      const rows = await sql<{ code: string; current: number; total: number }>`
+        select i.code, count(*) filter (where y.is_current)::int as current, count(*)::int as total
+        from academic_years y join institutions i on i.id = y.institution_id
+        where y.institution_id in (${ids(institutions)})
+        group by i.code order by i.code
+      `.execute(tx);
+      expect(rows.rows).toEqual([
+        { code: 'LPS', current: 1, total: 1 },
+        { code: 'SVHS', current: 1, total: 2 },
+        { code: 'SVPS', current: 1, total: 1 },
+      ]);
+    });
+  });
+
   it('is safe to run twice: nothing is written a second time', async () => {
     await withDemo(2, async (tx) => {
       const peopleIds = ids(people);

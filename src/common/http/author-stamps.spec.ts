@@ -1,4 +1,10 @@
-import { authorOf, authorStamps, SYSTEM_AUTHOR, type AuthorRef } from './author-stamps.js';
+import {
+  authorIdsOf,
+  authorOf,
+  authorStamps,
+  SYSTEM_AUTHOR,
+  type AuthorRef,
+} from './author-stamps.js';
 
 const nair: AuthorRef = { id: 'p1', displayName: 'R. Nair', roleName: 'Teacher' };
 const people = new Map([['p1', nair]]);
@@ -30,5 +36,18 @@ describe('author stamps (API design 7.6)', () => {
       updatedBy: SYSTEM_AUTHOR,
       updatedAt: '2026-10-24T05:00:00.000Z',
     });
+  });
+});
+
+describe('authorIdsOf', () => {
+  it('names each author once, in the order met, and leaves out a missing one', () => {
+    expect(
+      authorIdsOf([
+        { created_by: 'p1', updated_by: 'p2' },
+        { created_by: 'p1', updated_by: null },
+        { created_by: null, updated_by: 'p3' },
+      ]),
+    ).toEqual(['p1', 'p2', 'p3']);
+    expect(authorIdsOf([])).toEqual([]);
   });
 });

@@ -1,7 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsISO8601, IsOptional, IsString, Length, Matches } from 'class-validator';
-
-const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+import { IsOptional, IsString, Length, Matches } from 'class-validator';
+import { IsCalendarDate } from '../../common/validation/calendar-date.js';
 
 /** Money as the API writes it: a decimal string with exactly two decimals (API design 7.5); the column holds eight whole digits. */
 const RATE = /^\d{1,8}\.\d{2}$/;
@@ -14,9 +13,7 @@ export class SetPriceRateDto {
   ratePerStudentAmount!: string;
 
   @ApiProperty({ example: '2026-04-01', description: 'May be in the past or the future' })
-  @IsString()
-  @Matches(DATE_ONLY)
-  @IsISO8601({ strict: true })
+  @IsCalendarDate()
   effectiveFromDate!: string;
 
   @ApiPropertyOptional({ nullable: true, maxLength: 500, example: 'Agreed for 2026-27' })

@@ -78,6 +78,9 @@ const en: Catalogue = {
   NO_RATE_IN_FORCE: 'This Institution has no rate on or before the start of the period',
   TOTAL_NEGATIVE: 'The adjustment cannot take the total below zero',
   NOTE_REQUIRED: 'A note is required',
+  // Academic years (API design 10.4h)
+  YEAR_OVERLAP: 'This year overlaps another academic year of the Institution',
+  CURRENT_YEAR_LOCKED: 'The current year cannot be deactivated; make another year current first',
   // Field codes
   REQUIRED: 'This field is required',
   FIELD_NOT_ALLOWED: 'This field is not allowed',
