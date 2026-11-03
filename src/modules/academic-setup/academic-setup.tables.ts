@@ -8,6 +8,8 @@ declare module '../../platform/database/schema.js' {
   interface Database {
     academic_years: AcademicYearsTable;
     subjects: SubjectsTable;
+    classes: ClassesTable;
+    sections: SectionsTable;
   }
 }
 
@@ -42,4 +44,42 @@ export interface SubjectsTable {
   society_id: string;
   name: string;
   code: string | null;
+}
+
+/** One class of an Institution: a predefined class with an optional stream (Pre-University only). Deactivated, never deleted. */
+export interface ClassesTable {
+  id: Generated<string>;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  created_by: string | null;
+  updated_at: ColumnType<Date, never, Date>;
+  updated_by: string | null;
+  version: Generated<number>;
+  /** 1 active, 0 deactivated. */
+  status: Generated<number>;
+  society_id: string;
+  institution_id: string;
+  predefined_class_id: string;
+  /** Copied from the predefined class; the database keeps it true. */
+  class_category_id: string;
+  stream_name: string | null;
+  display_name: string;
+  code: string | null;
+}
+
+/** One section of a class. The capacity is a warning only (PRD 7.3). Deactivated, never deleted. */
+export interface SectionsTable {
+  id: Generated<string>;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  created_by: string | null;
+  updated_at: ColumnType<Date, never, Date>;
+  updated_by: string | null;
+  version: Generated<number>;
+  /** 1 active, 0 deactivated. */
+  status: Generated<number>;
+  society_id: string;
+  institution_id: string;
+  class_id: string;
+  predefined_section_id: string;
+  display_name: string;
+  capacity: number | null;
 }

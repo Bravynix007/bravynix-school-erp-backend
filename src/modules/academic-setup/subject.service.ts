@@ -4,6 +4,7 @@ import { ApiResult } from '../../common/http/api-result.js';
 import { authorIdsOf } from '../../common/http/author-stamps.js';
 import { AppException } from '../../common/http/app-exception.js';
 import { newId } from '../../common/ids/ids.js';
+import { changedColumns } from '../../common/http/changed-columns.js';
 import { requireVersion } from '../../common/http/require-version.js';
 import { AuditService, type AuditValues } from '../../platform/audit/index.js';
 import {
@@ -91,11 +92,7 @@ export class SubjectService {
           ...(body.name === undefined ? {} : { name: body.name }),
           ...(body.code === undefined ? {} : { code: body.code }),
         };
-        const changes = Object.fromEntries(
-          Object.entries(wanted).filter(
-            ([column, value]) => current[column as keyof SubjectRow] !== value,
-          ),
-        ) as SubjectChanges;
+        const changes = changedColumns(current, wanted) as SubjectChanges;
         if (Object.keys(changes).length === 0) return current;
         const updated = await this.subjects.update(tx, id, {
           ...changes,
