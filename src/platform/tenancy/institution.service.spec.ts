@@ -5,6 +5,7 @@ import { FixedClock } from '../../common/time/clock.js';
 import type { AuditService } from '../audit/index.js';
 import type { DatabaseService, TenantContext, Tx } from '../database/index.js';
 import type { GrantDirectory, PersonDirectory } from '../identity/index.js';
+import type { MasterReferences } from '../masters/index.js';
 import type { CreateInstitutionDto, UpdateInstitutionDto } from './institution.dto.js';
 import type { InstitutionRepository, InstitutionRow } from './institution.repository.js';
 import { INSTITUTION_DEACTIVATED, InstitutionService } from './institution.service.js';
@@ -45,6 +46,9 @@ const institution = (overrides: Partial<InstitutionRow> = {}): InstitutionRow =>
   address_line_1: '12 Lake Road',
   address_line_2: null,
   pincode: null,
+  country_id: null,
+  state_id: null,
+  city_id: null,
   latitude: null,
   longitude: null,
   ...overrides,
@@ -65,6 +69,16 @@ function build(
     .fn<InstitutionRepository['findWithBlocks']>()
     .mockResolvedValue(
       current ? { ...current, staff_blocked: false, students_blocked: true } : undefined,
+    );
+  const offeredIds = vi.fn<InstitutionRepository['offeredIds']>().mockResolvedValue([]);
+  const offer = vi.fn<InstitutionRepository['offer']>().mockResolvedValue();
+  const withdraw = vi.fn<InstitutionRepository['withdraw']>().mockResolvedValue();
+  const requirePlace = vi.fn<MasterReferences['requirePlace']>().mockResolvedValue();
+  const requireAllShown = vi.fn<MasterReferences['requireAllShown']>().mockResolvedValue();
+  const classCategories = vi
+    .fn<MasterReferences['classCategories']>()
+    .mockImplementation((_tx, ids) =>
+      Promise.resolve(ids.map((id) => ({ id, code: `C-${id}`, name: `Category ${id}` }))),
     );
   const findSociety = vi.fn<SocietyRepository['find']>().mockResolvedValue(society as SocietyRow);
   const record = vi.fn<AuditService['record']>().mockResolvedValue('audit-1');
@@ -89,8 +103,19 @@ function build(
   });
   const service = new InstitutionService(
     { transaction } as unknown as DatabaseService,
-    { find, update, insert, activeAmong, page, findWithBlocks } as unknown as InstitutionRepository,
+    {
+      find,
+      update,
+      insert,
+      activeAmong,
+      page,
+      findWithBlocks,
+      offeredIds,
+      offer,
+      withdraw,
+    } as unknown as InstitutionRepository,
     { find: findSociety } as unknown as SocietyRepository,
+    { requirePlace, requireAllShown, classCategories } as unknown as MasterReferences,
     { requireInstitution, forPrincipal } as unknown as ScopeService,
     {
       describe: vi.fn<PersonDirectory['describe']>().mockResolvedValue(new Map()),
@@ -108,6 +133,11 @@ function build(
     activeAmong,
     page,
     findWithBlocks,
+    offeredIds,
+    offer,
+    withdraw,
+    requirePlace,
+    requireAllShown,
     record,
     endAdminAccessInInstitution,
     requireInstitution,
@@ -194,6 +224,110 @@ describe('InstitutionService', () => {
         latitude: '12.500000',
         longitude: '-77.123456',
       });
+    });
+  });
+
+  describe('the place and the classes offered', () => {
+    it('checks the place and the categories before anything is written, and offers each once', async () => {
+      const t = build();
+      await t.service.create(
+        owner,
+        creation({
+          address: { line1: 'a', countryId: 'c1', stateId: 's1' },
+          classesOffered: ['k1', 'k2'],
+        }),
+      );
+      expect(t.requirePlace).toHaveBeenCalledWith(
+        t.tx,
+        { line1: 'a', countryId: 'c1', stateId: 's1' },
+        'address',
+      );
+      expect(t.requireAllShown).toHaveBeenCalledWith(t.tx, 'class_categories', [
+        { id: 'k1', field: 'classesOffered[0]' },
+        { id: 'k2', field: 'classesOffered[1]' },
+      ]);
+      expect(t.insert.mock.calls[0]![1]).toMatchObject({
+        country_id: 'c1',
+        state_id: 's1',
+        city_id: null,
+      });
+      expect(t.offer).toHaveBeenCalledWith(t.tx, [
+        expect.objectContaining({
+          institution_id: t.insert.mock.calls[0]![1].id,
+          class_category_id: 'k1',
+        }),
+        expect.objectContaining({ class_category_id: 'k2' }),
+      ]);
+    });
+
+    it('writes nothing when a place is refused', async () => {
+      const t = build();
+      t.requirePlace.mockRejectedValueOnce(AppException.notFound());
+      expect((await refusal(t.service.create(owner, creation()))).status).toBe(404);
+      expect(t.insert).not.toHaveBeenCalled();
+      expect(t.offer).not.toHaveBeenCalled();
+    });
+
+    it('adds and takes away only the difference, and a change of the classes alone is a change', async () => {
+      const t = build();
+      t.offeredIds.mockResolvedValue(['k1', 'k2']);
+      await t.service.update(owner, 'inst-1', patch({ version: 2, classesOffered: ['k2', 'k3'] }));
+      expect(t.requireAllShown).toHaveBeenLastCalledWith(t.tx, 'class_categories', [
+        { id: 'k3', field: 'classesOffered[1]' },
+      ]);
+      expect(t.withdraw).toHaveBeenCalledWith(t.tx, 'inst-1', ['k1']);
+      expect(t.offer).toHaveBeenCalledWith(t.tx, [
+        expect.objectContaining({ class_category_id: 'k3', society_id: 'society-1' }),
+      ]);
+      expect(t.update).toHaveBeenCalledWith(t.tx, 'inst-1', { updated_by: 'person-1' });
+      expect(t.record).toHaveBeenCalledWith(
+        t.tx,
+        expect.objectContaining({
+          before: expect.objectContaining({ classes_offered: ['k1', 'k2'] }),
+        }),
+      );
+    });
+
+    it('writes nothing for the classes it already has, in any order', async () => {
+      const t = build();
+      t.offeredIds.mockResolvedValue(['k1', 'k2']);
+      await t.service.update(owner, 'inst-1', patch({ version: 2, classesOffered: ['k2', 'k1'] }));
+      expect(t.update).not.toHaveBeenCalled();
+      expect(t.offer).not.toHaveBeenCalled();
+      expect(t.withdraw).not.toHaveBeenCalled();
+      expect(t.record).not.toHaveBeenCalled();
+    });
+
+    it('checks the place only when the address moves it', async () => {
+      const t = build(institution({ country_id: 'c1', state_id: 's1' }));
+      await t.service.update(
+        owner,
+        'inst-1',
+        patch({ version: 2, address: { line1: 'New road', countryId: 'c1', stateId: 's1' } }),
+      );
+      expect(t.requirePlace).not.toHaveBeenCalled();
+      await t.service.update(
+        owner,
+        'inst-1',
+        patch({ version: 2, address: { line1: '12 Lake Road', countryId: 'c1', stateId: 's2' } }),
+      );
+      expect(t.requirePlace).toHaveBeenCalledOnce();
+      // The stored place goes with it, so parts that are not new are not checked as shown again.
+      expect(t.requirePlace).toHaveBeenCalledWith(
+        t.tx,
+        expect.objectContaining({ stateId: 's2' }),
+        'address',
+        { countryId: 'c1', stateId: 's1', cityId: null },
+      );
+    });
+
+    it('names the position in the request when a category beside one it already has is hidden', async () => {
+      const t = build();
+      t.offeredIds.mockResolvedValue(['k1']);
+      await t.service.update(owner, 'inst-1', patch({ version: 2, classesOffered: ['k1', 'k9'] }));
+      expect(t.requireAllShown).toHaveBeenLastCalledWith(t.tx, 'class_categories', [
+        { id: 'k9', field: 'classesOffered[1]' },
+      ]);
     });
   });
 

@@ -64,6 +64,18 @@ describe('UpdateAcademicYearDto', () => {
   });
 });
 
+describe('the Institution ID of AY-01 and AY-02', () => {
+  it('may be sent in upper case and is read in lower case, as for the other endpoints', async () => {
+    const upper = uuid.toUpperCase();
+    expect(
+      (await body(CreateAcademicYearDto, { ...valid, institutionId: upper })).institutionId,
+    ).toBe(uuid);
+    expect((await body(ListAcademicYearsQueryDto, { institutionId: upper })).institutionId).toBe(
+      uuid,
+    );
+  });
+});
+
 describe('ListAcademicYearsQueryDto', () => {
   it('needs the Institution', async () => {
     expect(await problems(body(ListAcademicYearsQueryDto, { institutionId: uuid }))).toEqual([]);

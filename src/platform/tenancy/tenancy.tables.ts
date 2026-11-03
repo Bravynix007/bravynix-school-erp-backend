@@ -42,6 +42,10 @@ export interface InstitutionsTable extends Stamps {
   address_line_1: string;
   address_line_2: string | null;
   pincode: string | null;
+  /** The place, from the platform masters: a city needs its state and a state its country. */
+  country_id: string | null;
+  state_id: string | null;
+  city_id: string | null;
   /** numeric(9,6), kept as an exact decimal string. */
   latitude: string | null;
   longitude: string | null;
@@ -64,4 +68,16 @@ export interface AccessBlocksTable {
   reason: string;
   lifted_at: ColumnType<Date | null, never, Date>;
   lifted_by: ColumnType<string | null, never, string>;
+}
+
+/**
+ * One class category an Institution offers (DDD 9.3). Insert-only: a row is deleted when the category is
+ * unticked, and an update is not a right of the app role.
+ */
+export interface InstitutionClassCategoriesTable {
+  created_at: ColumnType<Date, Date | undefined, never>;
+  created_by: string | null;
+  society_id: string;
+  institution_id: string;
+  class_category_id: string;
 }

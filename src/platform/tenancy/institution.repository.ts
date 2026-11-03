@@ -10,7 +10,7 @@ import { containsPattern, type SortKey } from '../../common/pagination/paginatio
 import type { Database, Tx } from '../database/index.js';
 import { BlockSection } from '../../common/auth/block-section.js';
 import { institutionHasBlock } from './block-columns.js';
-import type { InstitutionsTable } from './tenancy.tables.js';
+import type { InstitutionClassCategoriesTable, InstitutionsTable } from './tenancy.tables.js';
 
 export type InstitutionRow = Selectable<InstitutionsTable> & {
   society_name: string;
@@ -159,5 +159,32 @@ export class InstitutionRepository {
 
   async update(tx: Tx, id: string, changes: InstitutionChanges): Promise<void> {
     await tx.updateTable('institutions').set(changes).where('id', '=', id).execute();
+  }
+
+  /** The IDs of the class categories the Institution offers. */
+  async offeredIds(tx: Tx, institutionId: string): Promise<string[]> {
+    const rows = await tx
+      .selectFrom('institution_class_categories')
+      .select('class_category_id')
+      .where('institution_id', '=', institutionId)
+      .execute();
+    return rows.map((row) => row.class_category_id);
+  }
+
+  async offer(tx: Tx, rows: readonly Insertable<InstitutionClassCategoriesTable>[]): Promise<void> {
+    if (rows.length > 0)
+      await tx
+        .insertInto('institution_class_categories')
+        .values([...rows])
+        .execute();
+  }
+
+  async withdraw(tx: Tx, institutionId: string, categoryIds: readonly string[]): Promise<void> {
+    if (categoryIds.length === 0) return;
+    await tx
+      .deleteFrom('institution_class_categories')
+      .where('institution_id', '=', institutionId)
+      .where('class_category_id', 'in', categoryIds)
+      .execute();
   }
 }

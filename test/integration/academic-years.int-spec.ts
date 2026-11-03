@@ -290,6 +290,12 @@ describe('AY-01 to AY-05 academic years (PRD 7.2, API design 10.4h)', () => {
       }
     });
 
+    it('reads an Institution ID sent in upper case, in the query and in the body', async () => {
+      const year = await added(first.toUpperCase());
+      expect(year.institutionId).toBe(first);
+      expect((await years(first.toUpperCase())).map((item) => item.id)).toEqual([year.id]);
+    });
+
     it('needs the Institution, and shows nothing of another Society or an Institution out of scope', async () => {
       await added(other, {}, otherOwner.token);
       await added(second);

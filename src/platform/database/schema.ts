@@ -24,6 +24,7 @@ import type { NumberSequencesTable } from '../numbering/numbering.tables.js';
 import type { IdempotencyKeysTable } from '../idempotency/idempotency.tables.js';
 import type {
   AccessBlocksTable,
+  InstitutionClassCategoriesTable,
   InstitutionsTable,
   SocietiesTable,
 } from '../tenancy/tenancy.tables.js';
@@ -47,6 +48,7 @@ export interface Database {
   mfa_challenges: MfaChallengesTable;
   societies: SocietiesTable;
   institutions: InstitutionsTable;
+  institution_class_categories: InstitutionClassCategoriesTable;
   access_blocks: AccessBlocksTable;
   idempotency_keys: IdempotencyKeysTable;
   number_sequences: NumberSequencesTable;

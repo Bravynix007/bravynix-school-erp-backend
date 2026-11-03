@@ -6,6 +6,7 @@ import {
   IsIn,
   IsInt,
   IsNotEmpty,
+  IsObject,
   IsOptional,
   IsString,
   Matches,
@@ -60,6 +61,7 @@ export class VerifyOtpDto {
   @ApiPropertyOptional({ type: DeviceDto, description: 'Required for the mobile app' })
   @ValidateIf((body: VerifyOtpDto) => body.clientType === ClientType.Mobile)
   @IsDefined()
+  @IsObject()
   @ValidateNested()
   @Type(() => DeviceDto)
   device?: DeviceDto;

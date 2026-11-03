@@ -1,12 +1,14 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsString, IsUUID, Length } from 'class-validator';
 import { IsCalendarDate } from '../../common/validation/calendar-date.js';
+import { LowerCaseUuid } from '../../common/validation/lower-case-uuid.js';
 import { VersionDto } from '../../common/validation/version.dto.js';
 import { WhenPresent } from '../../common/validation/when-present.js';
 
 /** AY-01 query: the Institution whose years are listed (API design 6.5). */
 export class ListAcademicYearsQueryDto {
   @ApiProperty({ format: 'uuid' })
+  @LowerCaseUuid()
   @IsUUID()
   institutionId!: string;
 }
@@ -14,6 +16,7 @@ export class ListAcademicYearsQueryDto {
 /** AY-02 body (API design 10.4h). */
 export class CreateAcademicYearDto {
   @ApiProperty({ format: 'uuid' })
+  @LowerCaseUuid()
   @IsUUID()
   institutionId!: string;
 
