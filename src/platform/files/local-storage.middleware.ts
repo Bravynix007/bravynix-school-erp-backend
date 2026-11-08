@@ -40,6 +40,13 @@ function receive(
     return refuse(response, 400, 'BAD_UPLOAD');
   }
   const chunks: Buffer[] = [];
+  let answered = false;
+  /** Busboy can report a broken form more than once (the form, then its file): the caller gets one answer. */
+  const answer = (status: number, code: string): void => {
+    if (answered) return;
+    answered = true;
+    refuse(response, status, code);
+  };
   let stored = false;
   let tooLarge = false;
   let wrongType = false;
@@ -47,13 +54,17 @@ function receive(
     stored = true;
     wrongType = info.mimeType !== grant.contentType;
     file.on('data', (chunk: Buffer) => chunks.push(chunk));
+    // A form cut off mid-file errors its file stream too; unheard, that error ends the process.
+    file.on('error', () => answer(400, 'BAD_UPLOAD'));
     file.on('limit', () => {
       tooLarge = true;
     });
   });
   busboy.on('close', () => {
-    if (!stored || wrongType) return refuse(response, 400, 'BAD_UPLOAD');
-    if (tooLarge) return refuse(response, 413, 'PAYLOAD_TOO_LARGE');
+    if (answered) return;
+    if (!stored || wrongType) return answer(400, 'BAD_UPLOAD');
+    if (tooLarge) return answer(413, 'PAYLOAD_TOO_LARGE');
+    answered = true;
     sendOrFail(response, async () => {
       if (!(await storage.write(grant.key, Buffer.concat(chunks)))) {
         return refuse(response, 409, 'ALREADY_UPLOADED');
@@ -61,7 +72,7 @@ function receive(
       response.status(204).end();
     });
   });
-  busboy.on('error', () => refuse(response, 400, 'BAD_UPLOAD'));
+  busboy.on('error', () => answer(400, 'BAD_UPLOAD'));
   request.pipe(busboy);
 }
 
