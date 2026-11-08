@@ -207,8 +207,10 @@ async function replaceBlockFunctions(db: Kysely<unknown>, withStaff: boolean): P
     as $$
     declare
       caller_role text := current_setting('app.role_code', true);
+      caller_society text := current_setting('app.society_id', true);
     begin
       perform set_config('app.role_code', '1', true);
+      perform set_config('app.society_id', society::text, true);
       return query
         select b.section, b.institution_id from access_blocks b
         where b.society_id = society and b.lifted_at is null
@@ -220,6 +222,7 @@ async function replaceBlockFunctions(db: Kysely<unknown>, withStaff: boolean): P
             ${member('society', 'person')}
           );
       perform set_config('app.role_code', coalesce(caller_role, ''), true);
+      perform set_config('app.society_id', coalesce(caller_society, ''), true);
     end;
     $$
   `.execute(db);
@@ -230,9 +233,11 @@ async function replaceBlockFunctions(db: Kysely<unknown>, withStaff: boolean): P
     as $$
     declare
       caller_role text := current_setting('app.role_code', true);
+      caller_society text := current_setting('app.society_id', true);
       found_name text;
     begin
       perform set_config('app.role_code', '1', true);
+      perform set_config('app.society_id', society::text, true);
       select s.name into found_name from societies s
       where s.id = society
         and (
@@ -243,6 +248,7 @@ async function replaceBlockFunctions(db: Kysely<unknown>, withStaff: boolean): P
           ${member('society', 'person')}
         );
       perform set_config('app.role_code', coalesce(caller_role, ''), true);
+      perform set_config('app.society_id', coalesce(caller_society, ''), true);
       return found_name;
     end;
     $$

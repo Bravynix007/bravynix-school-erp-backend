@@ -1,0 +1,353 @@
+import type { Principal } from '../../common/auth/access-token-verifier.js';
+import { AppException } from '../../common/http/app-exception.js';
+import { FixedClock } from '../../common/time/clock.js';
+import type { AuditService } from '../../platform/audit/index.js';
+import type { DatabaseService, Tx } from '../../platform/database/index.js';
+import type { FileDirectory } from '../../platform/files/index.js';
+import type { AccountDirectory, PersonDirectory } from '../../platform/identity/index.js';
+import type { MasterReferences } from '../../platform/masters/index.js';
+import type { InstitutionDirectory, ScopeService } from '../../platform/tenancy/index.js';
+import type { CreateStaffDto } from './staff.dto.js';
+import type { StaffRepository, StaffRow } from './staff.repository.js';
+import { StaffService } from './staff.service.js';
+
+const owner = {
+  personId: 'owner-1',
+  sessionId: 'session-1',
+  roleCode: 2,
+  societyId: 'society-1',
+  clientType: 'mobile',
+  viaSupportAccess: false,
+} as Principal;
+
+const staff = (overrides: Partial<StaffRow> = {}): StaffRow =>
+  ({
+    id: 'staff-1',
+    created_at: new Date('2026-11-01T00:00:00.000Z'),
+    created_by: 'owner-1',
+    updated_at: new Date('2026-11-01T00:00:00.000Z'),
+    updated_by: 'owner-1',
+    version: 1,
+    status: 1,
+    society_id: 'society-1',
+    home_institution_id: 'institution-1',
+    user_id: 'user-1',
+    employee_code: 'EMP-1',
+    first_name: 'Meera',
+    last_name: null,
+    class_category_id: 'category-1',
+    country_code: '91',
+    mobile_number: '9876500001',
+    alternate_phone: null,
+    address_line_1: null,
+    address_line_2: null,
+    joining_date: '2024-06-03',
+    resignation_date: null,
+    ...overrides,
+  }) as StaffRow;
+
+const unique = (constraint: string) =>
+  Object.assign(new Error('unique'), { code: '23505', constraint });
+
+const fail = async (work: Promise<unknown>) => {
+  try {
+    await work;
+  } catch (error) {
+    if (error instanceof AppException) return { status: error.status as number, code: error.code };
+    throw error;
+  }
+  throw new Error('expected a refusal');
+};
+
+const body: CreateStaffDto = {
+  homeInstitutionId: 'institution-1',
+  email: 'meera@example.com',
+  firstName: 'Meera',
+  classCategoryId: 'category-1',
+  mobile: { countryCode: '91', number: '9876500001' },
+};
+
+function build(current: StaffRow | null = staff()) {
+  const tx = {} as Tx;
+  const order: string[] = [];
+  const transaction = vi.fn<DatabaseService['transaction']>(async (_tenant, work) => {
+    const result = await work(tx);
+    order.push('commit');
+    return result;
+  });
+  const find = vi.fn<StaffRepository['find']>().mockResolvedValue(current ?? undefined);
+  const insert = vi
+    .fn<StaffRepository['insert']>()
+    .mockImplementation((_tx, values) =>
+      Promise.resolve(staff({ ...(values as Partial<StaffRow>) })),
+    );
+  const update = vi
+    .fn<StaffRepository['update']>()
+    .mockImplementation((_tx, id, changes) =>
+      Promise.resolve(staff({ ...current, ...(changes as Partial<StaffRow>), id, version: 2 })),
+    );
+  const replaceEducations = vi.fn<StaffRepository['replaceEducations']>().mockResolvedValue();
+  const replaceEmergencyContacts = vi
+    .fn<StaffRepository['replaceEmergencyContacts']>()
+    .mockResolvedValue();
+  const educations = vi.fn<StaffRepository['educations']>().mockResolvedValue([]);
+  const emergencyContacts = vi.fn<StaffRepository['emergencyContacts']>().mockResolvedValue([]);
+  const requireInstitution = vi.fn<ScopeService['requireInstitution']>().mockResolvedValue({
+    institutionId: 'institution-1',
+    societyId: 'society-1',
+    tenant: { societyId: 'society-1', institutionIds: ['institution-1'] },
+  });
+  const forPrincipal = vi
+    .fn<ScopeService['forPrincipal']>()
+    .mockResolvedValue({ tenant: { societyId: 'society-1' } } as Awaited<
+      ReturnType<ScopeService['forPrincipal']>
+    >);
+  const linkStaff = vi
+    .fn<AccountDirectory['linkStaff']>()
+    .mockResolvedValue({
+      id: 'user-1',
+      email: 'meera@example.com',
+      displayName: 'Meera',
+      created: true,
+    });
+  const welcomeAs = vi.fn<AccountDirectory['welcomeAs']>(() => {
+    order.push('welcome');
+  });
+  const endRoleSessions = vi.fn<AccountDirectory['endRoleSessions']>().mockResolvedValue(2);
+  const record = vi.fn<AuditService['record']>().mockResolvedValue('audit-1');
+  const service = new StaffService(
+    { transaction } as unknown as DatabaseService,
+    {
+      find,
+      insert,
+      update,
+      replaceEducations,
+      replaceEmergencyContacts,
+      educations,
+      emergencyContacts,
+    } as unknown as StaffRepository,
+    { requireInstitution, forPrincipal } as unknown as ScopeService,
+    { linkStaff, welcomeAs, endRoleSessions } as unknown as AccountDirectory,
+    {
+      describe: vi.fn<PersonDirectory['describe']>().mockResolvedValue(new Map()),
+      emails: vi
+        .fn<PersonDirectory['emails']>()
+        .mockResolvedValue(new Map([['user-1', 'meera@example.com']])),
+    } as unknown as PersonDirectory,
+    {
+      requireShown: vi.fn<MasterReferences['requireShown']>().mockResolvedValue(undefined),
+      requirePlace: vi.fn<MasterReferences['requirePlace']>().mockResolvedValue(undefined),
+    } as unknown as MasterReferences,
+    {
+      requireReady: vi.fn<FileDirectory['requireReady']>().mockResolvedValue(undefined),
+    } as unknown as FileDirectory,
+    {
+      names: vi
+        .fn<InstitutionDirectory['names']>()
+        .mockResolvedValue(
+          new Map([
+            [
+              'institution-1',
+              {
+                id: 'institution-1',
+                name: 'Sunrise School',
+                societyId: 'society-1',
+                societyName: 'Sunrise Trust',
+              },
+            ],
+          ]),
+        ),
+    } as unknown as InstitutionDirectory,
+    { record } as unknown as AuditService,
+    new FixedClock('2026-11-08T04:30:00.000Z'),
+  );
+  return {
+    service,
+    order,
+    find,
+    insert,
+    update,
+    replaceEducations,
+    requireInstitution,
+    linkStaff,
+    welcomeAs,
+    endRoleSessions,
+    record,
+  };
+}
+
+describe('StaffService', () => {
+  describe('create (STF-02)', () => {
+    it('adds the record at the Institution the caller reaches, audits it, and mails the welcome after the commit', async () => {
+      const t = build();
+      const created = await t.service.create(owner, { ...body, employeeCode: 'EMP-1' });
+      expect(t.requireInstitution).toHaveBeenCalledWith(owner, 'institution-1');
+      expect(t.insert.mock.calls[0]![1]).toMatchObject({
+        society_id: 'society-1',
+        home_institution_id: 'institution-1',
+        user_id: 'user-1',
+        employee_code: 'EMP-1',
+        created_by: 'owner-1',
+      });
+      expect(t.record.mock.calls[0]![1]).toMatchObject({
+        action: 'staff.created',
+        institutionId: 'institution-1',
+        entityType: 'staff_member',
+      });
+      expect(t.welcomeAs).toHaveBeenCalledWith({ email: 'meera@example.com' }, 4, 'Sunrise Trust');
+      expect(t.order).toEqual(['commit', 'welcome']);
+      expect(created).toMatchObject({ firstName: 'Meera', person: { email: 'meera@example.com' } });
+    });
+
+    it('checks the dates before opening a transaction', async () => {
+      const t = build();
+      expect(
+        await fail(t.service.create(owner, { ...body, dateOfBirth: '2026-11-08' })),
+      ).toMatchObject({
+        status: 400,
+        code: 'VALIDATION_FAILED',
+      });
+      expect(t.linkStaff).not.toHaveBeenCalled();
+    });
+
+    it('turns the three unique indexes into their answers, and sends no welcome', async () => {
+      for (const [constraint, status, code] of [
+        ['uq_staff_members_home_employee_code', 409, 'EMPLOYEE_ID_TAKEN'],
+        ['uq_staff_members_society_user', 409, 'DUPLICATE'],
+        ['uq_staff_members_photo', 400, 'VALIDATION_FAILED'],
+      ] as const) {
+        const t = build();
+        t.insert.mockRejectedValueOnce(unique(constraint));
+        expect(await fail(t.service.create(owner, body))).toEqual({ status, code });
+        expect(t.welcomeAs).not.toHaveBeenCalled();
+      }
+    });
+
+    it('lets any other failure through', async () => {
+      const t = build();
+      t.insert.mockRejectedValueOnce(new Error('boom'));
+      await expect(t.service.create(owner, body)).rejects.toThrow('boom');
+    });
+  });
+
+  describe('get (STF-03)', () => {
+    it('is 404 for a record that is not found, before the Institution is looked at', async () => {
+      const t = build(null);
+      expect(await fail(t.service.get(owner, 'staff-1'))).toMatchObject({ status: 404 });
+      expect(t.requireInstitution).not.toHaveBeenCalled();
+    });
+
+    it('shows the record with the login email', async () => {
+      const t = build();
+      expect(await t.service.get(owner, 'staff-1')).toMatchObject({
+        id: 'staff-1',
+        person: { id: 'user-1', email: 'meera@example.com' },
+      });
+      expect(t.requireInstitution).toHaveBeenCalledWith(owner, 'institution-1');
+    });
+  });
+
+  describe('update (STF-04)', () => {
+    it('checks the version first', async () => {
+      const t = build(staff({ version: 3 }));
+      expect(
+        await fail(t.service.update(owner, 'staff-1', { version: 2, firstName: 'X' })),
+      ).toMatchObject({
+        status: 409,
+      });
+      expect(t.update).not.toHaveBeenCalled();
+    });
+
+    it('is 404 for a deactivated record', async () => {
+      const t = build(staff({ status: 0 }));
+      expect(await fail(t.service.update(owner, 'staff-1', { version: 1 }))).toMatchObject({
+        status: 404,
+      });
+    });
+
+    it('writes and audits nothing when what is sent is what is stored', async () => {
+      const t = build();
+      const result = await t.service.update(owner, 'staff-1', {
+        version: 1,
+        firstName: 'Meera',
+        employeeCode: 'EMP-1',
+        educations: [],
+        emergencyContacts: [],
+      });
+      expect(result).toMatchObject({ version: 1 });
+      expect(t.update).not.toHaveBeenCalled();
+      expect(t.replaceEducations).not.toHaveBeenCalled();
+      expect(t.record).not.toHaveBeenCalled();
+    });
+
+    it('measures a resignation against the stored joining date', async () => {
+      const t = build();
+      expect(
+        await fail(
+          t.service.update(owner, 'staff-1', { version: 1, resignationDate: '2024-06-02' }),
+        ),
+      ).toMatchObject({ status: 400 });
+    });
+
+    it('writes the change with the stamp and audits before and after', async () => {
+      const t = build();
+      await t.service.update(owner, 'staff-1', { version: 1, firstName: 'Meena' });
+      expect(t.update.mock.calls[0]![2]).toMatchObject({
+        first_name: 'Meena',
+        updated_by: 'owner-1',
+      });
+      expect(t.record.mock.calls[0]![1]).toMatchObject({
+        action: 'staff.updated',
+        before: expect.objectContaining({ firstName: 'Meera' }),
+        after: expect.objectContaining({ firstName: 'Meena' }),
+      });
+    });
+
+    it('replaces a list that differs', async () => {
+      const t = build();
+      await t.service.update(owner, 'staff-1', { version: 1, educations: [{ degree: 'B.Ed' }] });
+      expect(t.replaceEducations).toHaveBeenCalledTimes(1);
+    });
+
+    it('turns a taken Employee ID into 409', async () => {
+      const t = build();
+      t.update.mockRejectedValueOnce(unique('uq_staff_members_home_employee_code'));
+      expect(
+        await fail(t.service.update(owner, 'staff-1', { version: 1, employeeCode: 'EMP-2' })),
+      ).toEqual({
+        status: 409,
+        code: 'EMPLOYEE_ID_TAKEN',
+      });
+    });
+  });
+
+  describe('deactivate (STF-05)', () => {
+    it('marks the record, ends the staff sessions in the Society, and audits the count', async () => {
+      const t = build();
+      expect(await t.service.deactivate(owner, 'staff-1')).toEqual({ id: 'staff-1', status: 0 });
+      expect(t.update.mock.calls[0]![2]).toMatchObject({ status: 0, updated_by: 'owner-1' });
+      expect(t.endRoleSessions).toHaveBeenCalledWith(
+        expect.anything(),
+        'user-1',
+        4,
+        'society-1',
+        expect.any(Date),
+      );
+      expect(t.record.mock.calls[0]![1]).toMatchObject({
+        action: 'staff.deactivated',
+        after: { status: 0, sessionsEnded: 2 },
+      });
+    });
+
+    it('refuses the caller’s own record and a record already deactivated', async () => {
+      const own = build(staff({ user_id: 'owner-1' }));
+      expect(await fail(own.service.deactivate(owner, 'staff-1'))).toEqual({
+        status: 409,
+        code: 'CANNOT_ACT_ON_SELF',
+      });
+      expect(own.update).not.toHaveBeenCalled();
+      const gone = build(staff({ status: 0 }));
+      expect(await fail(gone.service.deactivate(owner, 'staff-1'))).toMatchObject({ status: 404 });
+    });
+  });
+});
