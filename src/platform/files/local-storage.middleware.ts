@@ -6,7 +6,7 @@ import {
   type LocalObjectStorage,
 } from './local-object-storage.js';
 
-const ADDRESS = new RegExp(`^/(?:v1)?${LOCAL_STORAGE_PATH}/([^/?#]+)$`);
+const ADDRESS = new RegExp(`^/v1${LOCAL_STORAGE_PATH}/([^/?#]+)$`);
 
 /** An `Content-Disposition` filename that cannot break out of its quotes. */
 function attachment(name: string | null): string {
@@ -29,10 +29,16 @@ function receive(
   request: Request,
   response: Response,
 ): void {
-  const busboy = Busboy({
-    headers: request.headers,
-    limits: { files: 1, fileSize: grant.maxBytes + 1, fields: 20 },
-  });
+  let busboy: Busboy.Busboy;
+  try {
+    busboy = Busboy({
+      headers: request.headers,
+      limits: { files: 1, fileSize: grant.maxBytes + 1, fields: 20 },
+    });
+  } catch {
+    // Not a multipart form: JSON, or no body at all.
+    return refuse(response, 400, 'BAD_UPLOAD');
+  }
   const chunks: Buffer[] = [];
   let stored = false;
   let tooLarge = false;
@@ -49,7 +55,9 @@ function receive(
     if (!stored || wrongType) return refuse(response, 400, 'BAD_UPLOAD');
     if (tooLarge) return refuse(response, 413, 'PAYLOAD_TOO_LARGE');
     sendOrFail(response, async () => {
-      await storage.write(grant.key, Buffer.concat(chunks));
+      if (!(await storage.write(grant.key, Buffer.concat(chunks)))) {
+        return refuse(response, 409, 'ALREADY_UPLOADED');
+      }
       response.status(204).end();
     });
   });
@@ -80,7 +88,6 @@ export function localStorageMiddleware(storage: LocalObjectStorage) {
           .set({
             'Content-Type': grant.contentType,
             'Content-Disposition': attachment(grant.fileName),
-            'X-Content-Type-Options': 'nosniff',
             'Cache-Control': 'private, no-store',
           })
           .end(bytes);

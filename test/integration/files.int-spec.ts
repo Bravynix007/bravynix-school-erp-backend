@@ -1,3 +1,4 @@
+import { rm } from 'node:fs/promises';
 import { Kysely, PostgresDialect, sql } from 'kysely';
 import request from 'supertest';
 import { newId } from '../../src/common/ids/ids.js';
@@ -9,7 +10,7 @@ import { personaByKey } from '../../src/seeds/two-worlds.js';
 import { apiCaller } from '../support/api.js';
 import { superAdminToken } from '../support/admin-token.js';
 import { readAuditRows } from '../support/audit-rows.js';
-import { readFileRows } from '../support/file-rows.js';
+import { countFileRows, readFileRows } from '../support/file-rows.js';
 import { FixtureModule } from '../support/fixture.module.js';
 import { clearLoginState } from '../support/login-state.js';
 import { PlatformFixtures, type SignedInPerson } from '../support/platform-fixtures.js';
@@ -137,6 +138,7 @@ describe('FIL-01 to FIL-03 files (API design 15)', () => {
   });
 
   afterAll(async () => {
+    await rm(process.env.STORAGE_LOCAL_DIR!, { recursive: true, force: true });
     await t.close();
     await ownerDb.destroy();
   });
@@ -243,6 +245,7 @@ describe('FIL-01 to FIL-03 files (API design 15)', () => {
     });
 
     it('refuses more than 5 MB (413) and a type the purpose does not take (415), and writes nothing', async () => {
+      const before = await countFileRows(ownerDb);
       const big = await ask({ sizeBytes: 5_242_881 });
       expect(big.status).toBe(413);
       expect(big.body.code).toBe('FILE_TOO_LARGE');
@@ -250,10 +253,7 @@ describe('FIL-01 to FIL-03 files (API design 15)', () => {
       expect(pdf.status).toBe(415);
       expect(pdf.body.code).toBe('FILE_TYPE_NOT_ALLOWED');
       expect((await ask({ purpose: 12, contentType: 'image/png' })).status).toBe(415);
-      const { rows } = await sql<{ n: number }>`select count(*)::int as n from files`.execute(
-        ownerDb,
-      );
-      expect(rows[0]!.n).toBe(0);
+      expect(await countFileRows(ownerDb)).toBe(before);
     });
 
     it('refuses a purpose that does not exist, and a field the contract does not have', async () => {
@@ -293,6 +293,17 @@ describe('FIL-01 to FIL-03 files (API design 15)', () => {
       expect((await row(given.fileId)).file_status).toBe(3);
       expect((await confirm(given.fileId)).status).toBe(404);
       expect((await link(given.fileId)).status).toBe(404);
+    });
+
+    it('discards a file of the declared size whose first bytes are another type', async () => {
+      const given = await ticket({ sizeBytes: JPEG.length });
+      await send(
+        given,
+        Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(JPEG.length - 9)]),
+        'image/jpeg',
+      );
+      expect((await confirm(given.fileId)).body.code).toBe('FILE_CHECK_FAILED');
+      expect((await row(given.fileId)).file_status).toBe(3);
     });
 
     it('discards a file of another size than declared', async () => {
@@ -339,6 +350,37 @@ describe('FIL-01 to FIL-03 files (API design 15)', () => {
       expect((await http().get(path)).status).toBe(405);
       t.clock.set(new Date(t.clock.now().getTime() + 301_000));
       expect((await send(given, JPEG, 'image/jpeg')).status).toBe(403);
+    });
+
+    it('takes one object per address: a second send is 409 before and after the confirm, and the stored file is never replaced', async () => {
+      const given = await ticket();
+      expect((await send(given, JPEG, 'image/jpeg')).status).toBe(204);
+      expect((await send(given, JPEG, 'image/jpeg')).status).toBe(409);
+      expect((await confirm(given.fileId)).status).toBe(200);
+      expect((await send(given, PDF, 'image/jpeg')).status).toBe(409);
+      const url = ((await link(given.fileId)).body.data as unknown as { url: string }).url;
+      const download = await request(t.app.getHttpServer()).get(new URL(url).pathname).buffer();
+      expect(Buffer.from(download.body as Buffer).equals(JPEG)).toBe(true);
+    });
+
+    it('refuses a download link used to send a file, and leaves the object as it was', async () => {
+      const id = await ready({}, JPEG);
+      const url = ((await link(id)).body.data as unknown as { url: string }).url;
+      const path = new URL(url).pathname;
+      const attempt = request(t.app.getHttpServer()).post(path);
+      expect(
+        (await attempt.attach('file', PDF, { filename: 'x', contentType: 'image/jpeg' })).status,
+      ).toBe(405);
+      const again = await request(t.app.getHttpServer()).get(path).buffer();
+      expect(Buffer.from(again.body as Buffer).equals(JPEG)).toBe(true);
+    });
+
+    it('refuses a request that is not a multipart form, JSON or empty, with 400 and not a crash', async () => {
+      const given = await ticket();
+      const path = new URL(given.upload.url).pathname;
+      const server = t.app.getHttpServer();
+      expect((await request(server).post(path).send({ a: 1 })).status).toBe(400);
+      expect((await request(server).post(path)).status).toBe(400);
     });
 
     it('refuses a file of another type than the ticket, one over the limit and a request with no file', async () => {

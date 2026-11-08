@@ -83,11 +83,20 @@ export class LocalObjectStorage extends ObjectStorage {
     await rm(this.pathOf(key), { force: true });
   }
 
-  /** Stores the bytes of an accepted upload. */
-  async write(key: string, bytes: Buffer): Promise<void> {
+  /**
+   * Stores the bytes of an accepted upload, unless an object is already there: an address sends one object once,
+   * so a file that was sent, and perhaps confirmed, is never replaced. False when it was already there.
+   */
+  async write(key: string, bytes: Buffer): Promise<boolean> {
     const path = this.pathOf(key);
     await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, bytes);
+    try {
+      await writeFile(path, bytes, { flag: 'wx' });
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
+      throw error;
+    }
   }
 
   /** The grant a signed address carries, or null when it is forged, malformed or expired. */

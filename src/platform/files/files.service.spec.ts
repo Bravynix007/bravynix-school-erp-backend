@@ -164,6 +164,22 @@ describe('FilesService', () => {
       expect(t.insert.mock.calls[1]![1].original_filename).toBe('form.pdf');
     });
 
+    it('takes exactly 5 MB, and keeps no name for a path with none', async () => {
+      const t = build();
+      await t.service.requestUpload(admin(), request({ sizeBytes: 5_242_880 }) as never);
+      await t.service.requestUpload(
+        admin(),
+        request({ purpose: 5, contentType: 'application/pdf', fileName: 'docs/' }) as never,
+      );
+      await t.service.requestUpload(
+        admin(),
+        request({ purpose: 5, contentType: 'application/pdf', fileName: 'a\u200Bb.pdf' }) as never,
+      );
+      expect(t.insert.mock.calls[0]![1].size_bytes).toBe(5_242_880);
+      expect(t.insert.mock.calls[1]![1].original_filename).toBeNull();
+      expect(t.insert.mock.calls[2]![1].original_filename).toBe('ab.pdf');
+    });
+
     it('refuses more than 5 MB with 413 and a type the purpose does not take with 415', async () => {
       const t = build();
       expect(
@@ -275,11 +291,12 @@ describe('FilesService', () => {
     it.each([
       ['the wrong size', JPEG.subarray(0, 4)],
       ['the wrong type', Buffer.from('%PDF-1.7 and some more bytes')],
+      ['the right size but another type', Buffer.from('%PDF-1.7 '.padEnd(JPEG.length, 'x'))],
     ])(
       'discards a file with %s: object removed, file Rejected, 422 FILE_CHECK_FAILED',
       async (_name, bytes) => {
         const t = build(
-          file({ size_bytes: bytes.length === JPEG.length ? 1 : JPEG.length }),
+          file({ size_bytes: _name.includes('right size') ? bytes.length : JPEG.length }),
           bytes,
         );
         expect(await fail(t.service.confirm(admin(), 'file-1'))).toEqual({
@@ -305,16 +322,17 @@ describe('FilesService', () => {
       );
     });
 
-    it('lets an Owner or Admin of the Institution fetch another person’s file, and not a Teacher', async () => {
-      const row = file({ file_status: 2 });
+    it('gives an Owner or Admin another person’s file; row-level security has narrowed them to their Institutions', async () => {
+      const row = file({ file_status: 2, created_by: 'someone-else' });
       expect(
         (await build(row).service.download(admin({ personId: 'o', roleCode: 2 }), 'file-1')).url,
       ).toBe('http://store/down');
+    });
+
+    it('is 404 for a purpose nobody registered', async () => {
       expect(
-        await fail(build(row).service.download(admin({ personId: 't', roleCode: 4 }), 'file-1')),
-      ).toMatchObject({
-        status: 404,
-      });
+        await fail(build(file({ file_status: 2, purpose: 8 })).service.download(admin(), 'file-1')),
+      ).toMatchObject({ status: 404 });
     });
 
     it('is 404 for a file that is missing or not Ready', async () => {

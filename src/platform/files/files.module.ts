@@ -20,13 +20,19 @@ import { ObjectStorage } from './object-storage.js';
     {
       provide: LocalObjectStorage,
       inject: [AppConfig, Clock],
-      useFactory: ({ env }: AppConfig, clock: Clock) =>
-        new LocalObjectStorage(
+      useFactory: ({ env }: AppConfig, clock: Clock) => {
+        if (env.STORAGE_DRIVER !== 'local') {
+          throw new Error(
+            `STORAGE_DRIVER=${env.STORAGE_DRIVER} has no driver yet: it arrives with the deployment slice`,
+          );
+        }
+        return new LocalObjectStorage(
           env.STORAGE_LOCAL_DIR,
           env.STORAGE_LOCAL_BASE_URL ?? `http://localhost:${env.PORT}`,
           randomBytes(32),
           clock,
-        ),
+        );
+      },
     },
     { provide: ObjectStorage, useExisting: LocalObjectStorage },
   ],

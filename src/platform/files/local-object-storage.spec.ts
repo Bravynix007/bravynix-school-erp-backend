@@ -94,6 +94,14 @@ describe('LocalObjectStorage', () => {
       await expect(storage.remove('s/i/3/one')).resolves.toBeUndefined();
     });
 
+    it('is written once: a second write to the same key is refused and the first bytes stay', async () => {
+      expect(await storage.write('s/i/3/once', Buffer.from('first'))).toBe(true);
+      expect(await storage.write('s/i/3/once', Buffer.from('second'))).toBe(false);
+      expect((await storage.read('s/i/3/once'))?.toString()).toBe('first');
+      await storage.remove('s/i/3/once');
+      expect(await storage.write('s/i/3/once', Buffer.from('again'))).toBe(true);
+    });
+
     it('is never kept outside the storage directory', async () => {
       await expect(storage.write('../escape', Buffer.from('x'))).rejects.toThrow(/outside/);
       await expect(storage.read('../../etc/passwd')).rejects.toThrow(/outside/);
