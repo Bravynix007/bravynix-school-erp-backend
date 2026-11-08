@@ -81,7 +81,7 @@ function last4(value: unknown): string | null {
 }
 
 /** Whatever the key, an Aadhaar-shaped number in text is masked (a safe failure for a 12-digit phone number). */
-function scrubText(text: string): string {
+export function scrubText(text: string): string {
   return text.replace(AADHAAR_SHAPE, (_match, _a, _b, c: string) => `XXXX XXXX ${c}`);
 }
 

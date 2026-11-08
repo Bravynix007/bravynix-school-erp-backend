@@ -4,7 +4,7 @@ import { newId } from '../../common/ids/ids.js';
 import { RequestContext } from '../../common/request-context/request-context.js';
 import { Clock } from '../../common/time/clock.js';
 import type { Tx } from '../database/index.js';
-import { changedFields, serializeValues, type AuditValues } from './audit-values.js';
+import { changedFields, scrubText, serializeValues, type AuditValues } from './audit-values.js';
 
 export const AuditOutcome = { Success: 1, Denied: 2, Failed: 3 } as const;
 export type AuditOutcome = (typeof AuditOutcome)[keyof typeof AuditOutcome];
@@ -121,7 +121,9 @@ export function buildAuditRow(
     entity_type: entry.entityType ?? null,
     entity_id: entry.entityId ?? null,
     outcome: entry.outcome ?? AuditOutcome.Success,
-    reason: entry.reason ?? null,
+    // A reason is typed by a person and may quote an Aadhaar number; it is kept masked like the values (DDD 9.x
+    // audit_logs: Aadhaar appears only with its last 4). Masking can lengthen it, so it is cut back to the column.
+    reason: entry.reason === undefined ? null : scrubText(entry.reason).slice(0, 500),
     request_id: context?.requestId ?? null,
     ip_address: ip && isIP(ip) ? ip : null,
     user_agent: context?.userAgent ? control(context.userAgent).slice(0, 300) : null,

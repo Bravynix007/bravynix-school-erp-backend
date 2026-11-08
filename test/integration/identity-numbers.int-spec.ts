@@ -126,6 +126,14 @@ describe('identity numbers: protect and reveal (DDD 15.6, API design 10.9)', () 
     expect(JSON.stringify(rows)).not.toContain(NUMBER);
   });
 
+  it('keeps a number quoted in the reason masked in the audit entry', async () => {
+    const admin = newId();
+    const slot: IdentitySlot = { table: 'staff_identities', rowId: newId() };
+    expect(await reveal(admin, slot, `Parent says ${NUMBER} is on the form`)).toBe(NUMBER);
+    const [row] = await revealsOf(admin);
+    expect(row?.reason).toBe('Parent says XXXX XXXX 0124 is on the form');
+  });
+
   it('opens a number only for the row it was sealed for, and writes nothing when it does not open', async () => {
     const admin = newId();
     const slot: IdentitySlot = { table: 'student_identities', rowId: newId() };
@@ -252,6 +260,50 @@ describe('identity numbers: protect and reveal (DDD 15.6, API design 10.9)', () 
       );
     }
     expect(await reveal(admin, slot)).toBe(NUMBER);
+  });
+
+  it('shows a person their own reveals and nothing of anyone else’s, whoever reads and wherever', async () => {
+    const x = newId();
+    const y = newId();
+    const slot: IdentitySlot = { table: 'staff_identities', rowId: newId() };
+    const audit = t.app.get(AuditService);
+    const secondInstitution: Place = { societyId, institutionId: newId() };
+    const otherSociety: Place = { societyId: newId(), institutionId: newId() };
+    await reveal(x, slot);
+    await asAdmin(x, (tx) =>
+      audit.record(tx, { action: 'student.update', institutionId, societyId }),
+    );
+    await reveal(y, slot, 'Checking the form', otherSociety);
+    await reveal(y, slot, 'Checking the form', secondInstitution);
+
+    /** What `reader` sees, as the application role, of the rows `actor` made. */
+    const seen = (reader: string | undefined, place: Place, actor: string) =>
+      database.transaction(
+        {
+          ...(reader === undefined ? {} : { personId: reader }),
+          societyId: place.societyId,
+          institutionIds: [place.institutionId],
+          roleCode: 3,
+        },
+        async (tx) =>
+          (
+            await sql<{ action: string }>`
+              select action from audit_logs where actor_user_id = ${actor} order by action
+            `.execute(tx)
+          ).rows.map((row) => row.action),
+      );
+
+    // Nobody else reads X's reveal: not another person in another Society or at another Institution, not a tenant
+    // that names no person.
+    expect(await seen(y, otherSociety, x)).toEqual([]);
+    expect(await seen(y, secondInstitution, x)).toEqual([]);
+    expect(await seen(undefined, otherSociety, x)).toEqual([]);
+    expect(await seen(undefined, secondInstitution, x)).toEqual([]);
+    // X reads the reveal from another Society too, and none of X's other entries there.
+    expect(await seen(x, otherSociety, x)).toEqual(['identity.reveal']);
+    expect(await seen(x, secondInstitution, x)).toEqual(['identity.reveal']);
+    // Y's reveals stay Y's: X, in a Society where Y never acted, reads none of them.
+    expect(await seen(x, { societyId: newId(), institutionId: newId() }, y)).toEqual([]);
   });
 
   it('seals with IDENTITY_ENCRYPTION_KEY and hashes with IDENTITY_HMAC_KEY, as the settings name them', () => {

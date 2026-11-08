@@ -7,6 +7,9 @@ import { sql, type Kysely } from 'kysely';
  * Institution and each Society, and would stop working for an Institution Admin once `audit_logs_select` is
  * narrowed to Owners (carried forward). The policy adds to `audit_logs_select`; it shows a person nothing but
  * their own reveals.
+ *
+ * Because that includes reveals made in other Societies, any list of audit entries must filter `society_id`
+ * explicitly and not lean on row-level security alone.
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`

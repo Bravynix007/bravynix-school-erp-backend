@@ -23,6 +23,9 @@ const base64Key32 = z
   .string()
   .refine((key) => Buffer.from(key, 'base64').length === 32, '32 bytes, base64 encoded');
 
+/** A key as the bytes it decodes to: padding, base64url and whitespace spell the same key. */
+const keyBytes = (key: string): Buffer => Buffer.from(key, 'base64');
+
 /**
  * The Aadhaar keys that are published in the repository (`.env.example`, `demo.env`, the test setup). They are for
  * development only; staging and production refuse them, so a copied example file cannot protect real numbers.
@@ -180,7 +183,7 @@ export const envSchema = z
         message: 'is required in staging and production',
       });
     }
-    if (env.IDENTITY_ENCRYPTION_KEY === env.IDENTITY_HMAC_KEY) {
+    if (keyBytes(env.IDENTITY_ENCRYPTION_KEY).equals(keyBytes(env.IDENTITY_HMAC_KEY))) {
       ctx.addIssue({
         code: 'custom',
         path: ['IDENTITY_HMAC_KEY'],
@@ -188,7 +191,8 @@ export const envSchema = z
       });
     }
     for (const name of ['IDENTITY_ENCRYPTION_KEY', 'IDENTITY_HMAC_KEY'] as const) {
-      if (deployed && PUBLISHED_IDENTITY_KEYS.includes(env[name])) {
+      const given = keyBytes(env[name]);
+      if (deployed && PUBLISHED_IDENTITY_KEYS.some((key) => keyBytes(key).equals(given))) {
         ctx.addIssue({
           code: 'custom',
           path: [name],

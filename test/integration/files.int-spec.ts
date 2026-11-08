@@ -383,6 +383,22 @@ describe('FIL-01 to FIL-03 files (API design 15)', () => {
       expect((await request(server).post(path)).status).toBe(400);
     });
 
+    it('answers 400 once to a form cut off inside its file, and keeps running', async () => {
+      const given = await ticket();
+      const path = new URL(given.upload.url).pathname;
+      const server = t.app.getHttpServer();
+      const cut = await request(server)
+        .post(path)
+        .set('Content-Type', 'multipart/form-data; boundary=zz')
+        .send(
+          '--zz\r\nContent-Disposition: form-data; name="file"; filename="a.jpg"\r\nContent-Type: image/jpeg\r\n\r\nabc',
+        );
+      expect(cut.status).toBe(400);
+      expect(cut.body).toEqual({ code: 'BAD_UPLOAD' });
+      // The address was not used up, and the process is still answering.
+      expect((await send(given, JPEG, 'image/jpeg')).status).toBe(204);
+    });
+
     it('refuses a file of another type than the ticket, one over the limit and a request with no file', async () => {
       const given = await ticket();
       expect((await send(given, JPEG, 'image/png')).status).toBe(400);

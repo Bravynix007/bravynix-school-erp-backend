@@ -104,7 +104,43 @@ describe('parseEnv', () => {
     expect(parseEnv(base).IDENTITY_HMAC_KEY).toBe(HMAC);
   });
 
-  it('refuses the Aadhaar keys published in the repository when deployed', () => {
+  it.each(['staging', 'production'])(
+    'refuses the Aadhaar keys published in the repository in %s',
+    (NODE_ENV) => {
+      const deployed = {
+        ...base,
+        NODE_ENV,
+        EMAIL_DRIVER: 'smtp',
+        STORAGE_DRIVER: 'r2',
+        SMTP_URL: 'smtp://x',
+        EMAIL_FROM: 'BravyNix <no-reply@bravynix.in>',
+        OTP_HMAC_SECRET: SECRET,
+        JWT_SIGNING_KEY: 'pem',
+        MFA_ENCRYPTION_KEY: KEY,
+      };
+      expect(parseEnv(deployed).IDENTITY_HMAC_KEY).toBe(HMAC);
+      for (const published of PUBLISHED_IDENTITY_KEYS) {
+        expect(() => parseEnv({ ...deployed, IDENTITY_ENCRYPTION_KEY: published })).toThrow(
+          /IDENTITY_ENCRYPTION_KEY/,
+        );
+        expect(() => parseEnv({ ...deployed, IDENTITY_HMAC_KEY: published })).toThrow(
+          /IDENTITY_HMAC_KEY/,
+        );
+        // In development they are fine: that is what they are for.
+        expect(parseEnv({ ...base, IDENTITY_HMAC_KEY: published }).IDENTITY_HMAC_KEY).toBe(
+          published,
+        );
+      }
+    },
+  );
+
+  it('compares keys by the bytes they decode to, not by how they are spelt', () => {
+    const published = PUBLISHED_IDENTITY_KEYS[2]!;
+    const spellings = [
+      published.replace(/=+$/, ''),
+      published.replaceAll('+', '-').replaceAll('/', '_'),
+      `${published}\n`,
+    ];
     const deployed = {
       ...base,
       NODE_ENV: 'production',
@@ -116,16 +152,14 @@ describe('parseEnv', () => {
       JWT_SIGNING_KEY: 'pem',
       MFA_ENCRYPTION_KEY: KEY,
     };
-    expect(parseEnv(deployed).IDENTITY_HMAC_KEY).toBe(HMAC);
-    for (const published of PUBLISHED_IDENTITY_KEYS) {
-      expect(() => parseEnv({ ...deployed, IDENTITY_ENCRYPTION_KEY: published })).toThrow(
-        /IDENTITY_ENCRYPTION_KEY/,
-      );
-      expect(() => parseEnv({ ...deployed, IDENTITY_HMAC_KEY: published })).toThrow(
+    for (const spelt of spellings) {
+      expect(() => parseEnv({ ...deployed, IDENTITY_HMAC_KEY: spelt })).toThrow(
         /IDENTITY_HMAC_KEY/,
       );
-      // In development they are fine: that is what they are for.
-      expect(parseEnv({ ...base, IDENTITY_HMAC_KEY: published }).IDENTITY_HMAC_KEY).toBe(published);
+      // The same key spelt two ways is still one key.
+      expect(() =>
+        parseEnv({ ...base, IDENTITY_ENCRYPTION_KEY: published, IDENTITY_HMAC_KEY: spelt }),
+      ).toThrow(/IDENTITY_HMAC_KEY/);
     }
   });
 

@@ -93,7 +93,7 @@ describe('IdentityNumbers.reveal', () => {
     expect(t.seen.some((text) => text.includes('pg_advisory_xact_lock'))).toBe(true);
   });
 
-  it('answers 429 REVEAL_LIMIT with the seconds to midnight IST at the tenth reveal of the day, and records nothing', async () => {
+  it('answers 429 REVEAL_LIMIT with the seconds to midnight IST when ten were already made today, and records nothing', async () => {
     const t = build({ count: 10 });
     await expect(t.reveal()).rejects.toMatchObject({
       status: 429,
