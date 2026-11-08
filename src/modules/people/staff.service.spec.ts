@@ -102,14 +102,12 @@ function build(current: StaffRow | null = staff()) {
     .mockResolvedValue({ tenant: { societyId: 'society-1' } } as Awaited<
       ReturnType<ScopeService['forPrincipal']>
     >);
-  const linkStaff = vi
-    .fn<AccountDirectory['linkStaff']>()
-    .mockResolvedValue({
-      id: 'user-1',
-      email: 'meera@example.com',
-      displayName: 'Meera',
-      created: true,
-    });
+  const linkStaff = vi.fn<AccountDirectory['linkStaff']>().mockResolvedValue({
+    id: 'user-1',
+    email: 'meera@example.com',
+    displayName: 'Meera',
+    created: true,
+  });
   const welcomeAs = vi.fn<AccountDirectory['welcomeAs']>(() => {
     order.push('welcome');
   });
@@ -142,21 +140,19 @@ function build(current: StaffRow | null = staff()) {
       requireReady: vi.fn<FileDirectory['requireReady']>().mockResolvedValue(undefined),
     } as unknown as FileDirectory,
     {
-      names: vi
-        .fn<InstitutionDirectory['names']>()
-        .mockResolvedValue(
-          new Map([
-            [
-              'institution-1',
-              {
-                id: 'institution-1',
-                name: 'Sunrise School',
-                societyId: 'society-1',
-                societyName: 'Sunrise Trust',
-              },
-            ],
-          ]),
-        ),
+      names: vi.fn<InstitutionDirectory['names']>().mockResolvedValue(
+        new Map([
+          [
+            'institution-1',
+            {
+              id: 'institution-1',
+              name: 'Sunrise School',
+              societyId: 'society-1',
+              societyName: 'Sunrise Trust',
+            },
+          ],
+        ]),
+      ),
     } as unknown as InstitutionDirectory,
     { record } as unknown as AuditService,
     new FixedClock('2026-11-08T04:30:00.000Z'),

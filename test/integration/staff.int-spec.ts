@@ -121,24 +121,31 @@ describe('STF-02 to STF-05 staff (API design 9.5)', () => {
     }>(ownerDb, sql`entity_id = ${id}`);
 
   /** Designations are platform masters: their rows are written as the platform role, as the masters API does. */
+  const scratchDesignations: string[] = [];
   const asPlatform = <T>(fn: (trx: Transaction<unknown>) => Promise<T>): Promise<T> =>
     ownerDb.transaction().execute(async (trx) => {
       await sql`select set_config('app.role_code', '1', true)`.execute(trx);
       return fn(trx);
     });
-  const insertDesignation = (id: string, name: string, order: number, status: number) =>
-    asPlatform((trx) =>
+  const insertDesignation = (id: string, name: string, order: number, status: number) => {
+    scratchDesignations.push(id);
+    return asPlatform((trx) =>
       sql`
         insert into designations (id, name, code, display_order, status)
         values (${id}, ${name}, ${`H${newId().slice(-8).toUpperCase()}`}, ${order}, ${status})
       `.execute(trx),
     );
+  };
   const setDesignationStatus = (id: string, status: number) =>
     asPlatform((trx) =>
       sql`update designations set status = ${status} where id = ${id}`.execute(trx),
     );
-  const removeDesignation = (id: string) =>
-    asPlatform((trx) => sql`delete from designations where id = ${id}`.execute(trx));
+  /** After the Societies are gone, so no staff record still points at them. */
+  const removeScratchDesignations = async () => {
+    for (const id of scratchDesignations.splice(0)) {
+      await asPlatform((trx) => sql`delete from designations where id = ${id}`.execute(trx));
+    }
+  };
 
   const readyPhoto = async (institutionId = first, purpose = 4, status = 2) => {
     const id = newId();
@@ -208,6 +215,7 @@ describe('STF-02 to STF-05 staff (API design 9.5)', () => {
     await blocks.clearBlocks(ownerDb);
     await clearLoginState(ownerDb);
     await removeScratchSocieties(ownerDb, societies.splice(0));
+    await removeScratchDesignations();
     // The staff logins were made by the owner, so they go first.
     for (const id of staffUsers.splice(0)) {
       await sql`delete from users where id = ${id}`.execute(ownerDb);
@@ -431,14 +439,10 @@ describe('STF-02 to STF-05 staff (API design 9.5)', () => {
       expect((await add({ classCategoryId: missing })).status).toBe(404);
       expect((await add({ designationId: missing })).status).toBe(404);
       const hidden = newId();
-      await insertDesignation(hidden, 'Hidden post', 900, 0);
-      try {
-        const res = await add({ designationId: hidden });
-        expect(res.status).toBe(422);
-        expect(res.body.code).toBe('REFERENCE_INACTIVE');
-      } finally {
-        await removeDesignation(hidden);
-      }
+      await insertDesignation(hidden, `Hidden post ${hidden}`, 900, 0);
+      const res = await add({ designationId: hidden });
+      expect(res.status).toBe(422);
+      expect(res.body.code).toBe('REFERENCE_INACTIVE');
       const wrong = await add({ address: { stateId: place.stateId } });
       expect(wrong.status).toBe(400);
       expect(wrong.body.errors).toEqual([
@@ -635,40 +639,33 @@ describe('STF-02 to STF-05 staff (API design 9.5)', () => {
 
     it('leaves a link alone that it does not touch, even if the master entry was hidden since, and checks a new one', async () => {
       const hidden = newId();
-      await insertDesignation(hidden, 'Soon hidden', 901, 1);
-      try {
-        const staff = await added({ designationId: hidden });
-        await setDesignationStatus(hidden, 0);
-        expect(
-          (
-            await api('patch', `/v1/staff/${staff.id}`, owner.token, {
-              version: 1,
-              nationality: 'Indian',
-            })
-          ).status,
-        ).toBe(200);
-        const other = await added();
-        const res = await api('patch', `/v1/staff/${other.id}`, owner.token, {
-          version: 1,
-          designationId: hidden,
-        });
-        expect(res.status).toBe(422);
-        expect(res.body.code).toBe('REFERENCE_INACTIVE');
-        // Clearing the link is always allowed.
-        expect(
-          (
-            await api('patch', `/v1/staff/${staff.id}`, owner.token, {
-              version: 2,
-              designationId: null,
-            })
-          ).status,
-        ).toBe(200);
-      } finally {
-        await sql`update staff_members set designation_id = null where designation_id = ${hidden}`
-          .execute(ownerDb)
-          .catch(() => undefined);
-        await removeDesignation(hidden);
-      }
+      await insertDesignation(hidden, `Soon hidden ${hidden}`, 901, 1);
+      const staff = await added({ designationId: hidden });
+      await setDesignationStatus(hidden, 0);
+      expect(
+        (
+          await api('patch', `/v1/staff/${staff.id}`, owner.token, {
+            version: 1,
+            nationality: 'Indian',
+          })
+        ).status,
+      ).toBe(200);
+      const other = await added();
+      const res = await api('patch', `/v1/staff/${other.id}`, owner.token, {
+        version: 1,
+        designationId: hidden,
+      });
+      expect(res.status).toBe(422);
+      expect(res.body.code).toBe('REFERENCE_INACTIVE');
+      // Clearing the link is always allowed.
+      expect(
+        (
+          await api('patch', `/v1/staff/${staff.id}`, owner.token, {
+            version: 2,
+            designationId: null,
+          })
+        ).status,
+      ).toBe(200);
     });
 
     it('does not let the email or the home Institution change here, and refuses null for what must have a value', async () => {
