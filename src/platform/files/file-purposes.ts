@@ -23,6 +23,8 @@ export interface PurposeRule {
   uploadRoles: readonly RoleCode[];
   /** A link to the file is written to the audit log (API design 15.2). */
   auditedDownload: boolean;
+  /** The name the uploader gave is kept: documents and imports show it, photos do not (DDD 9.12). */
+  keepsName: boolean;
   /** Days an import is kept before the sweep removes it; none for the rest. */
   keepDays: number | null;
 }
@@ -35,30 +37,35 @@ export const PURPOSES: Readonly<Record<FilePurpose, PurposeRule>> = {
     contentTypes: IMAGE_TYPES,
     uploadRoles: ADMINS,
     auditedDownload: false,
+    keepsName: false,
     keepDays: null,
   },
   [FilePurpose.StaffPhoto]: {
     contentTypes: IMAGE_TYPES,
     uploadRoles: ADMINS,
     auditedDownload: false,
+    keepsName: false,
     keepDays: null,
   },
   [FilePurpose.StudentDocument]: {
     contentTypes: DOCUMENT_TYPES,
     uploadRoles: ADMINS,
     auditedDownload: true,
+    keepsName: true,
     keepDays: null,
   },
   [FilePurpose.StaffDocument]: {
     contentTypes: DOCUMENT_TYPES,
     uploadRoles: ADMINS,
     auditedDownload: true,
+    keepsName: true,
     keepDays: null,
   },
   [FilePurpose.ImportCsv]: {
     contentTypes: ['text/csv'],
     uploadRoles: ADMINS,
     auditedDownload: true,
+    keepsName: true,
     keepDays: 7,
   },
 };

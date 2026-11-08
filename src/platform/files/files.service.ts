@@ -28,9 +28,6 @@ export interface UploadGrant {
   maxBytes: number;
 }
 
-/** Purposes whose name is kept: documents and imports show it, photos do not (DDD 9.12). */
-const KEEPS_NAME = new Set<number>([5, 6, 12]);
-
 /** The name as a plain file name: no path, no control or invisible characters, at most 255; null when nothing is left. */
 function plainName(name: string): string | null {
   const base = name.split(/[\\/]/).pop() ?? '';
@@ -84,7 +81,7 @@ export class FilesService {
         purpose: body.purpose,
         content_type: body.contentType,
         size_bytes: body.sizeBytes,
-        original_filename: KEEPS_NAME.has(body.purpose) ? plainName(body.fileName) : null,
+        original_filename: rule.keepsName ? plainName(body.fileName) : null,
         delete_after: new Date(now.getTime() + PENDING_HOURS * 3_600_000),
       }),
     );

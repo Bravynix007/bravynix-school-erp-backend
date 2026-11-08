@@ -18,5 +18,6 @@ process.env.MFA_ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString('base64');
 process.env.IDENTITY_ENCRYPTION_KEY ??= Buffer.alloc(32, 11).toString('base64');
 process.env.IDENTITY_HMAC_KEY ??= Buffer.alloc(32, 13).toString('base64');
 process.env.OTP_DEV_ECHO = 'false';
-// Uploads of the local file store go to a throwaway directory.
-process.env.STORAGE_LOCAL_DIR ??= `${tmpdir()}/erp-test-storage`;
+// Uploads of the local file store go to a throwaway directory of this test process, never one from the
+// shell (a test that cleans up must not remove a developer's own uploads).
+process.env.STORAGE_LOCAL_DIR = `${tmpdir()}/erp-test-storage-${process.pid}`;

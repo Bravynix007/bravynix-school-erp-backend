@@ -289,16 +289,17 @@ describe('FilesService', () => {
     });
 
     it.each([
-      ['the wrong size', JPEG.subarray(0, 4)],
-      ['the wrong type', Buffer.from('%PDF-1.7 and some more bytes')],
-      ['the right size but another type', Buffer.from('%PDF-1.7 '.padEnd(JPEG.length, 'x'))],
+      ['the wrong size', JPEG.subarray(0, 4), JPEG.length],
+      ['the wrong type', Buffer.from('%PDF-1.7 and some more bytes'), JPEG.length],
+      [
+        'the right size but another type',
+        Buffer.from('%PDF-1.7 '.padEnd(JPEG.length, 'x')),
+        JPEG.length,
+      ],
     ])(
       'discards a file with %s: object removed, file Rejected, 422 FILE_CHECK_FAILED',
-      async (_name, bytes) => {
-        const t = build(
-          file({ size_bytes: _name.includes('right size') ? bytes.length : JPEG.length }),
-          bytes,
-        );
+      async (_name, bytes, declaredSize) => {
+        const t = build(file({ size_bytes: declaredSize }), bytes);
         expect(await fail(t.service.confirm(admin(), 'file-1'))).toEqual({
           status: 422,
           code: 'FILE_CHECK_FAILED',
