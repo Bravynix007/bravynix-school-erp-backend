@@ -24,6 +24,17 @@ const base64Key32 = z
   .refine((key) => Buffer.from(key, 'base64').length === 32, '32 bytes, base64 encoded');
 
 /**
+ * The Aadhaar keys that are published in the repository (`.env.example`, `demo.env`, the test setup). They are for
+ * development only; staging and production refuse them, so a copied example file cannot protect real numbers.
+ */
+export const PUBLISHED_IDENTITY_KEYS: readonly string[] = [
+  'ZGV2ZWxvcG1lbnQtb25seS1lbmNyeXB0aW9uLWtleSE=',
+  'ZGV2ZWxvcG1lbnQtb25seS1obWFjLWtleS0xMjM0NSE=',
+  Buffer.alloc(32, 11).toString('base64'),
+  Buffer.alloc(32, 13).toString('base64'),
+];
+
+/**
  * Every environment variable the API reads. The process refuses to start when
  * one is missing or malformed, so a bad deploy fails at boot, not at the first
  * request that needs the value.
@@ -175,6 +186,16 @@ export const envSchema = z
         path: ['IDENTITY_HMAC_KEY'],
         message: 'must differ from IDENTITY_ENCRYPTION_KEY: one key never does two jobs',
       });
+    }
+    for (const name of ['IDENTITY_ENCRYPTION_KEY', 'IDENTITY_HMAC_KEY'] as const) {
+      if (deployed && PUBLISHED_IDENTITY_KEYS.includes(env[name])) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [name],
+          message:
+            'is a development key published in the repository: make a new one for staging and production',
+        });
+      }
     }
     if (deployed && env.STORAGE_DRIVER === 'local') {
       ctx.addIssue({

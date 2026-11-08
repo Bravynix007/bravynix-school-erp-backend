@@ -3,6 +3,7 @@ export {
   IdentityNumbers,
   REVEAL_LIMIT_PER_DAY,
   REVEAL_REASON_LENGTH,
+  requireRevealReason,
   type IdentitySlot,
   type IdentityTable,
   type ProtectedAadhaar,
