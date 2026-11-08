@@ -140,11 +140,18 @@ describe('STF-02 to STF-05 staff (API design 9.5)', () => {
     asPlatform((trx) =>
       sql`update designations set status = ${status} where id = ${id}`.execute(trx),
     );
-  /** After the Societies are gone, so no staff record still points at them. */
+  /**
+   * After the Societies are gone, so no staff record still points at them. The table has no delete policy (a master
+   * is hidden, never deleted), so the owner lifts the forced policy for this one transaction, as the audit helper does.
+   */
   const removeScratchDesignations = async () => {
-    for (const id of scratchDesignations.splice(0)) {
-      await asPlatform((trx) => sql`delete from designations where id = ${id}`.execute(trx));
-    }
+    const ids = scratchDesignations.splice(0);
+    if (ids.length === 0) return;
+    await ownerDb.transaction().execute(async (trx) => {
+      await sql`alter table designations no force row level security`.execute(trx);
+      await sql`delete from designations where id = any(${sql.val(ids)}::uuid[])`.execute(trx);
+      await sql`alter table designations force row level security`.execute(trx);
+    });
   };
 
   const readyPhoto = async (institutionId = first, purpose = 4, status = 2) => {
