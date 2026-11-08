@@ -1,9 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable } from '@nestjs/common';
+import { changedColumns } from '../../common/http/changed-columns.js';
 import { requireVersion } from '../../common/http/require-version.js';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { ApiResult } from '../../common/http/api-result.js';
 import { authorIdsOf } from '../../common/http/author-stamps.js';
 import { AppException } from '../../common/http/app-exception.js';
+import { ErrorCode } from '../../common/http/error-codes.js';
+import { fieldError } from '../../common/validation/field-error.js';
 import { newId } from '../../common/ids/ids.js';
 import { pageMeta, pageOffset, parseSort } from '../../common/pagination/pagination.js';
 import { Clock } from '../../common/time/clock.js';
@@ -13,6 +16,8 @@ import {
   duplicateOn,
   insertStamp,
   isDuplicateOn,
+  isViolationOf,
+  PgErrorCode,
   platformTenant,
   updateStamp,
   type TenantContext,
@@ -93,6 +98,19 @@ function diffOffered(
     added: wanted.filter((id) => !had.has(id)),
     removed: [...had].filter((id) => !wants.has(id)),
   };
+}
+
+/**
+ * Unticking a category that a class (active or deactivated) is in is refused by the database, which keeps the
+ * rule even when classes are added at the same time: 409 `CATEGORY_IN_USE`, naming the field.
+ */
+function translateOfferError(error: unknown): unknown {
+  if (isViolationOf(error, PgErrorCode.foreignKeyViolation, 'fk_classes_offered_category')) {
+    return new AppException(HttpStatus.CONFLICT, ErrorCode.CATEGORY_IN_USE, {
+      errors: [fieldError('classesOffered', ErrorCode.CATEGORY_IN_USE)],
+    });
+  }
+  return error;
 }
 
 /** What the audit log keeps of an Institution: its own fields and the class categories it offers. */
@@ -258,51 +276,53 @@ export class InstitutionService {
     body: UpdateInstitutionDto,
   ): Promise<InstitutionDetail> {
     const { tenant } = await this.scope.requireInstitution(principal, id);
-    const { row, offered } = await this.database.transaction(tenant, async (tx) => {
-      const current = await this.lockedAt(tx, id, body.version);
-      requireActive(current);
-      const before = await this.offered(tx, id);
-      const wanted: InstitutionChanges = {
-        ...(body.name === undefined ? {} : { name: body.name }),
-        ...profileColumns(body),
-      };
-      // A request that changes nothing writes nothing: no new version, no audit entry.
-      const changes = Object.fromEntries(
-        Object.entries(wanted).filter(
-          ([column, value]) => current[column as keyof InstitutionRow] !== value,
-        ),
-      ) as InstitutionChanges;
-      // A place already on the Institution stays even if its entry has been hidden since; only a new link is checked.
-      if (
-        body.address !== undefined &&
-        ('country_id' in changes || 'state_id' in changes || 'city_id' in changes)
-      ) {
-        await this.masters.requirePlace(tx, body.address, 'address', {
-          countryId: current.country_id,
-          stateId: current.state_id,
-          cityId: current.city_id,
+    const { row, offered } = await this.database
+      .transaction(tenant, async (tx) => {
+        const current = await this.lockedAt(tx, id, body.version);
+        requireActive(current);
+        const before = await this.offered(tx, id);
+        const wanted: InstitutionChanges = {
+          ...(body.name === undefined ? {} : { name: body.name }),
+          ...profileColumns(body),
+        };
+        // A request that changes nothing writes nothing: no new version, no audit entry.
+        const changes = changedColumns(current, wanted) as InstitutionChanges;
+        // A place already on the Institution stays even if its entry has been hidden since; only a new link is checked.
+        if (
+          body.address !== undefined &&
+          ('country_id' in changes || 'state_id' in changes || 'city_id' in changes)
+        ) {
+          await this.masters.requirePlace(tx, body.address, 'address', {
+            countryId: current.country_id,
+            stateId: current.state_id,
+            cityId: current.city_id,
+          });
+        }
+        const { added, removed } = diffOffered(before, body.classesOffered);
+        await this.requireCategories(tx, body.classesOffered ?? [], added);
+        if (Object.keys(changes).length === 0 && added.length === 0 && removed.length === 0) {
+          return { row: current, offered: before };
+        }
+        // The classes offered belong to the resource, so changing only them is a new version too.
+        await this.institutions.update(tx, id, { ...changes, ...updateStamp(principal.personId) });
+        await this.institutions.withdraw(tx, id, removed);
+        await this.institutions.offer(
+          tx,
+          added.map((categoryId) =>
+            offering(current.society_id, id, categoryId, principal.personId),
+          ),
+        );
+        const updated = await this.mustFind(tx, id);
+        const after = await this.offered(tx, id);
+        await this.record(tx, 'institution.update', updated, {
+          before: auditView(current, before),
+          after: auditView(updated, after),
         });
-      }
-      const { added, removed } = diffOffered(before, body.classesOffered);
-      await this.requireCategories(tx, body.classesOffered ?? [], added);
-      if (Object.keys(changes).length === 0 && added.length === 0 && removed.length === 0) {
-        return { row: current, offered: before };
-      }
-      // The classes offered belong to the resource, so changing only them is a new version too.
-      await this.institutions.update(tx, id, { ...changes, ...updateStamp(principal.personId) });
-      await this.institutions.withdraw(tx, id, removed);
-      await this.institutions.offer(
-        tx,
-        added.map((categoryId) => offering(current.society_id, id, categoryId, principal.personId)),
-      );
-      const updated = await this.mustFind(tx, id);
-      const after = await this.offered(tx, id);
-      await this.record(tx, 'institution.update', updated, {
-        before: auditView(current, before),
-        after: auditView(updated, after),
+        return { row: updated, offered: after };
+      })
+      .catch((error: unknown) => {
+        throw translateOfferError(error);
       });
-      return { row: updated, offered: after };
-    });
     return this.detail(row, offered);
   }
 

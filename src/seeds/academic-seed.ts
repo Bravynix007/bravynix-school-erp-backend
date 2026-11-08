@@ -152,6 +152,81 @@ export async function insertClassesOffered(
   await clearScope(db);
 }
 
+/** A section of a seeded class, by the code of its predefined section (`A`). */
+export interface SeedSection {
+  id: string;
+  predefinedCode: string;
+  capacity: number | null;
+}
+
+/** A class of an Institution, by the code of its predefined class (`C09`); its category must be one the Institution offers. */
+export interface SeedClass {
+  id: string;
+  institutionId: string;
+  predefinedCode: string;
+  streamName: string | null;
+  sections: readonly SeedSection[];
+}
+
+/** The seeded class `n` of the two-worlds list, so a test can find its row. */
+export const seededClassId = (n: number): string => seedId(3301 + n);
+
+/** Two-worlds: A1 a first and a ninth class, A2 a Nursery, B1 a Pre-University class with its stream, so every case has one. */
+const twoWorldsClasses: readonly {
+  institution: number;
+  predefinedCode: string;
+  streamName: string | null;
+  sections: readonly string[];
+}[] = [
+  { institution: 0, predefinedCode: 'C01', streamName: null, sections: ['A', 'B'] },
+  { institution: 0, predefinedCode: 'C09', streamName: null, sections: ['A'] },
+  { institution: 1, predefinedCode: 'NUR', streamName: null, sections: ['A'] },
+  { institution: 2, predefinedCode: 'PUC1', streamName: 'PCMC', sections: ['A'] },
+];
+
+export const classes: SeedClass[] = twoWorldsClasses.map((entry, n) => ({
+  id: seededClassId(n),
+  institutionId: institutions[entry.institution]!.id,
+  predefinedCode: entry.predefinedCode,
+  streamName: entry.streamName,
+  sections: entry.sections.map((code, k) => ({
+    id: seedId(3500 + n * 10 + k),
+    predefinedCode: code,
+    capacity: 40,
+  })),
+}));
+
+/**
+ * Writes classes and their sections, each in its Institution's scope; the class takes the name of the predefined
+ * class (and the stream after it). Safe to run twice: rows are keyed by their fixed IDs.
+ */
+export async function insertClasses(
+  db: Kysely<unknown>,
+  rows: readonly SeedClass[],
+): Promise<void> {
+  for (const row of rows) {
+    const societyId = await scopeTo(db, row.institutionId, `class ${row.id}`);
+    await sql`
+      insert into classes (id, society_id, institution_id, predefined_class_id, class_category_id,
+        stream_name, display_name)
+      select ${row.id}, ${societyId}, ${row.institutionId}, p.id, p.class_category_id, ${row.streamName},
+        case when ${row.streamName}::text is null then p.name else p.name || ' ' || ${row.streamName}::text end
+      from predefined_classes p where p.code = ${row.predefinedCode}
+      on conflict (id) do nothing
+    `.execute(db);
+    for (const section of row.sections) {
+      await sql`
+        insert into sections (id, society_id, institution_id, class_id, predefined_section_id,
+          display_name, capacity)
+        select ${section.id}, ${societyId}, ${row.institutionId}, ${row.id}, p.id, p.name, ${section.capacity}
+        from predefined_sections p where p.code = ${section.predefinedCode}
+        on conflict (id) do nothing
+      `.execute(db);
+    }
+  }
+  await clearScope(db);
+}
+
 /** The two-worlds scenario's years, subjects and classes offered; runs after the identity seed, which writes the Institutions. */
 export async function writeAcademicSeed(db: Kysely<unknown>): Promise<void> {
   if (db.isTransaction) return writeIn(db);
@@ -162,4 +237,5 @@ async function writeIn(tx: Kysely<unknown>): Promise<void> {
   await insertAcademicYears(tx, academicYears);
   await insertSubjects(tx, subjects);
   await insertClassesOffered(tx, classesOffered);
+  await insertClasses(tx, classes);
 }

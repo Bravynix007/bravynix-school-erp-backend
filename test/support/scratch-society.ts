@@ -26,6 +26,8 @@ export async function removeScratchSocieties(
     await sql`alter table platform_dues no force row level security`.execute(tx);
     await sql`alter table academic_years no force row level security`.execute(tx);
     await sql`alter table subjects no force row level security`.execute(tx);
+    await sql`alter table classes no force row level security`.execute(tx);
+    await sql`alter table sections no force row level security`.execute(tx);
     await sql`alter table institution_class_categories no force row level security`.execute(tx);
     await sql`
       delete from refresh_tokens where session_id in
@@ -39,6 +41,8 @@ export async function removeScratchSocieties(
     );
     await sql`delete from academic_years where society_id in (${sql.join(ids)})`.execute(tx);
     await sql`delete from subjects where society_id in (${sql.join(ids)})`.execute(tx);
+    await sql`delete from sections where society_id in (${sql.join(ids)})`.execute(tx);
+    await sql`delete from classes where society_id in (${sql.join(ids)})`.execute(tx);
     await sql`delete from institution_class_categories where society_id in (${sql.join(ids)})`.execute(
       tx,
     );
@@ -47,6 +51,8 @@ export async function removeScratchSocieties(
     await sql`alter table access_blocks force row level security`.execute(tx);
     await sql`alter table academic_years force row level security`.execute(tx);
     await sql`alter table subjects force row level security`.execute(tx);
+    await sql`alter table classes force row level security`.execute(tx);
+    await sql`alter table sections force row level security`.execute(tx);
     await sql`alter table institution_class_categories force row level security`.execute(tx);
     await sql`alter table platform_dues force row level security`.execute(tx);
     await sql`alter table institution_price_rates force row level security`.execute(tx);

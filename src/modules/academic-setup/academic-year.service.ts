@@ -5,6 +5,7 @@ import { AppException } from '../../common/http/app-exception.js';
 import { ErrorCode } from '../../common/http/error-codes.js';
 import { authorIdsOf } from '../../common/http/author-stamps.js';
 import { newId } from '../../common/ids/ids.js';
+import { changedColumns } from '../../common/http/changed-columns.js';
 import { requireVersion } from '../../common/http/require-version.js';
 import { AuditService, type AuditValues } from '../../platform/audit/index.js';
 import {
@@ -27,6 +28,7 @@ import {
 } from './academic-year.repository.js';
 import { academicYearResource, type AcademicYearResource } from './academic-year.resource.js';
 import { requireYearDates, translateYearError } from './academic-year.rules.js';
+import { institutionOfActive } from './row-context.js';
 
 /** What the audit log keeps of a year. */
 function auditView(row: AcademicYearRow): AuditValues {
@@ -116,11 +118,7 @@ export class AcademicYearService {
           ...(body.startDate === undefined ? {} : { start_date: body.startDate }),
           ...(body.endDate === undefined ? {} : { end_date: body.endDate }),
         };
-        const changes = Object.fromEntries(
-          Object.entries(wanted).filter(
-            ([column, value]) => current[column as keyof AcademicYearRow] !== value,
-          ),
-        ) as AcademicYearChanges;
+        const changes = changedColumns(current, wanted) as AcademicYearChanges;
         if (Object.keys(changes).length === 0) return current;
         requireYearDates(
           changes.start_date ?? current.start_date,
@@ -199,10 +197,9 @@ export class AcademicYearService {
    * Society, or an Institution outside their scope, and for a deactivated one).
    */
   private async contextOf(principal: Principal, id: string): Promise<InstitutionContext> {
-    const { tenant } = await this.scope.forPrincipal(principal);
-    const year = await this.database.transaction(tenant, (tx) => this.years.find(tx, id));
-    if (!year || year.status === 0) throw AppException.notFound();
-    return this.scope.requireInstitution(principal, year.institution_id);
+    return institutionOfActive(this.scope, this.database, principal, (tx) =>
+      this.years.find(tx, id),
+    );
   }
 
   /** The year, locked for the change, after the Institution's lock; 404 when it is gone or deactivated. */

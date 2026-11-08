@@ -14,6 +14,12 @@ export function isDuplicateOn(error: unknown, constraintPrefix: string): boolean
   );
 }
 
+/** A violation of kind `violationCode` (a `PgErrorCode`) of the constraint named exactly `constraint`. */
+export function isViolationOf(error: unknown, violationCode: string, constraint: string): boolean {
+  const found = (error ?? {}) as { code?: unknown; constraint?: unknown };
+  return found.code === violationCode && found.constraint === constraint;
+}
+
 /** 409 `DUPLICATE`, naming the field that is already taken (API design 8). */
 export function duplicateOn(field: string): AppException {
   return new AppException(HttpStatus.CONFLICT, ErrorCode.DUPLICATE, {
