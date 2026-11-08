@@ -104,30 +104,35 @@ describe('parseEnv', () => {
     expect(parseEnv(base).IDENTITY_HMAC_KEY).toBe(HMAC);
   });
 
-  it('refuses the Aadhaar keys published in the repository when deployed', () => {
-    const deployed = {
-      ...base,
-      NODE_ENV: 'production',
-      EMAIL_DRIVER: 'smtp',
-      STORAGE_DRIVER: 'r2',
-      SMTP_URL: 'smtp://x',
-      EMAIL_FROM: 'BravyNix <no-reply@bravynix.in>',
-      OTP_HMAC_SECRET: SECRET,
-      JWT_SIGNING_KEY: 'pem',
-      MFA_ENCRYPTION_KEY: KEY,
-    };
-    expect(parseEnv(deployed).IDENTITY_HMAC_KEY).toBe(HMAC);
-    for (const published of PUBLISHED_IDENTITY_KEYS) {
-      expect(() => parseEnv({ ...deployed, IDENTITY_ENCRYPTION_KEY: published })).toThrow(
-        /IDENTITY_ENCRYPTION_KEY/,
-      );
-      expect(() => parseEnv({ ...deployed, IDENTITY_HMAC_KEY: published })).toThrow(
-        /IDENTITY_HMAC_KEY/,
-      );
-      // In development they are fine: that is what they are for.
-      expect(parseEnv({ ...base, IDENTITY_HMAC_KEY: published }).IDENTITY_HMAC_KEY).toBe(published);
-    }
-  });
+  it.each(['staging', 'production'])(
+    'refuses the Aadhaar keys published in the repository in %s',
+    (NODE_ENV) => {
+      const deployed = {
+        ...base,
+        NODE_ENV,
+        EMAIL_DRIVER: 'smtp',
+        STORAGE_DRIVER: 'r2',
+        SMTP_URL: 'smtp://x',
+        EMAIL_FROM: 'BravyNix <no-reply@bravynix.in>',
+        OTP_HMAC_SECRET: SECRET,
+        JWT_SIGNING_KEY: 'pem',
+        MFA_ENCRYPTION_KEY: KEY,
+      };
+      expect(parseEnv(deployed).IDENTITY_HMAC_KEY).toBe(HMAC);
+      for (const published of PUBLISHED_IDENTITY_KEYS) {
+        expect(() => parseEnv({ ...deployed, IDENTITY_ENCRYPTION_KEY: published })).toThrow(
+          /IDENTITY_ENCRYPTION_KEY/,
+        );
+        expect(() => parseEnv({ ...deployed, IDENTITY_HMAC_KEY: published })).toThrow(
+          /IDENTITY_HMAC_KEY/,
+        );
+        // In development they are fine: that is what they are for.
+        expect(parseEnv({ ...base, IDENTITY_HMAC_KEY: published }).IDENTITY_HMAC_KEY).toBe(
+          published,
+        );
+      }
+    },
+  );
 
   it.each(['.env.example', 'demo.env'])(
     'lists every Aadhaar key that %s publishes, so production refuses it',
