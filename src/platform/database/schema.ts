@@ -20,6 +20,7 @@ import type {
   PredefinedSectionsTable,
   StatesTable,
 } from '../masters/masters.tables.js';
+import type { FilesTable } from '../files/files.tables.js';
 import type { NumberSequencesTable } from '../numbering/numbering.tables.js';
 import type { IdempotencyKeysTable } from '../idempotency/idempotency.tables.js';
 import type {
@@ -59,4 +60,5 @@ export interface Database {
   predefined_classes: PredefinedClassesTable;
   predefined_sections: PredefinedSectionsTable;
   designations: DesignationsTable;
+  files: FilesTable;
 }

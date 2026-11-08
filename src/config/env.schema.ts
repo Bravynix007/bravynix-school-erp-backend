@@ -84,6 +84,20 @@ export const envSchema = z
       .default('false')
       .transform((value) => value === 'true'),
 
+    /**
+     * Where files are kept (API design 15). `local` is the server's own disk, for development, tests and the demo;
+     * staging and production refuse it. `r2` (Cloudflare R2, decision of 8 Nov 2026) names the production store;
+     * its driver arrives with the deployment slice, and the Files module refuses to start with it until then.
+     */
+    STORAGE_DRIVER: z.enum(['local', 'r2']).default('local'),
+    /**
+     * Where the local file store keeps uploads (development, tests and the demo; API design 15). The real store
+     * (R2) arrives with the deployment slice.
+     */
+    STORAGE_LOCAL_DIR: z.string().min(1).default('.local-storage'),
+    /** The address clients reach this API at, for the upload and download links the local store hands out. */
+    STORAGE_LOCAL_BASE_URL: z.url().optional(),
+
     /** Below these app versions the API answers 426 APP_UPDATE_REQUIRED (API design 5.2). */
     MIN_APP_VERSION_ANDROID: semver,
     MIN_APP_VERSION_IOS: semver,
@@ -140,6 +154,14 @@ export const envSchema = z
         code: 'custom',
         path: ['MFA_ENCRYPTION_KEY'],
         message: 'is required in staging and production',
+      });
+    }
+    if (deployed && env.STORAGE_DRIVER === 'local') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['STORAGE_DRIVER'],
+        message:
+          'must not be local in staging and production: the server disk is lost on a restart',
       });
     }
     if (deployed && env.OTP_DEV_ECHO) {

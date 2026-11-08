@@ -51,6 +51,7 @@ describe('parseEnv', () => {
       ...base,
       NODE_ENV: 'staging',
       EMAIL_DRIVER: 'smtp',
+      STORAGE_DRIVER: 'r2',
       SMTP_URL: 'smtp://x',
       OTP_HMAC_SECRET: SECRET,
       JWT_SIGNING_KEY: 'pem',
@@ -65,6 +66,28 @@ describe('parseEnv', () => {
     }
   });
 
+  it('refuses the local file store when deployed, and accepts the production one', () => {
+    const deployed = {
+      ...base,
+      NODE_ENV: 'staging',
+      EMAIL_DRIVER: 'smtp',
+      SMTP_URL: 'smtp://x',
+      EMAIL_FROM: 'BravyNix <no-reply@bravynix.in>',
+      OTP_HMAC_SECRET: 'x'.repeat(32),
+      JWT_SIGNING_KEY: 'pem',
+      MFA_ENCRYPTION_KEY: Buffer.alloc(32, 1).toString('base64'),
+    };
+    expect(parseEnv(base).STORAGE_DRIVER).toBe('local');
+    for (const NODE_ENV of ['staging', 'production']) {
+      expect(() => parseEnv({ ...deployed, NODE_ENV })).toThrow(/STORAGE_DRIVER/);
+      expect(() => parseEnv({ ...deployed, NODE_ENV, STORAGE_DRIVER: 'local' })).toThrow(
+        /STORAGE_DRIVER/,
+      );
+      expect(parseEnv({ ...deployed, NODE_ENV, STORAGE_DRIVER: 'r2' }).STORAGE_DRIVER).toBe('r2');
+    }
+    expect(() => parseEnv({ ...base, STORAGE_DRIVER: 's3' })).toThrow(/STORAGE_DRIVER/);
+  });
+
   it('validates minimum app versions', () => {
     expect(() => parseEnv({ ...base, MIN_APP_VERSION_IOS: '1.2' })).toThrow(/MIN_APP_VERSION_IOS/);
     expect(parseEnv({ ...base, MIN_APP_VERSION_IOS: '1.2.0' }).MIN_APP_VERSION_IOS).toBe('1.2.0');
@@ -75,6 +98,7 @@ describe('parseEnv', () => {
       ...base,
       NODE_ENV: 'production',
       EMAIL_DRIVER: 'smtp',
+      STORAGE_DRIVER: 'r2',
       SMTP_URL: 'smtp://x',
       EMAIL_FROM: 'BravyNix <no-reply@bravynix.in>',
     };
