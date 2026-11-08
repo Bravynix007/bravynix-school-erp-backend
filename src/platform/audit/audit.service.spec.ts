@@ -156,7 +156,16 @@ describe('buildAuditRow', () => {
   });
 
   it('masks an Aadhaar number quoted in a reason, whether spaced, unspaced or hyphenated', () => {
-    for (const quoted of ['2345 6789 0124', '234567890124', '2345-6789-0124']) {
+    for (const quoted of [
+      '2345 6789 0124',
+      '234567890124',
+      '2345-6789-0124',
+      '2345  6789  0124',
+      '2345\t6789\t0124',
+      '2345\u00a06789\u00a00124',
+      '2345.6789.0124',
+      '2345/6789/0124',
+    ]) {
       const row = buildAuditRow(
         {
           action: 'identity.reveal',
