@@ -15,24 +15,33 @@ describe('the purposes of a file (API design 15.2, DDD 16.2)', () => {
   });
 
   it.each([
-    ['student photo', FilePurpose.StudentPhoto, [...IMAGE_TYPES], false, null],
-    ['staff photo', FilePurpose.StaffPhoto, [...IMAGE_TYPES], false, null],
+    ['student photo', FilePurpose.StudentPhoto, [...IMAGE_TYPES], false, false, null],
+    ['staff photo', FilePurpose.StaffPhoto, [...IMAGE_TYPES], false, false, null],
     [
       'student document',
       FilePurpose.StudentDocument,
       [...IMAGE_TYPES, 'application/pdf'],
       true,
+      true,
       null,
     ],
-    ['staff document', FilePurpose.StaffDocument, [...IMAGE_TYPES, 'application/pdf'], true, null],
-    ['import CSV', FilePurpose.ImportCsv, ['text/csv'], true, 7],
+    [
+      'staff document',
+      FilePurpose.StaffDocument,
+      [...IMAGE_TYPES, 'application/pdf'],
+      true,
+      true,
+      null,
+    ],
+    ['import CSV', FilePurpose.ImportCsv, ['text/csv'], true, true, 7],
   ])(
-    '%s: types, who uploads, whether its link is audited, how long it is kept',
-    (_name, purpose, types, audited, days) => {
+    '%s: types, who uploads, whether its link is audited, whether its name is kept, how long it is kept',
+    (_name, purpose, types, audited, keepsName, days) => {
       expect(PURPOSES[purpose]).toEqual({
         contentTypes: types,
         uploadRoles: ADMINS,
         auditedDownload: audited,
+        keepsName,
         keepDays: days,
       });
     },

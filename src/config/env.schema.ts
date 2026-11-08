@@ -92,7 +92,7 @@ export const envSchema = z
     STORAGE_DRIVER: z.enum(['local', 'r2']).default('local'),
     /**
      * Where the local file store keeps uploads (development, tests and the demo; API design 15). The real store
-     * (S3) arrives with the deployment slice.
+     * (R2) arrives with the deployment slice.
      */
     STORAGE_LOCAL_DIR: z.string().min(1).default('.local-storage'),
     /** The address clients reach this API at, for the upload and download links the local store hands out. */
