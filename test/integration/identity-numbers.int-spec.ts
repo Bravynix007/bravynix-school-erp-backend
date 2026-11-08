@@ -1,7 +1,10 @@
+import { createHmac } from 'node:crypto';
 import { Kysely, PostgresDialect, sql } from 'kysely';
 import { AppException } from '../../src/common/http/app-exception.js';
 import { newId } from '../../src/common/ids/ids.js';
 import { RequestContext } from '../../src/common/request-context/request-context.js';
+import { AuditService } from '../../src/platform/audit/index.js';
+import { SecretBox } from '../../src/platform/crypto/index.js';
 import { DatabaseService } from '../../src/platform/database/index.js';
 import { createPool } from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
@@ -27,23 +30,36 @@ describe('identity numbers: protect and reveal (DDD 15.6, API design 10.9)', () 
   const societyId = newId();
   const institutionId = newId();
 
-  /** Runs `fn` as an admin of the Society, in one transaction with a request context. */
+  /** Where a call is made: a Society and the one Institution of it the request is narrowed to. */
+  interface Place {
+    societyId: string;
+    institutionId: string;
+  }
+  const here: Place = { societyId, institutionId };
+
+  /** Runs `fn` as an admin in that place, in one transaction with a request context. */
   const asAdmin = <T>(
     personId: string,
     fn: (tx: Parameters<Parameters<DatabaseService['transaction']>[1]>[0]) => Promise<T>,
+    place: Place = here,
   ) =>
     RequestContext.run(
       {
         requestId: newId(),
         language: 'en',
         personId,
-        societyId,
+        societyId: place.societyId,
         roleCode: 3,
         displayName: 'Asha Rao',
       },
       () =>
         database.transaction(
-          { personId, societyId, institutionIds: [institutionId], roleCode: 3 },
+          {
+            personId,
+            societyId: place.societyId,
+            institutionIds: [place.institutionId],
+            roleCode: 3,
+          },
           fn,
         ),
     );
@@ -52,9 +68,22 @@ describe('identity numbers: protect and reveal (DDD 15.6, API design 10.9)', () 
     const { ciphertext, keyVersion } = numbers.protect(NUMBER, slot);
     return { ciphertext, keyVersion };
   };
-  const reveal = (admin: string, slot: IdentitySlot, reason = 'Checking the admission form') =>
-    asAdmin(admin, (tx) =>
-      numbers.reveal(tx, { slot, stored: stored(slot), institutionId, reason }),
+  const reveal = (
+    admin: string,
+    slot: IdentitySlot,
+    reason = 'Checking the admission form',
+    place: Place = here,
+  ) =>
+    asAdmin(
+      admin,
+      (tx) =>
+        numbers.reveal(tx, {
+          slot,
+          stored: stored(slot),
+          institutionId: place.institutionId,
+          reason,
+        }),
+      place,
     );
   const revealsOf = (admin: string) =>
     readAuditRows<{
@@ -122,8 +151,20 @@ describe('identity numbers: protect and reveal (DDD 15.6, API design 10.9)', () 
   it('refuses a reveal with no reason, no caller, or a key version it does not hold', async () => {
     const admin = newId();
     const slot: IdentitySlot = { table: 'staff_identities', rowId: newId() };
-    await expect(reveal(admin, slot, 'short')).rejects.toThrow(/reason/);
-    await expect(reveal(admin, slot, ' '.repeat(20))).rejects.toThrow(/reason/);
+    for (const [reason, code] of [
+      ['short', 'TOO_SHORT'],
+      ['abc' + ' '.repeat(7), 'TOO_SHORT'],
+      [' '.repeat(20), 'TOO_SHORT'],
+      ['x'.repeat(501), 'TOO_LONG'],
+    ] as const) {
+      await expect(reveal(admin, slot, reason)).rejects.toMatchObject({
+        status: 400,
+        code: 'VALIDATION_FAILED',
+        options: { errors: [expect.objectContaining({ field: 'reason', code })] },
+      });
+    }
+    expect(await reveal(admin, slot, 'x'.repeat(500))).toBe(NUMBER);
+    expect(await reveal(admin, slot, '  ten chars!  ')).toBe(NUMBER);
     await expect(
       database.transaction({ societyId, institutionIds: [institutionId] }, (tx) =>
         numbers.reveal(tx, {
@@ -134,6 +175,19 @@ describe('identity numbers: protect and reveal (DDD 15.6, API design 10.9)', () 
         }),
       ),
     ).rejects.toThrow(/caller/);
+    // A request that has its caller but whose tenant does not name them cannot be counted, so it is refused.
+    await expect(
+      RequestContext.run({ requestId: newId(), language: 'en', personId: admin, societyId }, () =>
+        database.transaction({ societyId, institutionIds: [institutionId] }, (tx) =>
+          numbers.reveal(tx, {
+            slot,
+            stored: stored(slot),
+            institutionId,
+            reason: 'Checking the form',
+          }),
+        ),
+      ),
+    ).rejects.toThrow(/tenant person/);
     await expect(
       asAdmin(admin, (tx) =>
         numbers.reveal(tx, {
@@ -144,7 +198,7 @@ describe('identity numbers: protect and reveal (DDD 15.6, API design 10.9)', () 
         }),
       ),
     ).rejects.toThrow(/version 2/);
-    expect(await revealsOf(admin)).toHaveLength(0);
+    expect(await revealsOf(admin)).toHaveLength(2);
   });
 
   it('allows 10 reveals an IST day for each admin, then 429 REVEAL_LIMIT until midnight IST', async () => {
@@ -169,6 +223,53 @@ describe('identity numbers: protect and reveal (DDD 15.6, API design 10.9)', () 
     t.clock.set('2030-04-15T18:31:00.000Z');
     expect(await reveal(admin, slot)).toBe(NUMBER);
     t.clock.set(START);
+  });
+
+  it('counts the reveals of an admin across Institutions and Societies, however the request is narrowed', async () => {
+    const admin = newId();
+    const slot: IdentitySlot = { table: 'staff_identities', rowId: newId() };
+    const second: Place = { societyId, institutionId: newId() };
+    const other: Place = { societyId: newId(), institutionId: newId() };
+    for (let i = 0; i < REVEAL_LIMIT_PER_DAY - 2; i++) await reveal(admin, slot);
+    await reveal(admin, slot, 'Checking the form', second);
+    await reveal(admin, slot, 'Checking the form', other);
+    for (const place of [here, second, other]) {
+      await expect(reveal(admin, slot, 'Checking the form', place)).rejects.toMatchObject({
+        status: 429,
+        code: 'REVEAL_LIMIT',
+      });
+    }
+    expect(await revealsOf(admin)).toHaveLength(REVEAL_LIMIT_PER_DAY);
+  });
+
+  it('counts only reveals: an admin with other entries today can still reveal', async () => {
+    const admin = newId();
+    const slot: IdentitySlot = { table: 'staff_identities', rowId: newId() };
+    const audit = t.app.get(AuditService);
+    for (let i = 0; i < REVEAL_LIMIT_PER_DAY + 2; i++) {
+      await asAdmin(admin, (tx) =>
+        audit.record(tx, { action: 'student.update', institutionId, societyId }),
+      );
+    }
+    expect(await reveal(admin, slot)).toBe(NUMBER);
+  });
+
+  it('seals with IDENTITY_ENCRYPTION_KEY and hashes with IDENTITY_HMAC_KEY, as the settings name them', () => {
+    const slot: IdentitySlot = { table: 'student_identities', rowId: newId() };
+    const protectedNumber = numbers.protect(NUMBER, slot);
+    // An independent box and hash from the settings: the app's output must match them, not its own key.
+    const box = new SecretBox(process.env.IDENTITY_ENCRYPTION_KEY, 'IDENTITY_ENCRYPTION_KEY');
+    expect(
+      box.open(protectedNumber.ciphertext, `student_identities.aadhaar:${slot.rowId}`).toString(),
+    ).toBe(NUMBER);
+    const hmac = createHmac('sha256', Buffer.from(process.env.IDENTITY_HMAC_KEY!, 'base64'));
+    expect(protectedNumber.hmac.equals(hmac.update(NUMBER).digest())).toBe(true);
+    // The two keys are not the same key.
+    expect(process.env.IDENTITY_ENCRYPTION_KEY).not.toBe(process.env.IDENTITY_HMAC_KEY);
+    const swapped = new SecretBox(process.env.IDENTITY_HMAC_KEY, 'IDENTITY_HMAC_KEY');
+    expect(() =>
+      swapped.open(protectedNumber.ciphertext, `student_identities.aadhaar:${slot.rowId}`),
+    ).toThrow();
   });
 
   it('counts reveals made at the same moment, so a burst cannot pass the limit', async () => {

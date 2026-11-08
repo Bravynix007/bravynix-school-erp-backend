@@ -1,7 +1,8 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { createHmac } from 'node:crypto';
 import { AppException } from '../../common/http/app-exception.js';
-import { ErrorCode } from '../../common/http/error-codes.js';
+import { ErrorCode, FieldErrorCode } from '../../common/http/error-codes.js';
+import { fieldError } from '../../common/validation/field-error.js';
 import { RequestContext } from '../../common/request-context/request-context.js';
 import { Clock, nextIstMidnight } from '../../common/time/clock.js';
 import { AuditService } from '../audit/index.js';
@@ -34,6 +35,21 @@ export const REVEAL_LIMIT_PER_DAY = 10;
 export const REVEAL_REASON_LENGTH = { min: 10, max: 500 } as const;
 
 const DAY_MS = 24 * 60 * 60_000;
+
+/**
+ * The reason as it is audited: trimmed, 10 to 500 characters. 400 `VALIDATION_FAILED` on `reason` otherwise, so a
+ * request that got past its DTO is still refused and never becomes a 500. STF-12 and STU-11 use this one rule.
+ */
+export function requireRevealReason(raw: string): string {
+  const reason = raw.trim();
+  const { min, max } = REVEAL_REASON_LENGTH;
+  if (reason.length >= min && reason.length <= max) return reason;
+  const tooShort = reason.length < min;
+  const code = tooShort ? FieldErrorCode.TOO_SHORT : FieldErrorCode.TOO_LONG;
+  throw AppException.validation([
+    { ...fieldError('reason', code), params: tooShort ? { min } : { max } },
+  ]);
+}
 
 /**
  * Protects the Aadhaar number of a staff member or a student (SDD ADR-09, DDD
@@ -72,20 +88,28 @@ export class IdentityNumbers {
    * The full number, for an admin who gave a reason. The entry is written in
    * the caller's transaction before the number is returned, so a reveal that
    * cannot be recorded does not happen. At most {@link REVEAL_LIMIT_PER_DAY} a
-   * day for each admin (counted from the audit log, per Society).
+   * day for each admin, counted from their own reveal entries in every Society and Institution.
+   *
+   * The caller answers with the number only after the commit, with `Cache-Control: no-store`, and never logs it
+   * (API design 10.9): this returns it inside the transaction, so a failure after this call must not echo it.
    *
    * @throws AppException 429 REVEAL_LIMIT.
    */
   async reveal(tx: Tx, request: RevealRequest): Promise<string> {
-    const reason = request.reason.trim();
-    if (reason.length < REVEAL_REASON_LENGTH.min || reason.length > REVEAL_REASON_LENGTH.max) {
-      throw new Error('A reveal needs a reason of 10 to 500 characters');
-    }
+    const reason = requireRevealReason(request.reason);
     const actor = RequestContext.current()?.personId;
     if (!actor) throw new Error('A reveal needs a signed-in caller');
     if (request.stored.keyVersion !== this.box.keyVersion) {
       throw new Error(`No key for version ${request.stored.keyVersion}`);
     }
+
+    // The count reads the actor's own entries through `audit_logs_select_own_reveals`, which needs the
+    // person in the tenant. Without it the count would be 0 and the limit silently off.
+    const { rows: tenant } = await sql<{ person: string | null }>`
+      select app_current_person_id() as person
+    `.execute(tx);
+    if (tenant[0]?.person !== actor)
+      throw new Error('A reveal needs its caller as the tenant person');
 
     // Two reveals at once must not both pass the same count.
     await sql`select pg_advisory_xact_lock(hashtextextended(${`identity.reveal:${actor}`}, 0))`.execute(

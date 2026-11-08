@@ -1,6 +1,8 @@
 /**
  * The Aadhaar number as the rules want it (DDD 15.6, API design 12): twelve
- * digits once spaces and hyphens are removed, with the Verhoeff check digit.
+ * digits once spaces and hyphens are removed, the first of them 2 to 9 (the
+ * UIDAI never issues a number that starts with 0 or 1), with the Verhoeff
+ * check digit.
  */
 
 // Verhoeff's multiplication and permutation tables (the dihedral group D5).
@@ -40,11 +42,11 @@ export function hasValidCheckDigit(digits: string): boolean {
 /**
  * The twelve digits of a number typed as "2345 6789 0124" or "2345-6789-0124",
  * or null when it is not an Aadhaar number (wrong length, other characters,
- * or a failed check digit).
+ * a first digit of 0 or 1, or a failed check digit).
  */
 export function normaliseAadhaar(raw: string): string | null {
   const digits = raw.replace(/[\s-]/g, '');
-  return /^\d{12}$/.test(digits) && hasValidCheckDigit(digits) ? digits : null;
+  return /^[2-9]\d{11}$/.test(digits) && hasValidCheckDigit(digits) ? digits : null;
 }
 
 /** "XXXX XXXX 1234" for the last four digits kept in the clear. */
