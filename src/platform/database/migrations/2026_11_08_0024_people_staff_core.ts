@@ -77,7 +77,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       where employee_code is not null and status = 1
   `.execute(db);
   await sql`
-    create unique index uq_staff_members_society_user on staff_members (society_id, user_id) where status = 1
+    create unique index uq_staff_members_society_user on staff_members (user_id, society_id) where status = 1
   `.execute(db);
   // A photo belongs to one person; a second record pointing at it is refused.
   await sql`

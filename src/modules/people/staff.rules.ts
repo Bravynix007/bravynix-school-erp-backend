@@ -13,14 +13,17 @@ export interface StaffRuleInput {
   emergencyContacts?: readonly Pick<EmergencyContactDto, 'isPrimary'>[];
 }
 
+/** The earliest year a date of birth can be, as for the year of a degree (a typing slip, not a person). */
+const EARLIEST_BIRTH = '1900-01-01';
+
 /**
- * 400 `INVALID_VALUE` on the first field that breaks a rule: the date of birth is before `today`, the resignation
- * is on or after the joining, and at most one emergency contact is primary. Dates are `YYYY-MM-DD`, so they compare
- * as text. The first problem found, in the order of the form.
+ * 400 `INVALID_VALUE` on every field that breaks a rule, in the order of the form: the date of birth is from 1900
+ * and before `today`, the resignation is on or after the joining, and at most one emergency contact is primary.
+ * Dates are `YYYY-MM-DD`, so they compare as text.
  */
 export function requireValidStaff(input: StaffRuleInput, today: string): void {
   const problems: FieldError[] = [];
-  if (input.dateOfBirth && input.dateOfBirth >= today) {
+  if (input.dateOfBirth && (input.dateOfBirth >= today || input.dateOfBirth < EARLIEST_BIRTH)) {
     problems.push(fieldError('dateOfBirth', FieldErrorCode.INVALID_VALUE));
   }
   if (input.joiningDate && input.resignationDate && input.resignationDate < input.joiningDate) {

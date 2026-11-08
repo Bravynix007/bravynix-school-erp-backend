@@ -20,8 +20,12 @@ describe('requireValidStaff', () => {
     expect(problemsOf({ dateOfBirth: null, joiningDate: null, resignationDate: null })).toEqual([]);
   });
 
-  it('wants the date of birth before today', () => {
+  it('wants the date of birth from 1900 and before today', () => {
     expect(problemsOf({ dateOfBirth: '2026-11-07' })).toEqual([]);
+    expect(problemsOf({ dateOfBirth: '1900-01-01' })).toEqual([]);
+    expect(problemsOf({ dateOfBirth: '1899-12-31' })).toEqual([
+      { field: 'dateOfBirth', code: 'INVALID_VALUE' },
+    ]);
     for (const day of ['2026-11-08', '2027-01-01']) {
       expect(problemsOf({ dateOfBirth: day })).toEqual([
         { field: 'dateOfBirth', code: 'INVALID_VALUE' },

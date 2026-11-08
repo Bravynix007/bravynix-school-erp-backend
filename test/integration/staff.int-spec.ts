@@ -675,6 +675,75 @@ describe('STF-02 to STF-05 staff (API design 9.5)', () => {
       ).toBe(200);
     });
 
+    it('saves an edit that changes only a contact’s primary flag, or only an education’s year', async () => {
+      const staff = await added({
+        educations: [{ degree: 'B.Ed', yearOfPassing: 2014 }],
+        emergencyContacts: [
+          {
+            contactName: 'Ravi',
+            phone: { countryCode: '91', number: '9876500003' },
+            isPrimary: true,
+          },
+        ],
+      });
+      const flipped = await api('patch', `/v1/staff/${staff.id}`, owner.token, {
+        version: 1,
+        emergencyContacts: [
+          {
+            contactName: 'Ravi',
+            phone: { countryCode: '91', number: '9876500003' },
+            isPrimary: false,
+          },
+        ],
+      });
+      expect(flipped.status).toBe(200);
+      const afterFlip = flipped.body.data as unknown as StaffData;
+      expect(afterFlip.version).toBe(2);
+      expect(afterFlip.emergencyContacts.map((c) => c.isPrimary)).toEqual([false]);
+      const later = await api('patch', `/v1/staff/${staff.id}`, owner.token, {
+        version: 2,
+        educations: [{ degree: 'B.Ed', yearOfPassing: 2015 }],
+      });
+      expect(later.status).toBe(200);
+      const afterYear = later.body.data as unknown as StaffData;
+      expect(afterYear.version).toBe(3);
+      expect(afterYear.educations.map((e) => e.yearOfPassing)).toEqual([2015]);
+    });
+
+    it('checks the place and the photo of an edit as it does of an add', async () => {
+      const staff = await added({ address: place });
+      const { rows } = await sql<{ id: string }>`
+        select id from cities where status = 1 and state_id <> ${place.stateId} limit 1
+      `.execute(ownerDb);
+      const elsewhere = await api('patch', `/v1/staff/${staff.id}`, owner.token, {
+        version: 1,
+        address: { cityId: rows[0]!.id },
+      });
+      expect(elsewhere.status).toBe(400);
+      expect(elsewhere.body.errors?.[0]?.field).toMatch(/^address/);
+      for (const bad of [await readyPhoto(first, 4, 1), await readyPhoto(first, 3, 2)]) {
+        const res = await api('patch', `/v1/staff/${staff.id}`, owner.token, {
+          version: 1,
+          photoFileId: bad,
+        });
+        expect(res.status).toBe(400);
+        expect(res.body.errors).toEqual([
+          expect.objectContaining({ field: 'photoFileId', code: 'INVALID_VALUE' }),
+        ]);
+      }
+      // Another Institution's file is not visible to a request narrowed to this one, as on an add.
+      const hidden = await api('patch', `/v1/staff/${staff.id}`, owner.token, {
+        version: 1,
+        photoFileId: await readyPhoto(second, 4, 2),
+      });
+      expect(hidden.status).toBe(404);
+      // Nothing was written by the refusals.
+      expect(
+        ((await api('get', `/v1/staff/${staff.id}`, owner.token)).body.data as unknown as StaffData)
+          .version,
+      ).toBe(1);
+    });
+
     it('does not let the email or the home Institution change here, and refuses null for what must have a value', async () => {
       const staff = await added();
       for (const body of [
@@ -770,6 +839,10 @@ describe('STF-02 to STF-05 staff (API design 9.5)', () => {
       await blocks.setBlock(ownerDb, societyA, first, 2, true);
       await api('delete', `/v1/staff/${staff.id}`, owner.token);
       expect(await activeBlocksOf(ownerDb, societyA, staff.person.id)).toEqual([]);
+      const { rows } = await sql<{
+        name: string | null;
+      }>`select app_society_name(${societyA}, ${staff.person.id}) as name`.execute(ownerDb);
+      expect(rows[0]?.name).toBeNull();
     });
   });
 
@@ -812,6 +885,39 @@ describe('STF-02 to STF-05 staff (API design 9.5)', () => {
           ),
         ),
       ).rejects.toThrow(/permission denied/);
+    });
+
+    it('refuse a write that names another Society, and a move of a record to one', async () => {
+      const staff = await added();
+      const otherSociety = otherOwner.contexts[0]!.societyId!;
+      const refused = /row-level security/;
+      await expect(
+        database.transaction({ societyId: societyA }, (tx) =>
+          sql`insert into staff_members (society_id, home_institution_id, user_id, first_name, class_category_id, country_code, mobile_number)
+            values (${otherSociety}, ${first}, ${staff.person.id}, 'X', ${categoryId}, '91', '9876500009')`.execute(
+            tx,
+          ),
+        ),
+      ).rejects.toThrow(refused);
+      await expect(
+        database.transaction({ societyId: societyA }, (tx) =>
+          sql`insert into staff_educations (society_id, staff_member_id, degree)
+            values (${otherSociety}, ${staff.id}, 'X')`.execute(tx),
+        ),
+      ).rejects.toThrow(refused);
+      await expect(
+        database.transaction({ societyId: societyA }, (tx) =>
+          sql`insert into staff_emergency_contacts (society_id, staff_member_id, contact_name, country_code, phone_number)
+            values (${otherSociety}, ${staff.id}, 'X', '91', '9876500003')`.execute(tx),
+        ),
+      ).rejects.toThrow(refused);
+      await expect(
+        database.transaction({ societyId: societyA }, (tx) =>
+          sql`update staff_members set society_id = ${otherSociety} where id = ${staff.id}`.execute(
+            tx,
+          ),
+        ),
+      ).rejects.toThrow(refused);
     });
 
     it('refuse what the checks forbid even if the API let it through: two primary contacts, a resignation before the joining', async () => {
