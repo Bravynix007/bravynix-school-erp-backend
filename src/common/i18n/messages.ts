@@ -85,6 +85,12 @@ const en: Catalogue = {
   CLASS_NOT_OFFERED: 'This Institution does not offer the category of this class',
   STREAM_NOT_ALLOWED: 'Only Pre-University classes have a stream',
   CATEGORY_IN_USE: 'A class of this category exists, so the Institution must keep offering it',
+  // Files (API design 15)
+  ALREADY_CONFIRMED: 'This file has already been confirmed',
+  FILE_TOO_LARGE: 'The file is larger than 5 MB',
+  FILE_TYPE_NOT_ALLOWED: 'This type of file is not allowed here',
+  UPLOAD_NOT_FOUND: 'The file has not arrived yet; send it and confirm again',
+  FILE_CHECK_FAILED: 'The file is not what it was said to be and was discarded',
   // Field codes
   REQUIRED: 'This field is required',
   FIELD_NOT_ALLOWED: 'This field is not allowed',

@@ -76,7 +76,11 @@ export async function insertSubjects(
  * table owner, so each row is written with that Institution's Society and ID set for the transaction. The
  * Society is read as Super Admin. Returns the Society.
  */
-async function scopeTo(db: Kysely<unknown>, institutionId: string, what: string): Promise<string> {
+export async function scopeTo(
+  db: Kysely<unknown>,
+  institutionId: string,
+  what: string,
+): Promise<string> {
   await sql`select set_config('app.role_code', '1', true)`.execute(db);
   const { rows } = await sql<{ society_id: string }>`
     select society_id from institutions where id = ${institutionId}
@@ -90,7 +94,7 @@ async function scopeTo(db: Kysely<unknown>, institutionId: string, what: string)
   return societyId;
 }
 
-async function clearScope(db: Kysely<unknown>): Promise<void> {
+export async function clearScope(db: Kysely<unknown>): Promise<void> {
   await sql`
     select set_config('app.society_id', '', true), set_config('app.institution_ids', '', true)
   `.execute(db);

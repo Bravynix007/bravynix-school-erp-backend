@@ -13,6 +13,7 @@ import { PlatformDashboardModule } from './modules/platform-dashboard/index.js';
 import { AuditModule } from './platform/audit/audit.module.js';
 import { DatabaseModule } from './platform/database/database.module.js';
 import { EmailModule } from './platform/email/email.module.js';
+import { FilesModule } from './platform/files/index.js';
 import { IdempotencyModule } from './platform/idempotency/idempotency.module.js';
 import { IdentityModule } from './platform/identity/identity.module.js';
 import { MastersModule } from './platform/masters/index.js';
@@ -71,8 +72,9 @@ import { TenancyModule } from './platform/tenancy/tenancy.module.js';
     MastersModule,
     IdempotencyModule,
     NumberingModule,
+    FilesModule,
     HealthModule,
-    // Platform modules (Files, Notifications, Jobs) are registered here as they are built.
+    // Platform modules (Notifications, Jobs) are registered here as they are built.
     // Business modules are registered here as they are built.
     AcademicSetupModule,
     PlatformBillingModule,

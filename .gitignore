@@ -12,3 +12,4 @@ policies.json
 .idea/
 .vscode/*
 !.vscode/extensions.json
+.local-storage/
