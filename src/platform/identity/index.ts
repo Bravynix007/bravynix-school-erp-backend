@@ -1,7 +1,12 @@
 export { IdentityModule } from './identity.module.js';
 export { BackgroundMailer } from './background-mailer.js';
 export { OtpService, type OtpRequest, type OtpRequestResult } from './otp.service.js';
-export { AccountDirectory, type GrantedPerson, type SeatKind } from './account-directory.js';
+export {
+  AccountDirectory,
+  type GrantedPerson,
+  type LinkedPerson,
+  type SeatKind,
+} from './account-directory.js';
 export { maskEmail } from './account-rules.js';
 export { NewPersonDto } from './account.dto.js';
 export {

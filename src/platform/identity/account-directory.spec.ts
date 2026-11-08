@@ -236,3 +236,70 @@ describe('AccountDirectory.welcome', () => {
     );
   });
 });
+
+describe('AccountDirectory.linkStaff', () => {
+  it('makes a Pending account for a new email, taking no seat', async () => {
+    const t = build(undefined);
+    const linked = await t.directory.linkStaff(
+      tx,
+      { email: 'New@Example.com', firstName: 'Ravi' },
+      'admin-1',
+    );
+    expect(t.insertPending).toHaveBeenCalledWith(
+      tx,
+      { email: 'new@example.com', firstName: 'Ravi', lastName: null },
+      'admin-1',
+    );
+    expect(linked).toMatchObject({ id: 'new-1', created: true });
+    expect(t.lockSeats).not.toHaveBeenCalled();
+    expect(t.insertGrant).not.toHaveBeenCalled();
+  });
+
+  it('links the person an email already belongs to, and makes no second account', async () => {
+    const t = build(user());
+    const linked = await t.directory.linkStaff(tx, { email: 'asha@example.com' }, 'admin-1');
+    expect(linked).toEqual({
+      id: 'user-1',
+      email: 'asha@example.com',
+      displayName: 'Asha',
+      created: false,
+    });
+    expect(t.insertPending).not.toHaveBeenCalled();
+  });
+
+  it('refuses a Super Admin, under the separation lock', async () => {
+    const t = build(user());
+    t.holdsActiveGrant.mockResolvedValue(true);
+    await expect(
+      t.directory.linkStaff(tx, { email: 'asha@example.com' }, 'admin-1'),
+    ).rejects.toMatchObject({ status: 409, code: 'ROLE_CONFLICT' });
+    expect(t.lockRoleSeparation).toHaveBeenCalled();
+    expect(t.holdsActiveGrant).toHaveBeenCalledWith(tx, 'user-1', [1]);
+  });
+
+  it.each([
+    [2, 'ACCOUNT_BLOCKED'],
+    [0, 'INVALID_STATE'],
+  ])('refuses a person whose account status is %s with 409 %s', async (status, code) => {
+    const t = build(user({ account_status: status }));
+    await expect(
+      t.directory.linkStaff(tx, { email: 'asha@example.com' }, 'admin-1'),
+    ).rejects.toMatchObject({ status: 409, code });
+  });
+
+  it('ends only the sessions in the role and Society, and says why', async () => {
+    const t = build();
+    expect(await t.directory.endRoleSessions(tx, 'user-1', 4, 'society-1', now)).toBe(2);
+    expect(t.endRoleSessions).toHaveBeenCalledWith(tx, 'user-1', 4, 'society-1', 4, now);
+  });
+
+  it('sends the welcome for a role without a seat', () => {
+    const t = build();
+    t.directory.welcomeAs({ email: 'asha@example.com' }, 4, 'Sunrise Trust');
+    expect(t.send.mock.calls[0]![0]).toMatchObject({
+      to: 'asha@example.com',
+      template: 'welcome',
+      variables: { role: 'Teacher', society: 'Sunrise Trust' },
+    });
+  });
+});

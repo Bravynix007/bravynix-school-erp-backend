@@ -74,4 +74,16 @@ export class PersonDirectory {
     }
     return people;
   }
+
+  /** The sign-in emails of these people, by ID, for the one screen that shows a staff member's login to an admin. */
+  async emails(ids: readonly string[], db: Db = this.database.db): Promise<Map<string, string>> {
+    const wanted = [...new Set(ids)];
+    if (wanted.length === 0) return new Map();
+    const users = await db
+      .selectFrom('users')
+      .select(['id', 'email'])
+      .where('id', 'in', wanted)
+      .execute();
+    return new Map(users.map((user) => [user.id, user.email]));
+  }
 }

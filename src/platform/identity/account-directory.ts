@@ -17,6 +17,15 @@ export interface SeatKind {
   societyId: string | null;
 }
 
+/** A person found or made for a staff record: no seat, because roles 4 and 5 are derived from their records. */
+export interface LinkedPerson {
+  id: string;
+  email: string;
+  displayName: string;
+  /** False when the email already belonged to a person, who is now also staff here. */
+  created: boolean;
+}
+
 export interface GrantedPerson {
   id: string;
   email: string;
@@ -92,6 +101,62 @@ export class AccountDirectory {
     };
   }
 
+  /**
+   * The person for a staff record, by email (PRD 5.2, one email is one person): a new email makes a Pending
+   * account, an email that already belongs to a person is that person. A blocked or inactive person cannot be
+   * given a record; a Super Admin is never staff (409 `ROLE_CONFLICT`). Runs in the caller's transaction; the
+   * welcome mail is the caller's, after the commit.
+   */
+  async linkStaff(tx: Tx, person: NewPersonDto, by: string): Promise<LinkedPerson> {
+    const email = person.email.toLowerCase();
+    const existing = await this.accounts.findByEmail(tx, email);
+    if (existing) {
+      requireCanHoldRole(existing);
+      await this.accounts.lockRoleSeparation(tx);
+      if (await this.accounts.holdsActiveGrant(tx, existing.id, [RoleCode.SuperAdmin])) {
+        throw AppException.conflict(ErrorCode.ROLE_CONFLICT);
+      }
+    }
+    const holder =
+      existing ??
+      (await this.accounts
+        .insertPending(
+          tx,
+          { email, firstName: person.firstName ?? null, lastName: person.lastName ?? null },
+          by,
+        )
+        .catch((error: unknown) => {
+          throw emailInUse(error);
+        }));
+    return {
+      id: holder.id,
+      email: holder.email,
+      displayName: personName(holder.first_name, holder.last_name) ?? holder.email,
+      created: existing === undefined,
+    };
+  }
+
+  /**
+   * Ends the person's sessions that act in this role in this Society, so they lose access on the next call (a
+   * staff record deactivated or blocked). Returns how many ended.
+   */
+  endRoleSessions(
+    tx: Tx,
+    userId: string,
+    roleCode: RoleCode,
+    societyId: string,
+    now: Date,
+  ): Promise<number> {
+    return this.accounts.endRoleSessions(
+      tx,
+      userId,
+      roleCode,
+      societyId,
+      SessionEndReason.AccessRevoked,
+      now,
+    );
+  }
+
   /** Under the separation lock, so a concurrent grant of the other role sees this one or is seen by it. */
   private async requireSeparateRoles(
     tx: Tx,
@@ -143,6 +208,11 @@ export class AccountDirectory {
 
   /** The welcome mail, after the commit; a failed send never undoes the grant. */
   welcome(person: GrantedPerson, kind: SeatKind, societyName: string | null): void {
-    this.mailer.send(welcomeEmail(person.email, RoleName[kind.roleCode], societyName));
+    this.welcomeAs(person, kind.roleCode, societyName);
+  }
+
+  /** The same mail for a role that has no seat, such as a teacher. */
+  welcomeAs(person: { email: string }, roleCode: RoleCode, societyName: string | null): void {
+    this.mailer.send(welcomeEmail(person.email, RoleName[roleCode], societyName));
   }
 }
