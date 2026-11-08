@@ -24,11 +24,14 @@ function build(institutions: string[] = [], granted: string[] = [], blocks: Acti
   const adminInstitutionIds = vi
     .fn<GrantDirectory['adminInstitutionIds']>()
     .mockResolvedValue(granted);
+  const staffInstitutionIds = vi
+    .fn<GrantDirectory['staffInstitutionIds']>()
+    .mockResolvedValue(granted);
   const service = new ScopeService(
     { activeInstitutionIds, activeBlocks } as unknown as TenancyRepository,
-    { adminInstitutionIds } as unknown as GrantDirectory,
+    { adminInstitutionIds, staffInstitutionIds } as unknown as GrantDirectory,
   );
-  return { service, activeInstitutionIds, activeBlocks, adminInstitutionIds };
+  return { service, activeInstitutionIds, activeBlocks, adminInstitutionIds, staffInstitutionIds };
 }
 
 const staffOfA2: ActiveBlock = { section: BlockSection.Staff, institutionId: 'a2' };
@@ -57,6 +60,26 @@ describe('ScopeService.forPrincipal', () => {
       null,
     );
     expect(t.adminInstitutionIds).not.toHaveBeenCalled();
+    expect(t.staffInstitutionIds).not.toHaveBeenCalled();
+  });
+
+  it('gives a teacher the active home Institutions of their staff records, and no others', async () => {
+    const t = build(['a1'], ['a1', 'gone']);
+    const scope = await t.service.forPrincipal(principal({ roleCode: 4 }));
+    expect(scope.institutions).toEqual([{ id: 'a1', staffBlocked: false }]);
+    expect(t.staffInstitutionIds).toHaveBeenCalledWith('person-1', 'society-1');
+    expect(t.activeInstitutionIds).toHaveBeenCalledWith(
+      { personId: 'person-1', roleCode: 4, societyId: 'society-1' },
+      'society-1',
+      ['a1', 'gone'],
+    );
+    expect(t.adminInstitutionIds).not.toHaveBeenCalled();
+  });
+
+  it('leaves a teacher at an Institution whose staff are blocked out of the tenant scope', async () => {
+    const t = build(['a1', 'a2'], ['a1', 'a2'], [staffOfA2]);
+    const scope = await t.service.forPrincipal(principal({ roleCode: 4 }));
+    expect(scope.tenant.institutionIds).toEqual(['a1']);
   });
 
   it('gives an Institution Admin only the Institutions they hold a grant for', async () => {
@@ -68,7 +91,6 @@ describe('ScopeService.forPrincipal', () => {
   });
 
   it.each([
-    ['a teacher', principal({ roleCode: 4 })],
     ['a parent', principal({ roleCode: 5, societyId: null })],
     ['Super Admin', principal({ roleCode: 1, societyId: null })],
     ['a session with no context', principal({ roleCode: null, societyId: null })],
@@ -146,7 +168,7 @@ describe('ScopeService.requireInstitution', () => {
   it('answers 404 for an Institution outside the scope, whatever the reason', async () => {
     const t = build(['a1']);
     expect(await status(() => t.service.requireInstitution(principal(), 'elsewhere'))).toBe(404);
-    expect(await status(() => t.service.requireInstitution(principal({ roleCode: 4 }), 'a1'))).toBe(
+    expect(await status(() => t.service.requireInstitution(principal({ roleCode: 5 }), 'a1'))).toBe(
       404,
     );
   });

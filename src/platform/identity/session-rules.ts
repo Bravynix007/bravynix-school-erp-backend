@@ -16,9 +16,9 @@ export const CONSOLE_SESSION_MS = 12 * 3600 * 1000;
  */
 export const TOUCH_AFTER_MS = 5 * 60 * 1000;
 
-/** Roles 1 to 3 exist only by a grant row; 4 and 5 come from staff and guardian records (slice B5). */
+/** Roles 1 to 3 exist by a grant row and role 4 by a staff record; role 5 comes from a guardian link (a later slice). */
 function roleNeedsGrant(roleCode: number): boolean {
-  return roleCode >= 1 && roleCode <= 3;
+  return roleCode >= 1 && roleCode <= 4;
 }
 
 /**

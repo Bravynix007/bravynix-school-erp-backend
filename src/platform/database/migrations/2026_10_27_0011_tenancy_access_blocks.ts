@@ -18,8 +18,8 @@ import { sql, type Kysely } from 'kysely';
  * Both definer functions answer only for a Society where the named person holds
  * an active grant, so a caller cannot read the blocks or the name of any other
  * Society through them. `app_society_name` (0010) gets the same rule here.
- * Teachers and parents hold no grant until the People module; it widens the
- * rule then.
+ * Teachers hold a staff record instead of a grant; migration 0024 widens the
+ * rule for them. Parents follow with the guardians.
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
   // The guard function reads the pause columns, so it goes first or every

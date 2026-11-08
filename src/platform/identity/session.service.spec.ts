@@ -259,8 +259,8 @@ describe('SessionService.refresh', () => {
     expect(t.repository.hasGrant).toHaveBeenCalledWith(expect.anything(), 'user-1', 2, 'soc-1');
   });
 
-  it('does not look for a grant when there is no context or the role is a staff or parent role', async () => {
-    for (const activeRoleCode of [null, 4, 5]) {
+  it('does not look for a grant when there is no context or the role is a parent role', async () => {
+    for (const activeRoleCode of [null, 5]) {
       const t = build({ found: { session: { activeRoleCode, activeSocietyId: null } } });
       await t.service.refresh(PRESENTED, 'mobile');
       expect(t.repository.hasGrant).not.toHaveBeenCalled();

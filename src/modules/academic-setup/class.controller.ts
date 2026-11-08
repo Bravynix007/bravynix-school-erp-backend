@@ -34,7 +34,7 @@ export class ClassController {
     roles: READERS,
     scope: 'institution',
     operationId: 'CLS-01',
-    rule: 'The active classes of an Institution in the caller’s scope, with section counts; staff and parents reach them when the People module lands',
+    rule: 'The active classes of an Institution in the caller’s scope, with section counts; a teacher reaches them (parents when guardians exist)',
   })
   @Get()
   list(

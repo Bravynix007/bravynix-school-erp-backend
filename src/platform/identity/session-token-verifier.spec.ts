@@ -144,16 +144,24 @@ describe('SessionTokenVerifier.verify', () => {
     }
   });
 
-  it('ends a session whose grant was revoked, but only for roles that need a grant', async () => {
+  it('ends a session whose grant was revoked, but only for roles that need a grant or a record', async () => {
     const revoked = await build({ granted: false });
     expect(await fail(revoked.verifier.verify(revoked.token))).toMatchObject({
       options: { details: { reason: 'admin_revoked' } },
     });
-    for (const activeRoleCode of [null, 4, 5]) {
+    for (const activeRoleCode of [null, 5]) {
       const t = await build({ session: row({ activeRoleCode }), granted: false });
       await t.verifier.verify(t.token);
       expect(t.repository.hasGrant).not.toHaveBeenCalled();
     }
+  });
+
+  it('ends a teacher’s session when the staff record is gone, by the same check', async () => {
+    const t = await build({ session: row({ activeRoleCode: 4 }), granted: false });
+    expect(await fail(t.verifier.verify(t.token))).toMatchObject({
+      options: { details: { reason: 'admin_revoked' } },
+    });
+    expect(t.repository.hasGrant).toHaveBeenCalled();
   });
 
   it('moves the idle deadline of a mobile session only after five minutes', async () => {

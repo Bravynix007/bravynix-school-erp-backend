@@ -27,7 +27,7 @@ export class AcademicYearController {
     roles: [...WRITERS, RoleCode.TeacherStaff, RoleCode.StudentParent],
     scope: 'institution',
     operationId: 'AY-01',
-    rule: 'The active years of an Institution in the caller’s scope; staff and parents reach one when the People module lands',
+    rule: 'The active years of an Institution in the caller’s scope; a teacher reaches the one they work at; parents reach one when guardians exist',
   })
   @Get()
   list(
