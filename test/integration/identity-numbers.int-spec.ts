@@ -126,6 +126,14 @@ describe('identity numbers: protect and reveal (DDD 15.6, API design 10.9)', () 
     expect(JSON.stringify(rows)).not.toContain(NUMBER);
   });
 
+  it('keeps a number quoted in the reason masked in the audit entry', async () => {
+    const admin = newId();
+    const slot: IdentitySlot = { table: 'staff_identities', rowId: newId() };
+    expect(await reveal(admin, slot, `Parent says ${NUMBER} is on the form`)).toBe(NUMBER);
+    const [row] = await revealsOf(admin);
+    expect(row?.reason).toBe('Parent says XXXX XXXX 0124 is on the form');
+  });
+
   it('opens a number only for the row it was sealed for, and writes nothing when it does not open', async () => {
     const admin = newId();
     const slot: IdentitySlot = { table: 'student_identities', rowId: newId() };

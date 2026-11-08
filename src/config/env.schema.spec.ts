@@ -134,6 +134,35 @@ describe('parseEnv', () => {
     },
   );
 
+  it('compares keys by the bytes they decode to, not by how they are spelt', () => {
+    const published = PUBLISHED_IDENTITY_KEYS[2]!;
+    const spellings = [
+      published.replace(/=+$/, ''),
+      published.replaceAll('+', '-').replaceAll('/', '_'),
+      `${published}\n`,
+    ];
+    const deployed = {
+      ...base,
+      NODE_ENV: 'production',
+      EMAIL_DRIVER: 'smtp',
+      STORAGE_DRIVER: 'r2',
+      SMTP_URL: 'smtp://x',
+      EMAIL_FROM: 'BravyNix <no-reply@bravynix.in>',
+      OTP_HMAC_SECRET: SECRET,
+      JWT_SIGNING_KEY: 'pem',
+      MFA_ENCRYPTION_KEY: KEY,
+    };
+    for (const spelt of spellings) {
+      expect(() => parseEnv({ ...deployed, IDENTITY_HMAC_KEY: spelt })).toThrow(
+        /IDENTITY_HMAC_KEY/,
+      );
+      // The same key spelt two ways is still one key.
+      expect(() =>
+        parseEnv({ ...base, IDENTITY_ENCRYPTION_KEY: published, IDENTITY_HMAC_KEY: spelt }),
+      ).toThrow(/IDENTITY_HMAC_KEY/);
+    }
+  });
+
   it.each(['.env.example', 'demo.env'])(
     'lists every Aadhaar key that %s publishes, so production refuses it',
     (file) => {
