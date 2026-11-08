@@ -8,7 +8,7 @@ import type { IdentityRepository, LoginUser } from './identity.repository.js';
 import type { LockedMfaChallenge, MfaRepository, TotpFactor } from './mfa.repository.js';
 import { MFA_LIMITS, MfaService } from './mfa.service.js';
 import type { PublicCallLimiter } from './public-call-limiter.js';
-import { SecretBox } from './secret-box.js';
+import { SecretBox } from '../crypto/index.js';
 import type { SessionRepository } from './session.repository.js';
 import { TokenService } from './token.service.js';
 import { stepAt, totpAt } from './totp.js';
@@ -17,7 +17,7 @@ import { stepAt, totpAt } from './totp.js';
 const SECRET = 'a'.repeat(32);
 const USER_ID = '0192b0e0-0000-7000-8000-000000000001';
 const tokens = new TokenService(undefined, 'k1', SECRET);
-const box = new SecretBox(undefined);
+const box = new SecretBox(undefined, 'TEST_KEY');
 const authenticator = Buffer.from('12345678901234567890');
 
 const user = (patch: Partial<LoginUser> = {}): LoginUser => ({

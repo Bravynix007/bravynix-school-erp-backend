@@ -91,6 +91,9 @@ const en: Catalogue = {
   FILE_TYPE_NOT_ALLOWED: 'This type of file is not allowed here',
   UPLOAD_NOT_FOUND: 'The file has not arrived yet; send it and confirm again',
   FILE_CHECK_FAILED: 'The file is not what it was said to be and was discarded',
+  // Identity numbers (API design 10.8, 10.9)
+  INVALID_AADHAAR: 'This is not a valid Aadhaar number',
+  REVEAL_LIMIT: 'You have reached the limit of ID reveals for today; try again tomorrow',
   // Field codes
   REQUIRED: 'This field is required',
   FIELD_NOT_ALLOWED: 'This field is not allowed',

@@ -18,6 +18,11 @@ const semver = z
   .regex(/^\d+\.\d+\.\d+$/, 'must look like 1.4.2')
   .optional();
 
+/** A 32-byte key, base64 encoded (`openssl rand -base64 32`). */
+const base64Key32 = z
+  .string()
+  .refine((key) => Buffer.from(key, 'base64').length === 32, '32 bytes, base64 encoded');
+
 /**
  * Every environment variable the API reads. The process refuses to start when
  * one is missing or malformed, so a bad deploy fails at boot, not at the first
@@ -68,10 +73,18 @@ export const envSchema = z
      * Secrets Manager; elsewhere a key is made at start, so enrolled
      * authenticators do not survive a restart.
      */
-    MFA_ENCRYPTION_KEY: z
-      .string()
-      .refine((key) => Buffer.from(key, 'base64').length === 32, '32 bytes, base64 encoded')
-      .optional(),
+    MFA_ENCRYPTION_KEY: base64Key32.optional(),
+    /**
+     * 32 random bytes, base64: encrypts the Aadhaar numbers of staff and students at rest (AES-256-GCM, DDD 15.6).
+     * Required everywhere and never made at start: a number sealed with a key that is gone cannot be read again.
+     * Losing it loses every stored number, so it is backed up like the database.
+     */
+    IDENTITY_ENCRYPTION_KEY: base64Key32,
+    /**
+     * 32 random bytes, base64: the key of the keyed hash that finds a second record for the same Aadhaar
+     * (DDD 15.6). Required everywhere and separate from the encryption key; changing it breaks duplicate checks.
+     */
+    IDENTITY_HMAC_KEY: base64Key32,
     /** Names the signing key in the token header, so a rotated key can be told apart. */
     JWT_KEY_ID: z.string().min(1).max(40).default('k1'),
     /**
@@ -154,6 +167,13 @@ export const envSchema = z
         code: 'custom',
         path: ['MFA_ENCRYPTION_KEY'],
         message: 'is required in staging and production',
+      });
+    }
+    if (env.IDENTITY_ENCRYPTION_KEY === env.IDENTITY_HMAC_KEY) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['IDENTITY_HMAC_KEY'],
+        message: 'must differ from IDENTITY_ENCRYPTION_KEY: one key never does two jobs',
       });
     }
     if (deployed && env.STORAGE_DRIVER === 'local') {

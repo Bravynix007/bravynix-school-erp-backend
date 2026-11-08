@@ -14,6 +14,9 @@ process.env.CORS_ORIGINS ??= 'http://localhost:3001';
 process.env.OTP_HMAC_SECRET ??= 'test-only-secret-not-used-anywhere-else-0123456789';
 // A fixed fake key (32 zero-ish bytes), for tests only, so a secret sealed by one app instance opens in the next.
 process.env.MFA_ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString('base64');
+// Fixed fake keys for the Aadhaar numbers, for tests only, so a number sealed in one run opens in the next.
+process.env.IDENTITY_ENCRYPTION_KEY ??= Buffer.alloc(32, 11).toString('base64');
+process.env.IDENTITY_HMAC_KEY ??= Buffer.alloc(32, 13).toString('base64');
 process.env.OTP_DEV_ECHO = 'false';
 // Uploads of the local file store go to a throwaway directory.
 process.env.STORAGE_LOCAL_DIR ??= `${tmpdir()}/erp-test-storage`;

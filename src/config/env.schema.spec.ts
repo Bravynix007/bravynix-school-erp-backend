@@ -1,6 +1,12 @@
 import { parseEnv } from './env.schema.js';
 
-const base = { DATABASE_URL: 'postgres://u:p@localhost:5432/db' };
+const ENCRYPTION = Buffer.alloc(32, 3).toString('base64');
+const HMAC = Buffer.alloc(32, 5).toString('base64');
+const base = {
+  DATABASE_URL: 'postgres://u:p@localhost:5432/db',
+  IDENTITY_ENCRYPTION_KEY: ENCRYPTION,
+  IDENTITY_HMAC_KEY: HMAC,
+};
 const SECRET = 'unit-test-secret-not-used-anywhere-0123456789';
 const KEY = Buffer.alloc(32, 9).toString('base64');
 
@@ -86,6 +92,15 @@ describe('parseEnv', () => {
       expect(parseEnv({ ...deployed, NODE_ENV, STORAGE_DRIVER: 'r2' }).STORAGE_DRIVER).toBe('r2');
     }
     expect(() => parseEnv({ ...base, STORAGE_DRIVER: 's3' })).toThrow(/STORAGE_DRIVER/);
+  });
+
+  it('needs both Aadhaar keys, 32 bytes each and different, in every environment', () => {
+    const { IDENTITY_ENCRYPTION_KEY, IDENTITY_HMAC_KEY: _hmac, ...bare } = base;
+    expect(() => parseEnv(bare)).toThrow(/IDENTITY_ENCRYPTION_KEY/);
+    expect(() => parseEnv({ ...bare, IDENTITY_ENCRYPTION_KEY })).toThrow(/IDENTITY_HMAC_KEY/);
+    expect(() => parseEnv({ ...base, IDENTITY_HMAC_KEY: 'c2hvcnQ=' })).toThrow(/IDENTITY_HMAC_KEY/);
+    expect(() => parseEnv({ ...base, IDENTITY_HMAC_KEY: ENCRYPTION })).toThrow(/IDENTITY_HMAC_KEY/);
+    expect(parseEnv(base).IDENTITY_HMAC_KEY).toBe(HMAC);
   });
 
   it('validates minimum app versions', () => {
