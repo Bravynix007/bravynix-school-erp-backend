@@ -106,9 +106,9 @@ export class SchoolKit {
     return staff;
   }
 
-  /** Signs the person in and chooses the context; returns the token that acts in it. */
-  async actingAs(email: string, roleCode: number, societyId: string) {
-    const login = await signInMobile(this.t, email);
+  /** Signs the person in (from `ip`, when sign-ins must not share an address) and chooses the context; returns the token that acts in it. */
+  async actingAs(email: string, roleCode: number, societyId: string, ip?: string) {
+    const login = await signInMobile(this.t, email, ip);
     const chosen = await this.api('post', '/v1/auth/context', login.accessToken, {
       roleCode,
       societyId,

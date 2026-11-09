@@ -92,3 +92,14 @@ describe('StaffRepository.page', () => {
     },
   );
 });
+
+describe('StaffRepository.activeHomeIds', () => {
+  it('asks for each home of an active record once', async () => {
+    const { tx, queries } = recorder();
+    await new StaffRepository().activeHomeIds(tx).catch(() => undefined);
+    expect(queries).toHaveLength(1);
+    expect(queries[0]!.sql).toMatch(/^select distinct "home_institution_id" from "staff_members"/);
+    expect(queries[0]!.sql).toContain('"status" = $1');
+    expect(queries[0]!.parameters).toEqual([1]);
+  });
+});

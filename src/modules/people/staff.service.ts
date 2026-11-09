@@ -18,6 +18,7 @@ import {
   insertStamp,
   isDuplicateOn,
   updateStamp,
+  type TenantContext,
   type Tx,
 } from '../../platform/database/index.js';
 import { FileDirectory, FilePurpose } from '../../platform/files/index.js';
@@ -178,13 +179,16 @@ export class StaffService {
    * STF-02: adds a staff member at an Institution the caller reaches, and the login by email: a new email makes a
    * Pending account, an email that belongs to a person is that person. The welcome mail goes after the commit.
    * 409 `EMPLOYEE_ID_TAKEN`, 409 `DUPLICATE` (the person already has an active record in the Society), 409
-   * `ROLE_CONFLICT` (a Super Admin), 409 `ACCOUNT_BLOCKED`.
+   * `ROLE_CONFLICT` (a Super Admin), 409 `ACCOUNT_BLOCKED`. When the Society Owner adds a person whose active
+   * record is based at a deactivated Institution, that record ends first (as STF-05 ends it) and this one starts.
    */
   async create(principal: Principal, body: CreateStaffDto): Promise<StaffResource> {
     const context = await this.scope.requireInstitution(principal, body.homeInstitutionId);
     requireValidStaff(body, this.clock.todayIst());
+    const closed = await this.closedHomes(principal, context.tenant);
+    const tenant = { ...context.tenant, institutionIds: [context.institutionId, ...closed] };
     const created = await this.database
-      .transaction(context.tenant, async (tx) => {
+      .transaction(tenant, async (tx) => {
         await this.requireReferences(
           tx,
           {
@@ -201,6 +205,11 @@ export class StaffService {
           principal.personId,
         );
         const id = newId();
+        // A record whose home was closed is replaced by this one: it ends as STF-05 ends it (decided with B4c2).
+        const old = await this.staff.activeOfUser(tx, person.id);
+        if (old && closed.includes(old.home_institution_id)) {
+          await this.end(tx, principal, old, { replacedBy: id });
+        }
         const row = await this.staff.insert(tx, {
           id,
           society_id: context.societyId,
@@ -428,44 +437,76 @@ export class StaffService {
     await this.database.transaction(context.tenant, async (tx) => {
       const current = await this.context.lockedActive(tx, id);
       requireNotSelf(principal.personId, current.user_id);
-      const row = await this.staff.update(tx, id, {
-        status: 0,
-        ...updateStamp(principal.personId),
-      });
-      const now = this.clock.now();
-      // The access belongs to the record: its Admin grants end with it, and the Admin sessions with them.
-      const admin = await this.accounts.revokeAdminAccessOfStaff(
-        tx,
-        id,
-        principal.personId,
-        STAFF_DEACTIVATED,
-        now,
-      );
-      const assignments = await this.assignments.endAllOfStaff(tx, id, principal.personId, now);
-      const ended =
-        admin.sessionsEnded +
-        (await this.accounts.endRoleSessions(
-          tx,
-          current.user_id,
-          RoleCode.TeacherStaff,
-          current.society_id,
-          now,
-        ));
-      await this.audit.record(tx, {
-        action: 'staff.deactivated',
-        institutionId: row.home_institution_id,
-        entityType: 'staff_member',
-        entityId: id,
-        before: { status: current.status },
-        after: {
-          status: 0,
-          sessionsEnded: ended,
-          adminRevoked: admin.institutionIds,
-          assignmentsEnded: assignments.classTeacher + assignments.teaching,
-        },
-      });
+      await this.end(tx, principal, current, {});
     });
     return { id, status: 0 };
+  }
+
+  /**
+   * Ends an active record: status 0, its Admin grants and the Admin sessions, its assignments and its Teacher /
+   * Staff sessions. STF-05 and the replacement made by STF-02 both end a record this way, and audit it as
+   * `staff.deactivated`; `extra` adds to the entry's `after`.
+   */
+  private async end(
+    tx: Tx,
+    principal: Principal,
+    current: StaffRow,
+    extra: Record<string, unknown>,
+  ): Promise<void> {
+    const row = await this.staff.update(tx, current.id, {
+      status: 0,
+      ...updateStamp(principal.personId),
+    });
+    const now = this.clock.now();
+    // The access belongs to the record: its Admin grants end with it, and the Admin sessions with them.
+    const admin = await this.accounts.revokeAdminAccessOfStaff(
+      tx,
+      current.id,
+      principal.personId,
+      STAFF_DEACTIVATED,
+      now,
+    );
+    const assignments = await this.assignments.endAllOfStaff(
+      tx,
+      current.id,
+      principal.personId,
+      now,
+    );
+    const ended =
+      admin.sessionsEnded +
+      (await this.accounts.endRoleSessions(
+        tx,
+        current.user_id,
+        RoleCode.TeacherStaff,
+        current.society_id,
+        now,
+      ));
+    await this.audit.record(tx, {
+      action: 'staff.deactivated',
+      institutionId: row.home_institution_id,
+      entityType: 'staff_member',
+      entityId: current.id,
+      before: { status: current.status },
+      after: {
+        status: 0,
+        sessionsEnded: ended,
+        adminRevoked: admin.institutionIds,
+        assignmentsEnded: assignments.classTeacher + assignments.teaching,
+        ...extra,
+      },
+    });
+  }
+
+  /**
+   * The homes that are closed while an active record is still based there. Only a Society Owner may replace such a
+   * record (STF-02), so for anyone else there are none; the transaction then reaches these Institutions too, which
+   * the caller's scope leaves out because they are deactivated.
+   */
+  private async closedHomes(principal: Principal, tenant: TenantContext): Promise<string[]> {
+    if (principal.roleCode !== RoleCode.SocietyOwner) return [];
+    return this.database.transaction(tenant, async (tx) =>
+      this.institutions.inactive(tx, await this.staff.activeHomeIds(tx)),
+    );
   }
 
   /**
