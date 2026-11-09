@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { sql, type Selectable, type Updateable } from 'kysely';
+import { RoleCode } from '../../common/auth/roles.js';
 import { newId } from '../../common/ids/ids.js';
 import type { Db, Tx } from '../database/index.js';
 import { AccountStatus } from './auth-codes.js';
@@ -66,7 +67,7 @@ export class AccountRepository {
    * record linked by email, and an email change. So a Super Admin grant and an Owner grant
    * for the same person cannot both pass the separation check (PRD 5.2), and an access
    * given to the person an email names cannot land on a person whose email is being
-   * changed at the same moment (STF-13). Taken after the seat lock and last of all. It is
+   * changed at the same moment (STF-13). Taken after any seat lock and before any person row is locked. It is
    * one lock, not one per person: onboarding grants several people in one
    * transaction, and per-person locks taken in the operator's order deadlock
    * when two onboardings name the same people in the opposite order. Grants are
@@ -130,6 +131,58 @@ export class AccountRepository {
       .executeTakeFirst();
   }
 
+  /** Gives the person Institution Admin access to one Institution, tied to their staff record (API design 10.5). */
+  async insertAdminGrant(
+    tx: Tx,
+    grant: {
+      userId: string;
+      societyId: string;
+      institutionId: string;
+      staffMemberId: string;
+      by: string;
+      now: Date;
+    },
+  ): Promise<GrantRow> {
+    return tx
+      .insertInto('role_assignments')
+      .values({
+        user_id: grant.userId,
+        role_code: RoleCode.InstitutionAdmin,
+        society_id: grant.societyId,
+        institution_id: grant.institutionId,
+        staff_member_id: grant.staffMemberId,
+        created_by: grant.by,
+        created_at: grant.now,
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+  }
+
+  /**
+   * The Institution Admin grants of a staff record, one for each Institution: the active ones, and with
+   * `restorable` also those revoked for a reason a reactivation restores, which are access that can come back.
+   */
+  async adminGrantsOfStaff(
+    tx: Tx,
+    staffMemberId: string,
+    filter: { institutionId?: string; restorable?: readonly string[] } = {},
+  ): Promise<GrantRow[]> {
+    const { institutionId, restorable } = filter;
+    let query = tx
+      .selectFrom('role_assignments')
+      .selectAll()
+      .where('staff_member_id', '=', staffMemberId)
+      .where('role_code', '=', RoleCode.InstitutionAdmin);
+    query =
+      restorable === undefined
+        ? query.where('revoked_at', 'is', null)
+        : query.where((eb) =>
+            eb.or([eb('revoked_at', 'is', null), eb('revoke_reason', 'in', restorable)]),
+          );
+    if (institutionId !== undefined) query = query.where('institution_id', '=', institutionId);
+    return query.execute();
+  }
+
   async holdsActiveGrant(db: Db, userId: string, roleCodes: readonly number[]): Promise<boolean> {
     const row = await db
       .selectFrom('role_assignments')
@@ -170,6 +223,16 @@ export class AccountRepository {
       .updateTable('role_assignments')
       .set({ revoked_at: now, revoked_by: by, revoke_reason: reason })
       .where('id', '=', grantId)
+      .execute();
+  }
+
+  /** Gives revoked grants a new reason and keeps when and by whom they were revoked. */
+  async restampRevokeReason(tx: Tx, grantIds: string[], reason: string): Promise<void> {
+    if (grantIds.length === 0) return;
+    await tx
+      .updateTable('role_assignments')
+      .set({ revoke_reason: reason })
+      .where('id', 'in', grantIds)
       .execute();
   }
 

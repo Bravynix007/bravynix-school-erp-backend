@@ -58,6 +58,12 @@ import {
 } from './staff.resource.js';
 import { requireValidStaff, staffAuditView } from './staff.rules.js';
 
+/** Why dormant Admin access ended when the Owner took its Institution away from the record (STF-10). */
+const STAFF_INSTITUTION_REMOVED = 'staff_institution_removed';
+
+/** Why the Admin grants of a staff record were revoked when the record was deactivated. */
+const STAFF_DEACTIVATED = 'staff_deactivated';
+
 const EMPLOYEE_CODE = 'uq_staff_members_home_employee_code';
 const ONE_RECORD_PER_PERSON = 'uq_staff_members_society_user';
 const ONE_PHOTO_PER_PERSON = 'uq_staff_members_photo';
@@ -407,8 +413,9 @@ export class StaffService {
 
   /**
    * STF-05: deactivates a staff member; nothing is deleted, and the Employee ID is free again. Their sessions as
-   * staff end at once. Admin access and teaching assignments end here too once those exist. 404 when already
-   * deactivated; 409 `CANNOT_ACT_ON_SELF` for the caller's own record.
+   * staff end at once, and so do their Institution Admin grants and the Admin sessions (INS-10). Teaching assignments
+   * end here too once those exist. 404 when already deactivated; 409 `CANNOT_ACT_ON_SELF` for the caller's own
+   * record.
    */
   async deactivate(principal: Principal, id: string): Promise<{ id: string; status: 0 }> {
     const context = await this.contextOf(principal, id);
@@ -419,20 +426,31 @@ export class StaffService {
         status: 0,
         ...updateStamp(principal.personId),
       });
-      const ended = await this.accounts.endRoleSessions(
+      const now = this.clock.now();
+      // The access belongs to the record: its Admin grants end with it, and the Admin sessions with them.
+      const admin = await this.accounts.revokeAdminAccessOfStaff(
         tx,
-        current.user_id,
-        RoleCode.TeacherStaff,
-        current.society_id,
-        this.clock.now(),
+        id,
+        principal.personId,
+        STAFF_DEACTIVATED,
+        now,
       );
+      const ended =
+        admin.sessionsEnded +
+        (await this.accounts.endRoleSessions(
+          tx,
+          current.user_id,
+          RoleCode.TeacherStaff,
+          current.society_id,
+          now,
+        ));
       await this.audit.record(tx, {
         action: 'staff.deactivated',
         institutionId: row.home_institution_id,
         entityType: 'staff_member',
         entityId: id,
         before: { status: current.status },
-        after: { status: 0, sessionsEnded: ended },
+        after: { status: 0, sessionsEnded: ended, adminRevoked: admin.institutionIds },
       });
     });
     return { id, status: 0 };
@@ -442,7 +460,8 @@ export class StaffService {
    * STF-06: blocks the staff role of an active staff member in this Society (DDD D-02). Their sessions as Institution
    * Admin or Teacher / Staff here end at once (`SESSION_ENDED`, reason `blocked`) and the role answers 403
    * `ACCESS_BLOCKED` until STF-07; their account, their other Societies and their Owner role are untouched. 404 when
-   * deactivated; 409 `INVALID_STATE` when already blocked; 409 `CANNOT_ACT_ON_SELF` for the caller's own record.
+   * deactivated; 409 `INVALID_STATE` when already blocked; 409 `CANNOT_ACT_ON_SELF` for the caller's own record; 403 for an
+   * Institution Admin caller when the person is an Institution Admin (only a Society Owner may, API design 6.8).
    */
   async block(principal: Principal, id: string): Promise<StaffResource> {
     return this.setBlock(principal, id, true);
@@ -463,6 +482,7 @@ export class StaffService {
     return this.database.transaction(context.tenant, async (tx) => {
       const current = await this.lockedActive(tx, id);
       requireNotSelf(principal.personId, current.user_id);
+      await this.requireOwnerForAdmin(tx, principal, id);
       if ((current.access_blocked_at !== null) === blocked) {
         throw AppException.conflict(ErrorCode.INVALID_STATE);
       }
@@ -484,6 +504,17 @@ export class StaffService {
       });
       return this.resourceOf(tx, row);
     });
+  }
+
+  /**
+   * Only a Society Owner may block or unblock a staff member who is an Institution Admin, so an Admin cannot stop a
+   * fellow Admin or undo an Owner's block (API design 6.8). Held access counts, active or restorable. Read under the
+   * record lock the caller holds, so it cannot race a grant (INS-09). 403, with nothing changed.
+   */
+  private async requireOwnerForAdmin(tx: Tx, principal: Principal, id: string): Promise<void> {
+    if (principal.roleCode === RoleCode.SocietyOwner) return;
+    const { active, dormant } = await this.accounts.adminAccessOfStaff(tx, id);
+    if (active.length + dormant.length > 0) throw AppException.forbidden();
   }
 
   /**
@@ -545,6 +576,15 @@ export class StaffService {
       const current = await this.lockedActive(tx, id);
       const before = await this.staff.institutionIds(tx, id);
       if (sameIds(before, body.institutionIds)) return this.resourceOf(tx, current);
+      // An Admin of an Institution must keep it as an extra Institution: revoke the access first.
+      const access = await this.accounts.adminAccessOfStaff(tx, id);
+      const kept = new Set(body.institutionIds);
+      const dropped = (institutionIds: string[]) =>
+        institutionIds.filter(
+          (institutionId) => before.includes(institutionId) && !kept.has(institutionId),
+        );
+      if (dropped(access.active).length > 0)
+        throw AppException.conflict(ErrorCode.ADMIN_ACCESS_HELD);
       const added = body.institutionIds.flatMap((institutionId, index) =>
         before.includes(institutionId)
           ? []
@@ -554,6 +594,13 @@ export class StaffService {
       if (home)
         throw AppException.validation([fieldError(home.field, FieldErrorCode.INVALID_VALUE)]);
       await this.institutions.requireActive(tx, added);
+      // Access that the deactivation of an Institution took away goes with the Institution the Owner drops.
+      const released = await this.accounts.releaseDormantAdminAccess(
+        tx,
+        id,
+        dropped(access.dormant),
+        STAFF_INSTITUTION_REMOVED,
+      );
       await this.staff.replaceInstitutions(
         tx,
         id,
@@ -570,7 +617,10 @@ export class StaffService {
         entityType: 'staff_member',
         entityId: id,
         before: { institutionIds: before },
-        after: { institutionIds: body.institutionIds.toSorted() },
+        after: {
+          institutionIds: body.institutionIds.toSorted(),
+          ...(released.length > 0 ? { adminRevoked: released } : {}),
+        },
       });
       return this.resourceOf(tx, current);
     });
@@ -596,6 +646,7 @@ export class StaffService {
         requireVersion(current, body.version);
         requireNotSelf(principal.personId, current.user_id);
         const change = await this.accounts.changeStaffEmail(tx, {
+          staffMemberId: id,
           userId: current.user_id,
           societyId: current.society_id,
           email: body.email,
@@ -624,6 +675,7 @@ export class StaffService {
             personId: row.user_id,
             outcome: change.kind,
             sessionsEnded: change.sessionsEnded,
+            ...(change.kind === 'moved' ? { adminRevoked: change.adminRevoked } : {}),
           },
         });
         const society = await this.institutions.names(tx, [row.home_institution_id]);

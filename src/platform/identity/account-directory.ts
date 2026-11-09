@@ -2,8 +2,13 @@ import { Injectable } from '@nestjs/common';
 import { RoleCode, RoleName } from '../../common/auth/roles.js';
 import { AppException } from '../../common/http/app-exception.js';
 import { ErrorCode } from '../../common/http/error-codes.js';
-import { duplicateOn, type Tx } from '../database/index.js';
-import { emailChangedEmail, staffMovedEmail, welcomeEmail } from './account-email.js';
+import { duplicateOn, isDuplicateOn, type Tx } from '../database/index.js';
+import {
+  adminAccessEmail,
+  emailChangedEmail,
+  staffMovedEmail,
+  welcomeEmail,
+} from './account-email.js';
 import type { NewPersonDto } from './account.dto.js';
 import { AccountRepository, type AccountRow } from './account.repository.js';
 import { requireNotSelf } from '../../common/auth/require-not-self.js';
@@ -23,6 +28,12 @@ export const RESTORABLE_REVOKE_REASONS = [
   'society_deactivated',
   'institution_deactivated',
 ] as const;
+
+/** Why the Admin grants of a staff record were revoked when the record moved to another person. */
+export const STAFF_MOVED = 'staff_moved';
+
+/** The unique index that allows one active grant of a role in a place to a person. */
+const ACTIVE_GRANT_INDEX = 'uq_role_assignments_active_grant';
 
 /** The seat kinds of the platform (PRD decision 19): the role code, and the Society for an Owner. */
 export interface SeatKind {
@@ -46,10 +57,18 @@ export interface LinkedPerson {
 export type StaffEmailChange =
   | { kind: 'unchanged'; person: LinkedPerson }
   | { kind: 'edited'; person: LinkedPerson; previousEmail: string; sessionsEnded: number }
-  | { kind: 'moved'; person: LinkedPerson; previousEmail: string; sessionsEnded: number };
+  | {
+      kind: 'moved';
+      person: LinkedPerson;
+      previousEmail: string;
+      sessionsEnded: number;
+      /** The Institutions the old person administered through the record: that access ends with the move. */
+      adminRevoked: string[];
+    };
 
 export interface StaffEmailChangeRequest {
-  /** The person the record belongs to now, and the Society it is in. */
+  /** The record, the person it belongs to now, and the Society it is in. */
+  staffMemberId: string;
   userId: string;
   societyId: string;
   email: string;
@@ -59,6 +78,23 @@ export interface StaffEmailChangeRequest {
   now: Date;
   /** Passes or refuses an existing person the record would move to (for one who already has a record here). */
   vet: (personId: string) => Promise<void>;
+}
+
+/** What an Institution Admin grant is for: the person, the record and the place, and who gave it. */
+export interface AdminGrantRequest {
+  userId: string;
+  societyId: string;
+  institutionId: string;
+  staffMemberId: string;
+  by: string;
+  now: Date;
+}
+
+/** The person an access was given to or taken from, for the audit entry and the mail. */
+export interface AccessHolder {
+  id: string;
+  email: string;
+  displayName: string;
 }
 
 export interface GrantedPerson {
@@ -187,15 +223,30 @@ export class AccountDirectory {
     from: AccountRow,
     to: LinkedPerson,
   ): Promise<StaffEmailChange> {
-    const sessionsEnded = await this.accounts.endRoleSessions(
+    const admin = await this.revokeAdminAccessOfStaff(
       tx,
-      from.id,
-      RoleCode.TeacherStaff,
-      request.societyId,
-      SessionEndReason.AccessRevoked,
+      request.staffMemberId,
+      request.by,
+      STAFF_MOVED,
       request.now,
     );
-    return { kind: 'moved', person: to, previousEmail: from.email, sessionsEnded };
+    const sessionsEnded =
+      admin.sessionsEnded +
+      (await this.accounts.endRoleSessions(
+        tx,
+        from.id,
+        RoleCode.TeacherStaff,
+        request.societyId,
+        SessionEndReason.AccessRevoked,
+        request.now,
+      ));
+    return {
+      kind: 'moved',
+      person: to,
+      previousEmail: from.email,
+      sessionsEnded,
+      adminRevoked: admin.institutionIds,
+    };
   }
 
   /**
@@ -350,13 +401,174 @@ export class AccountDirectory {
     return ended;
   }
 
-  /** Under the separation lock, so a concurrent grant of the other role sees this one or is seen by it. */
+  /**
+   * Gives a staff member Institution Admin access to one Institution (INS-09). The grant is tied to the record, and
+   * `userId` is the person the record belongs to; the caller has the record locked, so the person cannot change under
+   * it. 409 `ALREADY_ADMIN` when they already hold it; a person whose account is blocked or inactive is refused
+   * (409 `ACCOUNT_BLOCKED`, 409 `INVALID_STATE`). Returns the person for the mail, which is `announceAdminAccess`,
+   * after the commit.
+   */
+  async grantInstitutionAdmin(tx: Tx, request: AdminGrantRequest): Promise<AccessHolder> {
+    // The identity lock comes before the person row is locked, as everywhere else: the other order deadlocks.
+    await this.requireSeparateRoles(tx, request.userId, RoleCode.InstitutionAdmin);
+    const person = await this.accounts.findById(tx, request.userId, true);
+    if (!person) throw AppException.notFound();
+    requireCanHoldRole(person);
+    try {
+      await this.accounts.insertAdminGrant(tx, request);
+    } catch (error) {
+      throw isDuplicateOn(error, ACTIVE_GRANT_INDEX)
+        ? AppException.conflict(ErrorCode.ALREADY_ADMIN)
+        : error;
+    }
+    return accessHolder(person);
+  }
+
+  /**
+   * Takes an Institution Admin grant of a staff record away (INS-10) and ends the person's sessions acting as
+   * Institution Admin in the Society, so they lose it on the next call. 404 when the record holds no active grant for
+   * the Institution. Returns the person and how many sessions ended.
+   */
+  async revokeInstitutionAdmin(
+    tx: Tx,
+    staffMemberId: string,
+    institutionId: string,
+    by: string,
+    reason: string,
+    now: Date,
+  ): Promise<AccessHolder & { sessionsEnded: number }> {
+    const [grant] = await this.accounts.adminGrantsOfStaff(tx, staffMemberId, { institutionId });
+    if (!grant) throw AppException.notFound();
+    await this.accounts.revokeGrant(tx, grant.id, by, reason, now);
+    const person = await this.accounts.findById(tx, grant.user_id);
+    return {
+      ...accessHolder(person!),
+      sessionsEnded: await this.endAdminSessions(tx, grant.user_id, grant.society_id!, now),
+    };
+  }
+
+  /**
+   * The Institutions a staff record holds Institution Admin access to (`active`), and those it held it to until the
+   * Institution was deactivated, which a reactivation could give back (`dormant`) (STF-06, STF-10).
+   */
+  async adminAccessOfStaff(
+    tx: Tx,
+    staffMemberId: string,
+  ): Promise<{ active: string[]; dormant: string[] }> {
+    const grants = await this.accounts.adminGrantsOfStaff(tx, staffMemberId, {
+      restorable: RESTORABLE_REVOKE_REASONS,
+    });
+    const at = (dormant: boolean) =>
+      grants
+        .filter((grant) => (grant.revoked_at !== null) === dormant)
+        .map((grant) => grant.institution_id!);
+    return { active: at(false), dormant: at(true) };
+  }
+
+  /**
+   * Ends the dormant Admin access of a record at these Institutions, because the Owner takes the Institutions away
+   * from the record (STF-10): the grants keep their revoke time and take the new reason, so no reactivation gives
+   * them back. Returns the Institutions it ended access at.
+   */
+  async releaseDormantAdminAccess(
+    tx: Tx,
+    staffMemberId: string,
+    institutionIds: readonly string[],
+    reason: string,
+  ): Promise<string[]> {
+    const grants = await this.accounts.adminGrantsOfStaff(tx, staffMemberId, {
+      restorable: RESTORABLE_REVOKE_REASONS,
+    });
+    const dormant = grants.filter(
+      (grant) => grant.revoked_at !== null && institutionIds.includes(grant.institution_id!),
+    );
+    await this.accounts.restampRevokeReason(
+      tx,
+      dormant.map((grant) => grant.id),
+      reason,
+    );
+    return dormant.map((grant) => grant.institution_id!);
+  }
+
+  /**
+   * Every Institution Admin grant of a staff record ends, because the record does (STF-05) or moves to another person
+   * (STF-13): the access belongs to the record. The person's admin sessions in the Society end with them. A grant
+   * that was already revoked with its Institution is dormant, not gone, and a reactivation would give it back to
+   * someone who has left: it keeps its revoke time and takes the new reason, so nothing restores it. Returns the
+   * Institutions the record held access to and how many sessions ended; nothing happens for a record with no grant.
+   */
+  async revokeAdminAccessOfStaff(
+    tx: Tx,
+    staffMemberId: string,
+    by: string,
+    reason: string,
+    now: Date,
+  ): Promise<{ institutionIds: string[]; sessionsEnded: number }> {
+    const grants = await this.accounts.adminGrantsOfStaff(tx, staffMemberId, {
+      restorable: RESTORABLE_REVOKE_REASONS,
+    });
+    const active = grants.filter((grant) => grant.revoked_at === null);
+    for (const grant of active) await this.accounts.revokeGrant(tx, grant.id, by, reason, now);
+    await this.accounts.restampRevokeReason(
+      tx,
+      grants.filter((grant) => grant.revoked_at !== null).map((grant) => grant.id),
+      reason,
+    );
+    const first = active[0];
+    return {
+      institutionIds: grants.map((grant) => grant.institution_id!),
+      sessionsEnded: first
+        ? await this.endAdminSessions(tx, first.user_id, first.society_id!, now)
+        : 0,
+    };
+  }
+
+  /** The mail after the commit: the person is told their admin access was given or taken away. */
+  announceAdminAccess(
+    person: { email: string },
+    kind: 'granted' | 'revoked',
+    institutionName: string,
+  ): void {
+    this.mailer.send(adminAccessEmail(person.email, kind, institutionName));
+  }
+
+  private endAdminSessions(tx: Tx, userId: string, societyId: string, now: Date): Promise<number> {
+    return this.accounts.endRoleSessions(
+      tx,
+      userId,
+      RoleCode.InstitutionAdmin,
+      societyId,
+      SessionEndReason.AccessRevoked,
+      now,
+    );
+  }
+
+  /**
+   * Under the separation lock, so a concurrent grant of the other role sees this one or is seen by it. A Super
+   * Admin and a Society Owner are never one person, and a Super Admin is never staff or an Institution Admin (PRD
+   * 5.2, API design 6.6): the platform team holds no school role. Dormant school access counts when a Super Admin is
+   * made, because it returns with its Institution or Society.
+   */
   private async requireSeparateRoles(tx: Tx, userId: string, roleCode: RoleCode): Promise<void> {
     await this.accounts.lockRoleSeparation(tx);
     const other = roleCode === RoleCode.SuperAdmin ? RoleCode.SocietyOwner : RoleCode.SuperAdmin;
-    if (await this.accounts.holdsActiveGrant(tx, userId, [other])) {
+    if (
+      (await this.accounts.holdsActiveGrant(tx, userId, [other])) ||
+      (roleCode === RoleCode.SuperAdmin && (await this.holdsSchoolRole(tx, userId)))
+    ) {
       throw AppException.conflict(ErrorCode.ROLE_CONFLICT);
     }
+  }
+
+  private async holdsSchoolRole(tx: Tx, userId: string): Promise<boolean> {
+    return (
+      (await this.accounts.holdsGrantOrRestorable(
+        tx,
+        userId,
+        [RoleCode.InstitutionAdmin],
+        RESTORABLE_REVOKE_REASONS,
+      )) || (await this.sessions.holdsStaffRecord(tx, userId))
+    );
   }
 
   /**
@@ -404,6 +616,14 @@ export class AccountDirectory {
   welcomeAs(person: { email: string }, roleCode: RoleCode, societyName: string | null): void {
     this.mailer.send(welcomeEmail(person.email, RoleName[roleCode], societyName));
   }
+}
+
+function accessHolder(person: AccountRow): AccessHolder {
+  return {
+    id: person.id,
+    email: person.email,
+    displayName: personName(person.first_name, person.last_name) ?? person.email,
+  };
 }
 
 function linked(holder: AccountRow, created: boolean): LinkedPerson {

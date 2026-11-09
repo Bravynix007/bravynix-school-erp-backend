@@ -140,6 +140,15 @@ function build(current: StaffRow | null = staff()) {
     previousEmail: 'meera@example.com',
     sessionsEnded: 2,
   });
+  const revokeAdminAccessOfStaff = vi
+    .fn<AccountDirectory['revokeAdminAccessOfStaff']>()
+    .mockResolvedValue({ institutionIds: [], sessionsEnded: 0 });
+  const adminAccessOfStaff = vi
+    .fn<AccountDirectory['adminAccessOfStaff']>()
+    .mockResolvedValue({ active: [], dormant: [] });
+  const releaseDormantAdminAccess = vi
+    .fn<AccountDirectory['releaseDormantAdminAccess']>()
+    .mockResolvedValue([]);
   const announceStaffEmail = vi.fn<AccountDirectory['announceStaffEmail']>(() => {
     order.push('announce');
   });
@@ -171,6 +180,9 @@ function build(current: StaffRow | null = staff()) {
       welcomeAs,
       endRoleSessions,
       endStaffAccessSessions,
+      revokeAdminAccessOfStaff,
+      adminAccessOfStaff,
+      releaseDormantAdminAccess,
       changeStaffEmail,
       announceStaffEmail,
     } as unknown as AccountDirectory,
@@ -218,6 +230,9 @@ function build(current: StaffRow | null = staff()) {
     welcomeAs,
     endRoleSessions,
     endStaffAccessSessions,
+    revokeAdminAccessOfStaff,
+    adminAccessOfStaff,
+    releaseDormantAdminAccess,
     replaceSubjects,
     replaceInstitutions,
     subjectIds,
@@ -492,6 +507,29 @@ describe('StaffService', () => {
       });
     });
 
+    it('takes the Admin grants of the record with it and counts their sessions', async () => {
+      const t = build();
+      t.revokeAdminAccessOfStaff.mockResolvedValue({
+        institutionIds: ['institution-1', 'institution-2'],
+        sessionsEnded: 3,
+      });
+      await t.service.deactivate(owner, 'staff-1');
+      expect(t.revokeAdminAccessOfStaff).toHaveBeenCalledWith(
+        expect.anything(),
+        'staff-1',
+        'owner-1',
+        'staff_deactivated',
+        expect.any(Date),
+      );
+      expect(t.record.mock.calls[0]![1]).toMatchObject({
+        after: {
+          status: 0,
+          sessionsEnded: 5,
+          adminRevoked: ['institution-1', 'institution-2'],
+        },
+      });
+    });
+
     it('refuses the caller’s own record and a record already deactivated', async () => {
       const own = build(staff({ user_id: 'owner-1' }));
       expect(await fail(own.service.deactivate(owner, 'staff-1'))).toEqual({
@@ -542,12 +580,14 @@ describe('StaffService', () => {
         person,
         previousEmail: 'meera@example.com',
         sessionsEnded: 1,
+        adminRevoked: ['institution-1'],
       };
       t.changeStaffEmail.mockResolvedValue(moved);
       await t.service.changeEmail(owner, 'staff-1', request);
+      expect(t.changeStaffEmail.mock.calls[0]![1]).toMatchObject({ staffMemberId: 'staff-1' });
       expect(t.update.mock.calls[0]![2]).toEqual({ user_id: 'user-2', updated_by: 'owner-1' });
       expect(t.record.mock.calls[0]![1]).toMatchObject({
-        after: { personId: 'user-2', outcome: 'moved' },
+        after: { personId: 'user-2', outcome: 'moved', adminRevoked: ['institution-1'] },
       });
     });
 
@@ -590,7 +630,13 @@ describe('StaffService', () => {
       t.hasActiveRecord.mockResolvedValue(true);
       t.changeStaffEmail.mockImplementation(async (_tx, change) => {
         await change.vet('user-2');
-        return { kind: 'moved', person, previousEmail: 'meera@example.com', sessionsEnded: 0 };
+        return {
+          kind: 'moved',
+          person,
+          previousEmail: 'meera@example.com',
+          sessionsEnded: 0,
+          adminRevoked: [],
+        };
       });
       expect(await fail(t.service.changeEmail(owner, 'staff-1', request))).toEqual({
         status: 409,
@@ -608,6 +654,7 @@ describe('StaffService', () => {
         person,
         previousEmail: 'm@example.com',
         sessionsEnded: 0,
+        adminRevoked: [],
       });
       t.update.mockRejectedValue(unique('uq_staff_members_society_user'));
       expect(await fail(t.service.changeEmail(owner, 'staff-1', request))).toEqual({
@@ -668,6 +715,64 @@ describe('StaffService', () => {
       });
       expect(blocked.update).not.toHaveBeenCalled();
       expect(open.update).not.toHaveBeenCalled();
+    });
+
+    describe('a staff member who is an Institution Admin', () => {
+      const admin = { ...owner, personId: 'admin-1', roleCode: 3 } as Principal;
+
+      it.each([
+        ['block', staff()],
+        ['unblock', staff({ access_blocked_at: new Date(), access_blocked_by: 'owner-1' })],
+      ] as const)(
+        'is for the Society Owner only: an Institution Admin gets 403 on %s, and nothing changes',
+        async (action, record) => {
+          const t = build(record);
+          t.adminAccessOfStaff.mockResolvedValue({ active: ['institution-1'], dormant: [] });
+          expect(await fail(t.service[action](admin, 'staff-1'))).toEqual({
+            status: 403,
+            code: 'FORBIDDEN',
+          });
+          expect(t.adminAccessOfStaff).toHaveBeenCalledWith(expect.anything(), 'staff-1');
+          expect(t.update).not.toHaveBeenCalled();
+          expect(t.endStaffAccessSessions).not.toHaveBeenCalled();
+          expect(t.record).not.toHaveBeenCalled();
+        },
+      );
+
+      it('counts access that went dormant with its Institution: 403, with nothing written', async () => {
+        const t = build();
+        t.adminAccessOfStaff.mockResolvedValue({ active: [], dormant: ['institution-2'] });
+        expect(await fail(t.service.block(admin, 'staff-1'))).toEqual({
+          status: 403,
+          code: 'FORBIDDEN',
+        });
+        expect(t.update).not.toHaveBeenCalled();
+        expect(t.endStaffAccessSessions).not.toHaveBeenCalled();
+        expect(t.record).not.toHaveBeenCalled();
+      });
+
+      it('lets the Society Owner block and unblock them, without asking whether they are an Admin', async () => {
+        const t = build();
+        t.adminAccessOfStaff.mockResolvedValue({ active: ['institution-1'], dormant: [] });
+        await t.service.block(owner, 'staff-1');
+        expect(t.update).toHaveBeenCalledTimes(1);
+        expect(t.adminAccessOfStaff).not.toHaveBeenCalled();
+      });
+
+      it('lets an Institution Admin block a staff member who is not an Admin', async () => {
+        const t = build();
+        await t.service.block(admin, 'staff-1');
+        expect(t.update).toHaveBeenCalledTimes(1);
+      });
+
+      it('answers the caller’s own record with 409 first', async () => {
+        const t = build(staff({ user_id: 'admin-1' }));
+        t.adminAccessOfStaff.mockResolvedValue({ active: ['institution-1'], dormant: [] });
+        expect(await fail(t.service.block(admin, 'staff-1'))).toEqual({
+          status: 409,
+          code: 'CANNOT_ACT_ON_SELF',
+        });
+      });
     });
 
     it('refuses the caller’s own record and a deactivated one', async () => {
@@ -758,6 +863,63 @@ describe('StaffService', () => {
         before: { institutionIds: ['institution-2'] },
         after: { institutionIds: ['institution-2', 'institution-3'] },
       });
+    });
+
+    it('refuses to drop an Institution the person is an Admin of, and keeps the ones that stay', async () => {
+      const t = build();
+      t.institutionIds.mockResolvedValue(['institution-2', 'institution-3']);
+      t.adminAccessOfStaff.mockResolvedValue({ active: ['institution-3'], dormant: [] });
+      expect(
+        await fail(
+          t.service.setInstitutions(owner, 'staff-1', { institutionIds: ['institution-2'] }),
+        ),
+      ).toEqual({ status: 409, code: 'ADMIN_ACCESS_HELD' });
+      expect(t.replaceInstitutions).not.toHaveBeenCalled();
+      await t.service.setInstitutions(owner, 'staff-1', {
+        institutionIds: ['institution-3', 'institution-4'],
+      });
+      expect(t.replaceInstitutions).toHaveBeenCalledTimes(1);
+    });
+
+    it('ends dormant Admin access at a dropped Institution, keeps it where the Institution stays, and says so in the audit entry', async () => {
+      const t = build();
+      t.institutionIds.mockResolvedValue(['institution-2', 'institution-3']);
+      t.adminAccessOfStaff.mockResolvedValue({
+        active: [],
+        dormant: ['institution-2', 'institution-3'],
+      });
+      t.releaseDormantAdminAccess.mockResolvedValue(['institution-2']);
+      await t.service.setInstitutions(owner, 'staff-1', { institutionIds: ['institution-3'] });
+      expect(t.releaseDormantAdminAccess).toHaveBeenCalledWith(
+        expect.anything(),
+        'staff-1',
+        ['institution-2'],
+        'staff_institution_removed',
+      );
+      expect(t.record.mock.calls[0]![1]).toMatchObject({
+        after: { institutionIds: ['institution-3'], adminRevoked: ['institution-2'] },
+      });
+    });
+
+    it('writes nothing, not even the dormant access, when active Admin access holds a dropped Institution', async () => {
+      const t = build();
+      t.institutionIds.mockResolvedValue(['institution-2', 'institution-3']);
+      t.adminAccessOfStaff.mockResolvedValue({
+        active: ['institution-3'],
+        dormant: ['institution-2'],
+      });
+      expect(
+        await fail(t.service.setInstitutions(owner, 'staff-1', { institutionIds: [] })),
+      ).toEqual({ status: 409, code: 'ADMIN_ACCESS_HELD' });
+      expect(t.releaseDormantAdminAccess).not.toHaveBeenCalled();
+    });
+
+    it('lets an Admin of the home Institution change the extras, as the home is never in the list', async () => {
+      const t = build();
+      t.institutionIds.mockResolvedValue(['institution-2']);
+      t.adminAccessOfStaff.mockResolvedValue({ active: ['institution-1'], dormant: [] });
+      await t.service.setInstitutions(owner, 'staff-1', { institutionIds: ['institution-3'] });
+      expect(t.replaceInstitutions).toHaveBeenCalledTimes(1);
     });
 
     it('writes nothing for the same list', async () => {

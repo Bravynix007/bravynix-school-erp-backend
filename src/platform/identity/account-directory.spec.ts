@@ -24,6 +24,10 @@ function build(existing?: AccountRow, taken: number[] = []) {
   const lockSeats = vi.fn<AccountRepository['lockSeats']>().mockResolvedValue();
   const lockRoleSeparation = vi.fn<AccountRepository['lockRoleSeparation']>().mockResolvedValue();
   const holdsActiveGrant = vi.fn<AccountRepository['holdsActiveGrant']>().mockResolvedValue(false);
+  const holdsGrantOrRestorable = vi
+    .fn<AccountRepository['holdsGrantOrRestorable']>()
+    .mockResolvedValue(false);
+  const holdsStaffRecord = vi.fn<SessionRepository['holdsStaffRecord']>().mockResolvedValue(false);
   const findByEmail = vi.fn<AccountRepository['findByEmail']>().mockResolvedValue(existing);
   const insertPending = vi
     .fn<AccountRepository['insertPending']>()
@@ -39,6 +43,7 @@ function build(existing?: AccountRow, taken: number[] = []) {
       lockSeats,
       lockRoleSeparation,
       holdsActiveGrant,
+      holdsGrantOrRestorable,
       findByEmail,
       insertPending,
       activeGrant,
@@ -47,7 +52,7 @@ function build(existing?: AccountRow, taken: number[] = []) {
       revokeGrant,
       endRoleSessions,
     } as unknown as AccountRepository,
-    {} as SessionRepository,
+    { holdsStaffRecord } as unknown as SessionRepository,
     {} as MfaRepository,
     { send } as unknown as BackgroundMailer,
   );
@@ -56,6 +61,8 @@ function build(existing?: AccountRow, taken: number[] = []) {
     lockSeats,
     lockRoleSeparation,
     holdsActiveGrant,
+    holdsGrantOrRestorable,
+    holdsStaffRecord,
     findByEmail,
     insertPending,
     activeGrant,
@@ -123,6 +130,37 @@ describe('AccountDirectory.grant', () => {
     ).rejects.toMatchObject({ status: 409, code: 'ROLE_CONFLICT' });
     expect(t.holdsActiveGrant).toHaveBeenCalledWith(tx, 'user-1', [held]);
     expect(t.insertGrant).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['an Institution Admin, active or dormant', 'holdsGrantOrRestorable'],
+    ['staff, in any Society, active or dormant', 'holdsStaffRecord'],
+  ] as const)(
+    'refuses %s as Super Admin: the platform team holds no school role',
+    async (_name, which) => {
+      const t = build(user());
+      t[which].mockResolvedValue(true);
+      await expect(
+        t.directory.grant(tx, superAdmin, { email: 'asha@example.com' }, 'admin-1', now),
+      ).rejects.toMatchObject({ status: 409, code: 'ROLE_CONFLICT' });
+      expect(t.holdsGrantOrRestorable).toHaveBeenCalledWith(
+        tx,
+        'user-1',
+        [3],
+        ['society_deactivated', 'institution_deactivated'],
+      );
+      expect(t.insertGrant).not.toHaveBeenCalled();
+    },
+  );
+
+  it('lets an Owner or a teacher hold the other school roles: only a Super Admin is kept apart from them', async () => {
+    const t = build(user());
+    t.holdsGrantOrRestorable.mockResolvedValue(true);
+    t.holdsStaffRecord.mockResolvedValue(true);
+    await t.directory.grant(tx, owner, { email: 'asha@example.com' }, 'admin-1', now);
+    expect(t.insertGrant).toHaveBeenCalledTimes(1);
+    expect(t.holdsGrantOrRestorable).not.toHaveBeenCalled();
+    expect(t.holdsStaffRecord).not.toHaveBeenCalled();
   });
 
   it('checks the other role under the separation lock, after the seat lock', async () => {
@@ -326,6 +364,7 @@ describe('AccountDirectory.linkStaff', () => {
 });
 
 const request = (overrides: Partial<Parameters<AccountDirectory['changeStaffEmail']>[1]> = {}) => ({
+  staffMemberId: 'staff-1',
   userId: 'user-1',
   societyId: 'society-1',
   email: 'New@Example.com',
@@ -337,8 +376,20 @@ const request = (overrides: Partial<Parameters<AccountDirectory['changeStaffEmai
 });
 
 function change(
-  options: { existing?: AccountRow; grant?: boolean; staffElsewhere?: boolean } = {},
+  options: {
+    existing?: AccountRow;
+    grant?: boolean;
+    staffElsewhere?: boolean;
+    adminGrants?: { id: string; user_id: string; society_id: string; institution_id: string }[];
+  } = {},
 ) {
+  const adminGrantsOfStaff = vi
+    .fn<AccountRepository['adminGrantsOfStaff']>()
+    .mockResolvedValue(
+      (options.adminGrants ?? []).map((grant) => ({ revoked_at: null, ...grant })) as never,
+    );
+  const restampRevokeReason = vi.fn<AccountRepository['restampRevokeReason']>().mockResolvedValue();
+  const revokeGrant = vi.fn<AccountRepository['revokeGrant']>().mockResolvedValue();
   const findById = vi.fn<AccountRepository['findById']>().mockResolvedValue(user());
   const findByEmail = vi.fn<AccountRepository['findByEmail']>().mockResolvedValue(options.existing);
   const update = vi
@@ -369,6 +420,9 @@ function change(
       holdsGrantOrRestorable,
       endRoleSessions,
       lockRoleSeparation,
+      adminGrantsOfStaff,
+      restampRevokeReason,
+      revokeGrant,
     } as unknown as AccountRepository,
     { endUserSessions, hasStaffElsewhere } as unknown as SessionRepository,
     { spendTokens } as unknown as MfaRepository,
@@ -384,6 +438,8 @@ function change(
     holdsActiveGrant,
     holdsGrantOrRestorable,
     hasStaffElsewhere,
+    adminGrantsOfStaff,
+    revokeGrant,
     endRoleSessions,
     endUserSessions,
     spendTokens,
@@ -479,6 +535,27 @@ describe('AccountDirectory.changeStaffEmail', () => {
     },
   );
 
+  it('takes the Admin grants of the record from the old person when it moves, and ends their Admin sessions', async () => {
+    const grants = [
+      { id: 'g1', user_id: 'user-1', society_id: 'society-1', institution_id: 'inst-1' },
+      { id: 'g2', user_id: 'user-1', society_id: 'society-1', institution_id: 'inst-2' },
+    ];
+    const t = change({ grant: true, adminGrants: grants });
+    const result = await t.directory.changeStaffEmail(tx, request());
+    expect(t.adminGrantsOfStaff).toHaveBeenCalledWith(tx, 'staff-1', {
+      restorable: ['society_deactivated', 'institution_deactivated'],
+    });
+    expect(t.revokeGrant.mock.calls.map((call) => call[1])).toEqual(['g1', 'g2']);
+    expect(t.revokeGrant).toHaveBeenCalledWith(tx, 'g1', 'admin-1', 'staff_moved', now);
+    // Admin sessions (role 3), then staff sessions (role 4), of the old person in this Society.
+    expect(t.endRoleSessions.mock.calls.map((call) => call[2])).toEqual([3, 4]);
+    expect(result).toMatchObject({
+      kind: 'moved',
+      adminRevoked: ['inst-1', 'inst-2'],
+      sessionsEnded: 2,
+    });
+  });
+
   it('counts dormant access as held: grants revoked for a reactivation to restore, and records anywhere', async () => {
     const t = change();
     await t.directory.changeStaffEmail(tx, request());
@@ -560,6 +637,7 @@ describe('AccountDirectory.changeStaffEmail', () => {
       {
         kind: 'moved',
         sessionsEnded: 1,
+        adminRevoked: [],
         previousEmail: 'old@example.com',
         person: { id: 'u', email: 'new@example.com', displayName: 'x', created: true },
       },
@@ -604,5 +682,299 @@ describe('AccountDirectory.changeOwnEmail', () => {
       'old@example.com',
       'new@example.com',
     ]);
+  });
+});
+
+const grantRequest = {
+  userId: 'user-1',
+  societyId: 'society-1',
+  institutionId: 'inst-1',
+  staffMemberId: 'staff-1',
+  by: 'owner-1',
+  now,
+};
+
+function admin(
+  person: AccountRow | null = user(),
+  grants: {
+    id: string;
+    user_id: string;
+    society_id: string;
+    institution_id: string;
+    revoked_at?: Date | null;
+  }[] = [],
+) {
+  const findById = vi.fn<AccountRepository['findById']>().mockResolvedValue(person ?? undefined);
+  const insertAdminGrant = vi
+    .fn<AccountRepository['insertAdminGrant']>()
+    .mockResolvedValue({} as never);
+  const adminGrantsOfStaff = vi
+    .fn<AccountRepository['adminGrantsOfStaff']>()
+    .mockResolvedValue(grants.map((grant) => ({ revoked_at: null, ...grant })) as never);
+  const revokeGrant = vi.fn<AccountRepository['revokeGrant']>().mockResolvedValue();
+  const restampRevokeReason = vi.fn<AccountRepository['restampRevokeReason']>().mockResolvedValue();
+  const holdsActiveGrant = vi.fn<AccountRepository['holdsActiveGrant']>().mockResolvedValue(false);
+  const lockRoleSeparation = vi.fn<AccountRepository['lockRoleSeparation']>().mockResolvedValue();
+  const endRoleSessions = vi.fn<AccountRepository['endRoleSessions']>().mockResolvedValue(2);
+  const send = vi.fn<BackgroundMailer['send']>();
+  const directory = new AccountDirectory(
+    {
+      findById,
+      insertAdminGrant,
+      adminGrantsOfStaff,
+      revokeGrant,
+      restampRevokeReason,
+      holdsActiveGrant,
+      lockRoleSeparation,
+      endRoleSessions,
+    } as unknown as AccountRepository,
+    {} as SessionRepository,
+    {} as MfaRepository,
+    { send } as unknown as BackgroundMailer,
+  );
+  return {
+    directory,
+    findById,
+    insertAdminGrant,
+    adminGrantsOfStaff,
+    revokeGrant,
+    restampRevokeReason,
+    holdsActiveGrant,
+    lockRoleSeparation,
+    endRoleSessions,
+    send,
+  };
+}
+
+const held = { id: 'g1', user_id: 'user-1', society_id: 'society-1', institution_id: 'inst-1' };
+
+describe('AccountDirectory, Institution Admin access', () => {
+  describe('grantInstitutionAdmin', () => {
+    it('locks the person, writes the grant tied to the record and returns who holds it', async () => {
+      const t = admin();
+      const person = await t.directory.grantInstitutionAdmin(tx, grantRequest);
+      expect(t.findById).toHaveBeenCalledWith(tx, 'user-1', true);
+      expect(t.insertAdminGrant).toHaveBeenCalledWith(tx, grantRequest);
+      expect(person).toEqual({ id: 'user-1', email: 'asha@example.com', displayName: 'Asha' });
+    });
+
+    it.each([
+      [2, 'ACCOUNT_BLOCKED'],
+      [0, 'INVALID_STATE'],
+    ])(
+      'refuses a person whose account status is %s with 409 %s, writing nothing',
+      async (status, code) => {
+        const t = admin(user({ account_status: status }));
+        await expect(t.directory.grantInstitutionAdmin(tx, grantRequest)).rejects.toMatchObject({
+          status: 409,
+          code,
+        });
+        expect(t.insertAdminGrant).not.toHaveBeenCalled();
+      },
+    );
+
+    it('turns the unique index on the active grant into 409 ALREADY_ADMIN and lets other failures through', async () => {
+      const t = admin();
+      t.insertAdminGrant.mockRejectedValue(
+        Object.assign(new Error('duplicate'), {
+          code: '23505',
+          constraint: 'uq_role_assignments_active_grant',
+        }),
+      );
+      await expect(t.directory.grantInstitutionAdmin(tx, grantRequest)).rejects.toMatchObject({
+        status: 409,
+        code: 'ALREADY_ADMIN',
+      });
+      t.insertAdminGrant.mockRejectedValue(new Error('boom'));
+      await expect(t.directory.grantInstitutionAdmin(tx, grantRequest)).rejects.toThrow('boom');
+    });
+
+    it('takes the identity lock before it locks the person row, as every other change does, so the two cannot deadlock', async () => {
+      const t = admin();
+      await t.directory.grantInstitutionAdmin(tx, grantRequest);
+      expect(t.lockRoleSeparation).toHaveBeenCalledWith(tx);
+      expect(t.lockRoleSeparation.mock.invocationCallOrder[0]).toBeLessThan(
+        t.findById.mock.invocationCallOrder[0] ?? 0,
+      );
+    });
+
+    it('refuses a Super Admin with 409 ROLE_CONFLICT, before it locks the person', async () => {
+      const t = admin();
+      t.holdsActiveGrant.mockResolvedValue(true);
+      await expect(t.directory.grantInstitutionAdmin(tx, grantRequest)).rejects.toMatchObject({
+        status: 409,
+        code: 'ROLE_CONFLICT',
+      });
+      expect(t.holdsActiveGrant).toHaveBeenCalledWith(tx, 'user-1', [1]);
+      expect(t.insertAdminGrant).not.toHaveBeenCalled();
+      expect(t.findById).not.toHaveBeenCalled();
+    });
+
+    it('is 404 for a person who is gone', async () => {
+      const t = admin(null);
+      await expect(t.directory.grantInstitutionAdmin(tx, grantRequest)).rejects.toMatchObject({
+        status: 404,
+      });
+    });
+  });
+
+  describe('revokeInstitutionAdmin', () => {
+    it('revokes the grant of the record for the Institution and ends the Admin sessions in the Society', async () => {
+      const t = admin(user(), [held]);
+      const result = await t.directory.revokeInstitutionAdmin(
+        tx,
+        'staff-1',
+        'inst-1',
+        'owner-1',
+        'revoked_by_owner',
+        now,
+      );
+      expect(t.adminGrantsOfStaff).toHaveBeenCalledWith(tx, 'staff-1', { institutionId: 'inst-1' });
+      expect(t.revokeGrant).toHaveBeenCalledWith(tx, 'g1', 'owner-1', 'revoked_by_owner', now);
+      expect(t.endRoleSessions).toHaveBeenCalledWith(tx, 'user-1', 3, 'society-1', 4, now);
+      expect(result).toEqual({
+        id: 'user-1',
+        email: 'asha@example.com',
+        displayName: 'Asha',
+        sessionsEnded: 2,
+      });
+    });
+
+    it('is 404 when the record holds no active grant for the Institution', async () => {
+      const t = admin();
+      await expect(
+        t.directory.revokeInstitutionAdmin(
+          tx,
+          'staff-1',
+          'inst-1',
+          'owner-1',
+          'revoked_by_owner',
+          now,
+        ),
+      ).rejects.toMatchObject({ status: 404 });
+      expect(t.revokeGrant).not.toHaveBeenCalled();
+      expect(t.endRoleSessions).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('revokeAdminAccessOfStaff', () => {
+    it('revokes every grant of the record with the reason, and ends the Admin sessions once', async () => {
+      const t = admin(user(), [held, { ...held, id: 'g2', institution_id: 'inst-2' }]);
+      const result = await t.directory.revokeAdminAccessOfStaff(
+        tx,
+        'staff-1',
+        'owner-1',
+        'staff_deactivated',
+        now,
+      );
+      expect(t.revokeGrant.mock.calls.map((call) => [call[1], call[3]])).toEqual([
+        ['g1', 'staff_deactivated'],
+        ['g2', 'staff_deactivated'],
+      ]);
+      expect(t.endRoleSessions).toHaveBeenCalledTimes(1);
+      expect(result).toEqual({ institutionIds: ['inst-1', 'inst-2'], sessionsEnded: 2 });
+    });
+
+    it('gives a grant that went dormant with its Institution the new reason, keeping when it was revoked', async () => {
+      const dormant = {
+        ...held,
+        id: 'g2',
+        institution_id: 'inst-2',
+        revoked_at: new Date('2026-10-01T00:00:00Z'),
+      };
+      const t = admin(user(), [held, dormant]);
+      const result = await t.directory.revokeAdminAccessOfStaff(
+        tx,
+        'staff-1',
+        'owner-1',
+        'staff_moved',
+        now,
+      );
+      expect(t.adminGrantsOfStaff).toHaveBeenCalledWith(tx, 'staff-1', {
+        restorable: ['society_deactivated', 'institution_deactivated'],
+      });
+      expect(t.revokeGrant.mock.calls.map((call) => call[1])).toEqual(['g1']);
+      expect(t.restampRevokeReason).toHaveBeenCalledWith(tx, ['g2'], 'staff_moved');
+      expect(result).toEqual({ institutionIds: ['inst-1', 'inst-2'], sessionsEnded: 2 });
+    });
+
+    it('ends no session for a record that holds only dormant grants', async () => {
+      const t = admin(user(), [{ ...held, revoked_at: new Date('2026-10-01T00:00:00Z') }]);
+      const result = await t.directory.revokeAdminAccessOfStaff(
+        tx,
+        'staff-1',
+        'owner-1',
+        'staff_deactivated',
+        now,
+      );
+      expect(t.revokeGrant).not.toHaveBeenCalled();
+      expect(t.endRoleSessions).not.toHaveBeenCalled();
+      expect(result).toEqual({ institutionIds: ['inst-1'], sessionsEnded: 0 });
+    });
+
+    it('does nothing for a record with no grant', async () => {
+      const t = admin();
+      expect(
+        await t.directory.revokeAdminAccessOfStaff(
+          tx,
+          'staff-1',
+          'owner-1',
+          'staff_deactivated',
+          now,
+        ),
+      ).toEqual({
+        institutionIds: [],
+        sessionsEnded: 0,
+      });
+      expect(t.revokeGrant).not.toHaveBeenCalled();
+      expect(t.endRoleSessions).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('adminAccessOfStaff', () => {
+    it('tells the Institutions of active grants from those of grants that went dormant with theirs', async () => {
+      const t = admin(user(), [
+        held,
+        { ...held, id: 'g2', institution_id: 'inst-2', revoked_at: new Date('2026-10-01') },
+      ]);
+      expect(await t.directory.adminAccessOfStaff(tx, 'staff-1')).toEqual({
+        active: ['inst-1'],
+        dormant: ['inst-2'],
+      });
+      expect(t.adminGrantsOfStaff).toHaveBeenCalledWith(tx, 'staff-1', {
+        restorable: ['society_deactivated', 'institution_deactivated'],
+      });
+    });
+  });
+
+  describe('releaseDormantAdminAccess', () => {
+    it('gives the dormant grants at the named Institutions the new reason, and leaves active ones and others alone', async () => {
+      const dormant = { ...held, revoked_at: new Date('2026-10-01') };
+      const t = admin(user(), [
+        held,
+        { ...dormant, id: 'g2', institution_id: 'inst-2' },
+        { ...dormant, id: 'g3', institution_id: 'inst-3' },
+      ]);
+      const released = await t.directory.releaseDormantAdminAccess(
+        tx,
+        'staff-1',
+        ['inst-1', 'inst-2'],
+        'staff_institution_removed',
+      );
+      expect(released).toEqual(['inst-2']);
+      expect(t.restampRevokeReason).toHaveBeenCalledWith(tx, ['g2'], 'staff_institution_removed');
+      expect(t.revokeGrant).not.toHaveBeenCalled();
+    });
+  });
+
+  it('tells the person after the commit, naming the Institution', () => {
+    const t = admin();
+    t.directory.announceAdminAccess({ email: 'asha@example.com' }, 'granted', 'Green Valley');
+    t.directory.announceAdminAccess({ email: 'asha@example.com' }, 'revoked', 'Green Valley');
+    expect(t.send.mock.calls.map(([message]) => [message.to, message.template])).toEqual([
+      ['asha@example.com', 'admin-access-granted'],
+      ['asha@example.com', 'admin-access-revoked'],
+    ]);
+    expect(t.send.mock.calls[0]![0].text).toContain('Green Valley');
   });
 });

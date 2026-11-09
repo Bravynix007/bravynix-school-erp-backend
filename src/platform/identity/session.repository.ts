@@ -99,7 +99,11 @@ function toSession(row: {
   };
 }
 
+/** A Society ID that no Society has, for asking about a person's records in every Society. */
+const NO_SOCIETY = '00000000-0000-0000-0000-000000000000';
+
 /** Sessions and refresh tokens (DDD 9.1). Only the Identity module touches these tables. */
+
 @Injectable()
 export class SessionRepository {
   /**
@@ -141,6 +145,14 @@ export class SessionRepository {
       found: boolean;
     }>`select app_has_staff_elsewhere(${userId}::uuid, ${societyId}::uuid) as found`.execute(db);
     return rows[0]?.found === true;
+  }
+
+  /**
+   * Does the person hold an active staff record in any Society, whatever the status of that Society or its home
+   * Institution? Dormant access counts. No Society is the nil UUID, so every record is "elsewhere".
+   */
+  holdsStaffRecord(db: Db, userId: string): Promise<boolean> {
+    return this.hasStaffElsewhere(db, userId, NO_SOCIETY);
   }
 
   private async explicitGrants(tx: Db, userId: string): Promise<Grant[]> {
