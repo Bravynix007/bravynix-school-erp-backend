@@ -123,6 +123,18 @@ export class SessionRepository {
     }));
   }
 
+  /**
+   * Does the person hold an active staff record in a Society other than this one, whatever the status of that
+   * Society or its home Institution? Dormant access counts: it returns when they are reactivated. Read through its
+   * own definer function, because `app_staff_roles` keeps to what can sign in.
+   */
+  async hasStaffElsewhere(db: Db, userId: string, societyId: string): Promise<boolean> {
+    const { rows } = await sql<{
+      found: boolean;
+    }>`select app_has_staff_elsewhere(${userId}::uuid, ${societyId}::uuid) as found`.execute(db);
+    return rows[0]?.found === true;
+  }
+
   private async explicitGrants(tx: Db, userId: string): Promise<Grant[]> {
     // Sign-in has no role set, so row-level security hides every Society and block; the
     // functions hand back the one name, and the active blocks, of a Society the person

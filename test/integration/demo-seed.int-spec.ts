@@ -13,6 +13,7 @@ import {
   people,
   rates,
   societies,
+  staff,
   subjects,
   superAdmin,
   writeDemoSeed,
@@ -125,6 +126,26 @@ describe('the demo seed', () => {
         { code: 'SVHS', current: 1, total: 2 },
         { code: 'SVPS', current: 1, total: 1 },
       ]);
+    });
+  });
+
+  it('gives each Admin the staff record their grant names, and one teacher a school, written once however often it runs', async () => {
+    await withDemo(2, async (tx) => {
+      await sql`alter table staff_members no force row level security`.execute(tx);
+      const rows = await sql<{ id: string; email: string; code: string; employee_code: string }>`
+        select m.id, u.email, i.code, m.employee_code from staff_members m
+        join users u on u.id = m.user_id join institutions i on i.id = m.home_institution_id
+        where m.id in (${ids(staff)}) order by m.employee_code
+      `.execute(tx);
+      expect(rows.rows.map((r) => [r.employee_code, r.email, r.code])).toEqual(
+        staff.map((m) => [m.employeeCode, m.person.email, m.institution]),
+      );
+      const linked = await sql<{ n: number }>`
+        select count(*)::int n from role_assignments r join staff_members m on m.id = r.staff_member_id
+        where r.role_code = 3 and r.revoked_at is null and m.user_id = r.user_id
+          and m.id in (${ids(admins.map((a) => ({ id: a.staffMemberId })))})
+      `.execute(tx);
+      expect(linked.rows[0]!.n).toBe(admins.length);
     });
   });
 

@@ -4,10 +4,14 @@ import { FixedClock } from '../../common/time/clock.js';
 import type { AuditService } from '../../platform/audit/index.js';
 import type { DatabaseService, Tx } from '../../platform/database/index.js';
 import type { FileDirectory } from '../../platform/files/index.js';
-import type { AccountDirectory, PersonDirectory } from '../../platform/identity/index.js';
+import type {
+  AccountDirectory,
+  PersonDirectory,
+  StaffEmailChange,
+} from '../../platform/identity/index.js';
 import type { MasterReferences } from '../../platform/masters/index.js';
 import type { InstitutionDirectory, ScopeService } from '../../platform/tenancy/index.js';
-import type { CreateStaffDto } from './staff.dto.js';
+import type { CreateStaffDto, ListStaffQueryDto } from './staff.dto.js';
 import type { StaffRepository, StaffRow } from './staff.repository.js';
 import { StaffService } from './staff.service.js';
 
@@ -112,6 +116,20 @@ function build(current: StaffRow | null = staff()) {
     order.push('welcome');
   });
   const endRoleSessions = vi.fn<AccountDirectory['endRoleSessions']>().mockResolvedValue(2);
+  const person = { id: 'user-2', email: 'new@example.com', displayName: 'Meera', created: false };
+  const changeStaffEmail = vi.fn<AccountDirectory['changeStaffEmail']>().mockResolvedValue({
+    kind: 'edited',
+    person,
+    previousEmail: 'meera@example.com',
+    sessionsEnded: 2,
+  });
+  const announceStaffEmail = vi.fn<AccountDirectory['announceStaffEmail']>(() => {
+    order.push('announce');
+  });
+  const hasActiveRecord = vi.fn<StaffRepository['hasActiveRecord']>().mockResolvedValue(false);
+  const page = vi
+    .fn<StaffRepository['page']>()
+    .mockResolvedValue({ rows: [current ?? staff()], total: 41 });
   const record = vi.fn<AuditService['record']>().mockResolvedValue('audit-1');
   const service = new StaffService(
     { transaction } as unknown as DatabaseService,
@@ -119,13 +137,21 @@ function build(current: StaffRow | null = staff()) {
       find,
       insert,
       update,
+      hasActiveRecord,
+      page,
       replaceEducations,
       replaceEmergencyContacts,
       educations,
       emergencyContacts,
     } as unknown as StaffRepository,
     { requireInstitution, forPrincipal } as unknown as ScopeService,
-    { linkStaff, welcomeAs, endRoleSessions } as unknown as AccountDirectory,
+    {
+      linkStaff,
+      welcomeAs,
+      endRoleSessions,
+      changeStaffEmail,
+      announceStaffEmail,
+    } as unknown as AccountDirectory,
     {
       describe: vi.fn<PersonDirectory['describe']>().mockResolvedValue(new Map()),
       emails: vi
@@ -168,9 +194,17 @@ function build(current: StaffRow | null = staff()) {
     linkStaff,
     welcomeAs,
     endRoleSessions,
+    changeStaffEmail,
+    announceStaffEmail,
+    hasActiveRecord,
+    page,
+    forPrincipal,
     record,
   };
 }
+
+const query = (fields: object = {}) =>
+  Object.assign({ page: 2, limit: 20 }, fields) as ListStaffQueryDto;
 
 describe('StaffService', () => {
   describe('create (STF-02)', () => {
@@ -223,6 +257,66 @@ describe('StaffService', () => {
       const t = build();
       t.insert.mockRejectedValueOnce(new Error('boom'));
       await expect(t.service.create(owner, body)).rejects.toThrow('boom');
+    });
+  });
+
+  describe('list (STF-01)', () => {
+    it('lists the staff of every Institution the caller reaches, active only, by name, with the login email', async () => {
+      const t = build();
+      t.forPrincipal.mockResolvedValue({
+        tenant: { societyId: 'society-1', institutionIds: ['institution-1', 'institution-2'] },
+      } as unknown as Awaited<ReturnType<ScopeService['forPrincipal']>>);
+      const answer = await t.service.list(owner, query({ q: 'mee' }));
+      expect(t.page).toHaveBeenCalledWith(
+        expect.anything(),
+        {
+          q: 'mee',
+          institutionIds: ['institution-1', 'institution-2'],
+          statuses: [1],
+          designationId: undefined,
+          classCategoryId: undefined,
+        },
+        [{ field: 'name', direction: 'asc' }],
+        20,
+        20,
+      );
+      expect(t.requireInstitution).not.toHaveBeenCalled();
+      expect(answer.options.meta).toEqual({ page: 2, limit: 20, totalItems: 41, totalPages: 3 });
+      expect(answer.data).toEqual([
+        expect.objectContaining({
+          id: 'staff-1',
+          person: { id: 'user-1', email: 'meera@example.com' },
+          firstName: 'Meera',
+        }),
+      ]);
+    });
+
+    it('looks in the one Institution that is named, once the caller is known to reach it', async () => {
+      const t = build();
+      await t.service.list(owner, query({ institutionId: 'institution-1', status: [0, 1] }));
+      expect(t.requireInstitution).toHaveBeenCalledWith(owner, 'institution-1');
+      expect(t.page.mock.calls[0]![1]).toMatchObject({
+        institutionIds: ['institution-1'],
+        statuses: [0, 1],
+      });
+    });
+
+    it('does not look in an Institution the caller does not reach', async () => {
+      const t = build();
+      t.requireInstitution.mockRejectedValue(AppException.notFound());
+      expect(await fail(t.service.list(owner, query({ institutionId: 'institution-9' })))).toEqual({
+        status: 404,
+        code: 'NOT_FOUND',
+      });
+      expect(t.page).not.toHaveBeenCalled();
+    });
+
+    it('turns an unknown sort field into 400', async () => {
+      const t = build();
+      expect(await fail(t.service.list(owner, query({ sort: 'salary' })))).toMatchObject({
+        status: 400,
+        code: 'INVALID_SORT',
+      });
     });
   });
 
@@ -344,6 +438,119 @@ describe('StaffService', () => {
       expect(own.update).not.toHaveBeenCalled();
       const gone = build(staff({ status: 0 }));
       expect(await fail(gone.service.deactivate(owner, 'staff-1'))).toMatchObject({ status: 404 });
+    });
+  });
+
+  describe('changeEmail (STF-13)', () => {
+    const request = { email: 'New@Example.com', version: 1 };
+    const person = { id: 'user-2', email: 'new@example.com', displayName: 'Meera', created: false };
+
+    it('changes the login, touches the record, audits masked addresses and tells both after the commit', async () => {
+      const t = build();
+      const changed = await t.service.changeEmail(owner, 'staff-1', request);
+      expect(t.changeStaffEmail.mock.calls[0]![1]).toMatchObject({
+        userId: 'user-1',
+        societyId: 'society-1',
+        email: 'New@Example.com',
+        names: { firstName: 'Meera', lastName: null },
+        by: 'owner-1',
+      });
+      expect(t.update.mock.calls[0]![2]).toEqual({ updated_by: 'owner-1' });
+      const audit = t.record.mock.calls[0]![1];
+      expect(audit).toMatchObject({
+        action: 'staff.email_changed',
+        institutionId: 'institution-1',
+        before: { email: 'm***@example.com', personId: 'user-1' },
+        after: { email: 'n***@example.com', outcome: 'edited', sessionsEnded: 2 },
+      });
+      expect(JSON.stringify(audit)).not.toContain('meera@example.com');
+      expect(t.announceStaffEmail).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'edited' }),
+        'Sunrise Trust',
+      );
+      expect(t.order).toEqual(['commit', 'commit', 'announce', 'commit']);
+      expect(changed.version).toBe(2);
+    });
+
+    it('moves the record to the other person when the directory says so', async () => {
+      const t = build();
+      const moved: StaffEmailChange = {
+        kind: 'moved',
+        person,
+        previousEmail: 'meera@example.com',
+        sessionsEnded: 1,
+      };
+      t.changeStaffEmail.mockResolvedValue(moved);
+      await t.service.changeEmail(owner, 'staff-1', request);
+      expect(t.update.mock.calls[0]![2]).toEqual({ user_id: 'user-2', updated_by: 'owner-1' });
+      expect(t.record.mock.calls[0]![1]).toMatchObject({
+        after: { personId: 'user-2', outcome: 'moved' },
+      });
+    });
+
+    it('writes, audits and tells nobody when the email is the one the person has', async () => {
+      const t = build();
+      t.changeStaffEmail.mockResolvedValue({ kind: 'unchanged', person });
+      const same = await t.service.changeEmail(owner, 'staff-1', request);
+      expect(t.update).not.toHaveBeenCalled();
+      expect(t.record).not.toHaveBeenCalled();
+      expect(t.announceStaffEmail).not.toHaveBeenCalled();
+      expect(same.version).toBe(1);
+    });
+
+    it('checks the version before anything else', async () => {
+      const t = build();
+      expect(
+        await fail(t.service.changeEmail(owner, 'staff-1', { ...request, version: 7 })),
+      ).toEqual({
+        status: 409,
+        code: 'VERSION_CONFLICT',
+      });
+      expect(t.changeStaffEmail).not.toHaveBeenCalled();
+    });
+
+    it('refuses the caller’s own record and a deactivated record', async () => {
+      const own = build(staff({ user_id: 'owner-1' }));
+      expect(await fail(own.service.changeEmail(owner, 'staff-1', request))).toEqual({
+        status: 409,
+        code: 'CANNOT_ACT_ON_SELF',
+      });
+      expect(own.changeStaffEmail).not.toHaveBeenCalled();
+      const gone = build(staff({ status: 0 }));
+      expect(await fail(gone.service.changeEmail(owner, 'staff-1', request))).toMatchObject({
+        status: 404,
+      });
+    });
+
+    it('refuses an email whose person already has a record in this Society', async () => {
+      const t = build();
+      t.hasActiveRecord.mockResolvedValue(true);
+      t.changeStaffEmail.mockImplementation(async (_tx, change) => {
+        await change.vet('user-2');
+        return { kind: 'moved', person, previousEmail: 'meera@example.com', sessionsEnded: 0 };
+      });
+      expect(await fail(t.service.changeEmail(owner, 'staff-1', request))).toEqual({
+        status: 409,
+        code: 'EMAIL_IN_USE',
+      });
+      expect(t.hasActiveRecord).toHaveBeenCalledWith(expect.anything(), 'user-2', 'society-1');
+      expect(t.update).not.toHaveBeenCalled();
+      expect(t.announceStaffEmail).not.toHaveBeenCalled();
+    });
+
+    it('turns a second request that took the person first into 409 EMAIL_IN_USE', async () => {
+      const t = build();
+      t.changeStaffEmail.mockResolvedValue({
+        kind: 'moved',
+        person,
+        previousEmail: 'm@example.com',
+        sessionsEnded: 0,
+      });
+      t.update.mockRejectedValue(unique('uq_staff_members_society_user'));
+      expect(await fail(t.service.changeEmail(owner, 'staff-1', request))).toEqual({
+        status: 409,
+        code: 'EMAIL_IN_USE',
+      });
     });
   });
 });

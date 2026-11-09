@@ -56,6 +56,41 @@ export interface StaffResource extends AuthorStamps {
   version: number;
 }
 
+/** One row of the staff list (STF-01); the profile has the rest. */
+export interface StaffSummary {
+  id: string;
+  homeInstitutionId: string;
+  person: { id: string; email: string };
+  employeeCode: string | null;
+  firstName: string;
+  lastName: string | null;
+  photoFileId: string | null;
+  designationId: string | null;
+  classCategoryId: string;
+  mobile: { countryCode: string; number: string };
+  joiningDate: string | null;
+  status: number;
+  version: number;
+}
+
+export function staffSummary(row: StaffRow, email: string): StaffSummary {
+  return {
+    id: row.id,
+    homeInstitutionId: row.home_institution_id,
+    person: { id: row.user_id, email },
+    employeeCode: row.employee_code,
+    firstName: row.first_name,
+    lastName: row.last_name,
+    photoFileId: row.photo_file_id,
+    designationId: row.designation_id,
+    classCategoryId: row.class_category_id,
+    mobile: { countryCode: row.country_code, number: row.mobile_number },
+    joiningDate: row.joining_date,
+    status: row.status,
+    version: row.version,
+  };
+}
+
 export function staffResource(
   row: StaffRow,
   educations: readonly EducationRow[],

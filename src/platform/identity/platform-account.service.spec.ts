@@ -63,6 +63,13 @@ function build(current: AccountRow | null = user(), caller: AccountRow = user({ 
     .mockResolvedValue({ id: 'grant-1' } as never);
   const lockSeats = vi.fn<AccountRepository['lockSeats']>().mockResolvedValue();
   const revoke = vi.fn<AccountDirectory['revoke']>().mockResolvedValue(1);
+  const changeOwnEmail = vi
+    .fn<AccountDirectory['changeOwnEmail']>()
+    .mockImplementation((_tx, userId, email) =>
+      Promise.resolve({ person: user({ id: userId, email }), sessionsEnded: 3 }),
+    );
+  const announceEmailChange = vi.fn<AccountDirectory['announceEmailChange']>();
+  const lockIdentities = vi.fn<AccountDirectory['lockIdentities']>().mockResolvedValue();
   const grant = vi.fn<AccountDirectory['grant']>();
   const welcome = vi.fn<AccountDirectory['welcome']>();
   const seatHolders = vi.fn<AccountRepository['seatHolders']>().mockResolvedValue([]);
@@ -86,7 +93,14 @@ function build(current: AccountRow | null = user(), caller: AccountRow = user({ 
       lockSeats,
       seatHolders,
     } as unknown as AccountRepository,
-    { revoke, grant, welcome } as unknown as AccountDirectory,
+    {
+      revoke,
+      grant,
+      welcome,
+      changeOwnEmail,
+      announceEmailChange,
+      lockIdentities,
+    } as unknown as AccountDirectory,
     { endUserSessions } as unknown as SessionRepository,
     {
       findFactor,
@@ -111,6 +125,9 @@ function build(current: AccountRow | null = user(), caller: AccountRow = user({ 
     revoke,
     grant,
     welcome,
+    changeOwnEmail,
+    announceEmailChange,
+    lockIdentities,
     seatHolders,
     confirmedAmong,
     endUserSessions,
@@ -363,43 +380,39 @@ describe('changeEmail (PLT-17)', () => {
   it('writes nothing for the same email', async () => {
     const t = build();
     await t.service.changeEmail(principal, 'user-1', { email: 'ASHA@example.com', version: 3 });
-    expect(t.update).not.toHaveBeenCalled();
-    expect(t.send).not.toHaveBeenCalled();
+    expect(t.changeOwnEmail).not.toHaveBeenCalled();
+    expect(t.announceEmailChange).not.toHaveBeenCalled();
   });
 
-  it('changes the email at once: sessions and open steps end, both addresses are told, the audit is masked', async () => {
+  it('changes the email at once through the directory, tells both addresses after the commit, and audits it masked', async () => {
     const t = build();
     const changed = await t.service.changeEmail(principal, 'user-1', body);
     expect(changed.email).toBe('new@example.com');
-    expect(t.endUserSessions).toHaveBeenCalledWith(
+    expect(t.changeOwnEmail).toHaveBeenCalledWith(
       expect.anything(),
       'user-1',
-      7,
+      'new@example.com',
+      'admin-1',
       expect.any(Date),
     );
-    expect(t.spendTokens).toHaveBeenCalled();
-    expect(t.send.mock.calls.map(([mail]) => mail.to)).toEqual([
-      'asha@example.com',
-      'new@example.com',
-    ]);
+    expect(t.announceEmailChange).toHaveBeenCalledWith('asha@example.com', 'new@example.com');
     expect(t.record).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         action: 'account.email_change',
         before: { email: 'a***@example.com' },
-        after: expect.objectContaining({ email: 'n***@example.com' }),
+        after: { email: 'n***@example.com', sessions_ended: 3 },
       }),
     );
   });
 
-  it('tells the loser of a race on the new email that it is taken', async () => {
+  it('takes the identity lock before it reads anyone, so a person whose email moves at the same time is not missed', async () => {
     const t = build();
-    t.update.mockRejectedValue(
-      Object.assign(new Error('duplicate'), { code: '23505', constraint: 'uq_users_email' }),
+    await t.service.changeEmail(principal, 'user-1', body);
+    expect(t.lockIdentities).toHaveBeenCalled();
+    expect(t.lockIdentities.mock.invocationCallOrder[0]).toBeLessThan(
+      t.findByEmail.mock.invocationCallOrder[0] ?? 0,
     );
-    expect(await refusal(t.service.changeEmail(principal, 'user-1', body))).toMatchObject({
-      code: 'EMAIL_IN_USE',
-    });
   });
 });
 

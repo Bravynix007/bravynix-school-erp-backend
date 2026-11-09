@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { CurrentPrincipal } from '../../common/auth/current-principal.decorator.js';
@@ -6,19 +6,34 @@ import { Policy } from '../../common/auth/policy.decorator.js';
 import { RoleCode } from '../../common/auth/roles.js';
 import { ApiResult } from '../../common/http/api-result.js';
 import { UuidParamPipe } from '../../common/http/uuid-param.pipe.js';
-import { CreateStaffDto, UpdateStaffDto } from './staff.dto.js';
-import type { StaffResource } from './staff.resource.js';
+import { ChangeEmailDto } from '../../platform/identity/index.js';
+import { CreateStaffDto, ListStaffQueryDto, UpdateStaffDto } from './staff.dto.js';
+import type { StaffResource, StaffSummary } from './staff.resource.js';
 import { StaffService } from './staff.service.js';
 
 const ADMINS = [RoleCode.SocietyOwner, RoleCode.InstitutionAdmin];
 /** A teacher reads their own profile (STF-03, "TS self"). */
 const ADMINS_AND_SELF = [...ADMINS, RoleCode.TeacherStaff];
 
-/** STF-02 to STF-05 (API design 9.5): the staff of a Society. */
+/** STF-01 to STF-05 and STF-13 (API design 9.5): the staff of a Society. */
 @ApiTags('Staff')
 @Controller('staff')
 export class StaffController {
   constructor(private readonly staff: StaffService) {}
+
+  @Policy({
+    roles: ADMINS,
+    scope: 'institution',
+    operationId: 'STF-01',
+    rule: 'Lists the staff whose home Institution the caller reaches, a page at a time, with search by name or Employee ID',
+  })
+  @Get()
+  list(
+    @CurrentPrincipal() principal: Principal,
+    @Query() query: ListStaffQueryDto,
+  ): Promise<ApiResult<StaffSummary[]>> {
+    return this.staff.list(principal, query);
+  }
 
   @Policy({
     roles: ADMINS,
@@ -75,5 +90,20 @@ export class StaffController {
     @Param('staffMemberId', UuidParamPipe) staffMemberId: string,
   ): Promise<{ id: string; status: 0 }> {
     return this.staff.deactivate(principal, staffMemberId);
+  }
+
+  @Policy({
+    roles: ADMINS,
+    scope: 'institution',
+    operationId: 'STF-13',
+    rule: 'Changes an active staff member’s login email by version and ends their sessions; an email that belongs to a person moves the record to them',
+  })
+  @Put(':staffMemberId/email')
+  changeEmail(
+    @CurrentPrincipal() principal: Principal,
+    @Param('staffMemberId', UuidParamPipe) staffMemberId: string,
+    @Body() body: ChangeEmailDto,
+  ): Promise<StaffResource> {
+    return this.staff.changeEmail(principal, staffMemberId, body);
   }
 }

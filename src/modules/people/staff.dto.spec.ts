@@ -1,5 +1,7 @@
 import { body, problems } from '../../../test/support/dto-validation.js';
-import { CreateStaffDto, UpdateStaffDto } from './staff.dto.js';
+import { createValidationPipe } from '../../common/validation/validation.js';
+import { AppException } from '../../common/http/app-exception.js';
+import { CreateStaffDto, ListStaffQueryDto, UpdateStaffDto } from './staff.dto.js';
 
 const id = '0192f3b0-0000-7000-8000-000000000001';
 const valid = {
@@ -142,5 +144,49 @@ describe('UpdateStaffDto', () => {
       field,
       code: 'FIELD_NOT_ALLOWED',
     });
+  });
+});
+
+describe('ListStaffQueryDto', () => {
+  const pipe = createValidationPipe();
+  const query = (value: unknown) =>
+    pipe.transform(value, {
+      type: 'query',
+      metatype: ListStaffQueryDto,
+    }) as Promise<ListStaffQueryDto>;
+
+  it('takes no filter at all, the defaults of a page, and leaves status to the service', async () => {
+    const parsed = await query({});
+    expect(parsed).toMatchObject({ page: 1, limit: 20 });
+    expect(parsed.status).toBeUndefined();
+  });
+
+  it('reads status as numbers, repeated or single, and the IDs in lower case', async () => {
+    expect(await query({ status: ['0', '1'], page: '3' })).toMatchObject({
+      status: [0, 1],
+      page: 3,
+    });
+    expect(await query({ status: '0' })).toMatchObject({ status: [0] });
+    expect(
+      await query({
+        institutionId: id.toUpperCase(),
+        designationId: id,
+        classCategoryId: id,
+        q: 'me',
+      }),
+    ).toMatchObject({ institutionId: id, designationId: id, classCategoryId: id, q: 'me' });
+  });
+
+  it.each([
+    { status: '2' },
+    { status: 'x' },
+    { status: '' },
+    { institutionId: 'nope' },
+    { designationId: 'nope' },
+    { classCategoryId: 'nope' },
+    { q: 'm' },
+    { limit: '101' },
+  ])('refuses %j', async (value) => {
+    await expect(query(value)).rejects.toBeInstanceOf(AppException);
   });
 });
