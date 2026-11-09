@@ -1,7 +1,5 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { AppException } from '../../common/http/app-exception.js';
-import { ErrorCode } from '../../common/http/error-codes.js';
-import { fieldError } from '../../common/validation/field-error.js';
 import type { Tx } from '../../platform/database/index.js';
 import { SubjectRepository } from './subject.repository.js';
 
@@ -23,11 +21,7 @@ export class SubjectDirectory {
     for (const id of ids) {
       const status = statuses.get(id);
       if (status === undefined) throw AppException.notFound();
-      if (status === 0) {
-        throw new AppException(HttpStatus.UNPROCESSABLE_ENTITY, ErrorCode.REFERENCE_INACTIVE, {
-          errors: [fieldError(field, ErrorCode.REFERENCE_INACTIVE)],
-        });
-      }
+      if (status === 0) throw AppException.referenceInactive(field);
     }
   }
 }

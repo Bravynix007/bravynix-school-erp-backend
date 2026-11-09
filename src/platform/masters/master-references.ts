@@ -1,6 +1,6 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { AppException } from '../../common/http/app-exception.js';
-import { ErrorCode, FieldErrorCode } from '../../common/http/error-codes.js';
+import { FieldErrorCode } from '../../common/http/error-codes.js';
 import { fieldError } from '../../common/validation/field-error.js';
 import type { Tx } from '../database/index.js';
 import type { MasterTable } from './master.catalog.js';
@@ -11,13 +11,6 @@ export interface PlaceIds {
   countryId?: string | null;
   stateId?: string | null;
   cityId?: string | null;
-}
-
-/** 422 `REFERENCE_INACTIVE`, naming the field that points at a hidden master entry (API design 12.2). */
-function inactive(field: string): AppException {
-  return new AppException(HttpStatus.UNPROCESSABLE_ENTITY, ErrorCode.REFERENCE_INACTIVE, {
-    errors: [fieldError(field, ErrorCode.REFERENCE_INACTIVE)],
-  });
 }
 
 /** A class category as another module shows it. */
@@ -71,7 +64,7 @@ export class MasterReferences {
     for (const { id, field } of entries) {
       const status = statuses.get(id);
       if (status === undefined) throw AppException.notFound();
-      if (status === 0) throw inactive(field);
+      if (status === 0) throw AppException.referenceInactive(field);
     }
   }
 
@@ -79,7 +72,7 @@ export class MasterReferences {
   async requirePredefinedClass(tx: Tx, id: string, field: string): Promise<PredefinedClassRef> {
     const found = await this.masters.predefinedClass(tx, id);
     if (!found) throw AppException.notFound();
-    if (found.status === 0) throw inactive(field);
+    if (found.status === 0) throw AppException.referenceInactive(field);
     const { status: _status, ...ref } = found;
     return ref;
   }
@@ -88,7 +81,7 @@ export class MasterReferences {
   async requirePredefinedSection(tx: Tx, id: string, field: string): Promise<PredefinedSectionRef> {
     const found = await this.masters.predefinedSection(tx, id);
     if (!found) throw AppException.notFound();
-    if (found.status === 0) throw inactive(field);
+    if (found.status === 0) throw AppException.referenceInactive(field);
     const { status: _status, ...ref } = found;
     return ref;
   }

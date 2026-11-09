@@ -120,15 +120,15 @@ export class InstitutionRepository {
     return Number(total);
   }
 
-  /** The name and Society of these Institutions, by ID. */
+  /** The name, Society and status of these Institutions, by ID. */
   async refs(
     tx: Tx,
     ids: readonly string[],
-  ): Promise<Map<string, { id: string; name: string; society_id: string }>> {
+  ): Promise<Map<string, { id: string; name: string; society_id: string; status: number }>> {
     if (ids.length === 0) return new Map();
     const rows = await tx
       .selectFrom('institutions')
-      .select(['id', 'name', 'society_id'])
+      .select(['id', 'name', 'society_id', 'status'])
       .where('id', 'in', ids)
       .execute();
     return new Map(rows.map((row) => [row.id, row]));

@@ -19,6 +19,9 @@ import { sql, type Kysely } from 'kysely';
  *
  * - `app_staff_blocked(society, person)`: does the person hold an active staff record in the Society that is blocked?
  * - `app_staff_extra_institutions(society, person)`: the extra Institutions of the person's active staff record there.
+ *
+ * `app_staff_roles` (migration 0025) is replaced so a teacher's staff section counts as blocked only when every
+ * Institution they reach, the home one and the active extras, has it blocked (API design 6.3).
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`
@@ -148,6 +151,45 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       $$
     `.execute(db);
   }
+  // A teacher's staff section is blocked only when every Institution they reach is: the home one and the active
+  // extras (API design 6.3). The extras come through their own definer function, because this one has no Society set.
+  await sql`
+    create or replace function app_staff_roles(person uuid)
+      returns table (society_id uuid, home_institution_id uuid, society_name text, staff_blocked boolean)
+    language plpgsql volatile security definer
+    set search_path = pg_catalog, public, pg_temp
+    as $$
+    declare
+      caller_role text := current_setting('app.role_code', true);
+      caller_person text := current_setting('app.person_id', true);
+    begin
+      perform set_config('app.role_code', '1', true);
+      perform set_config('app.person_id', person::text, true);
+      return query
+        select m.society_id, m.home_institution_id, s.name::text,
+          not exists (
+            select 1 from (
+              select m.home_institution_id as institution_id
+              union
+              select x.id from app_staff_extra_institutions(m.society_id, person) as x(id)
+                join institutions xi on xi.id = x.id and xi.status = 1
+            ) reached
+            where not exists (
+              select 1 from access_blocks b
+              where b.society_id = m.society_id and b.institution_id = reached.institution_id
+                and b.section = 2 and b.lifted_at is null
+            )
+          )
+        from staff_members m
+        join societies s on s.id = m.society_id and s.status = 1
+        join institutions i on i.id = m.home_institution_id and i.status = 1
+        where m.user_id = person and m.status = 1
+        order by m.created_at, m.id;
+      perform set_config('app.role_code', coalesce(caller_role, ''), true);
+      perform set_config('app.person_id', coalesce(caller_person, ''), true);
+    end;
+    $$
+  `.execute(db);
 }
 
 export async function down(db: Kysely<unknown>): Promise<void> {
@@ -155,6 +197,35 @@ export async function down(db: Kysely<unknown>): Promise<void> {
   if (process.env.NODE_ENV === 'production') {
     throw new Error('Refusing to drop staff access in production: blocks and lists are records');
   }
+  await sql`
+    create or replace function app_staff_roles(person uuid)
+      returns table (society_id uuid, home_institution_id uuid, society_name text, staff_blocked boolean)
+    language plpgsql volatile security definer
+    set search_path = pg_catalog, public, pg_temp
+    as $$
+    declare
+      caller_role text := current_setting('app.role_code', true);
+      caller_person text := current_setting('app.person_id', true);
+    begin
+      perform set_config('app.role_code', '1', true);
+      perform set_config('app.person_id', person::text, true);
+      return query
+        select m.society_id, m.home_institution_id, s.name::text,
+          exists (
+            select 1 from access_blocks b
+            where b.society_id = m.society_id and b.institution_id = m.home_institution_id
+              and b.section = 2 and b.lifted_at is null
+          )
+        from staff_members m
+        join societies s on s.id = m.society_id and s.status = 1
+        join institutions i on i.id = m.home_institution_id and i.status = 1
+        where m.user_id = person and m.status = 1
+        order by m.created_at, m.id;
+      perform set_config('app.role_code', coalesce(caller_role, ''), true);
+      perform set_config('app.person_id', coalesce(caller_person, ''), true);
+    end;
+    $$
+  `.execute(db);
   await sql`drop function if exists app_staff_extra_institutions(uuid, uuid)`.execute(db);
   await sql`drop function if exists app_staff_blocked(uuid, uuid)`.execute(db);
   await sql`drop table if exists staff_subjects`.execute(db);

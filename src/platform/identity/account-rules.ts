@@ -24,11 +24,6 @@ export function requireCanHoldRole(person: AccountRow): void {
   }
 }
 
-/** An administrator may not block, remove or reset themselves: that is how a platform locks itself out. */
-export function requireNotSelf(actorId: string, targetId: string): void {
-  if (actorId === targetId) throw AppException.conflict(ErrorCode.CANNOT_ACT_ON_SELF);
-}
-
 /** An address as the audit log keeps it: enough to tell which, not enough to use (`a***@example.org`). */
 export function maskEmail(email: string): string {
   const [name = '', domain = ''] = email.split('@');

@@ -24,8 +24,8 @@ export const seededStaffId = (personaKey: string): string => {
 /**
  * A staff record for each two-worlds persona that holds the Teacher and Staff role, at the first Institution of the
  * grant, each with one education, one emergency contact and one subject, so a test can show one Society's people are
- * hidden from another. The Institutions of a grant after the first are the member's extra Institutions. The pending, blocked and inactive accounts have records too: the account state is the login's, not the
- * record's. Safe to run twice: rows are keyed by their fixed IDs. The numbers are made up (the 900000 range).
+ * hidden from another. The Institutions of a grant after the first are the member's extra Institutions. The pending,
+ * blocked and inactive accounts have records too: the account state is the login's, not the record's. Safe to run twice: rows are keyed by their fixed IDs. The numbers are made up (the 900000 range).
  */
 export async function writeStaffSeed(db: Kysely<unknown>): Promise<void> {
   if (db.isTransaction) return writeIn(db);

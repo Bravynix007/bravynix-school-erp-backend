@@ -1,7 +1,8 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { ApiResult } from '../../common/http/api-result.js';
 import { pageMeta, pageOffset, parseSort } from '../../common/pagination/pagination.js';
+import { requireNotSelf } from '../../common/auth/require-not-self.js';
 import { RoleCode } from '../../common/auth/roles.js';
 import { AppException } from '../../common/http/app-exception.js';
 import { authorIdsOf } from '../../common/http/author-stamps.js';
@@ -413,9 +414,7 @@ export class StaffService {
     const context = await this.contextOf(principal, id);
     await this.database.transaction(context.tenant, async (tx) => {
       const current = await this.lockedActive(tx, id);
-      if (current.user_id === principal.personId) {
-        throw AppException.conflict(ErrorCode.CANNOT_ACT_ON_SELF);
-      }
+      requireNotSelf(principal.personId, current.user_id);
       const row = await this.staff.update(tx, id, {
         status: 0,
         ...updateStamp(principal.personId),
@@ -463,9 +462,7 @@ export class StaffService {
     const now = this.clock.now();
     return this.database.transaction(context.tenant, async (tx) => {
       const current = await this.lockedActive(tx, id);
-      if (current.user_id === principal.personId) {
-        throw AppException.conflict(ErrorCode.CANNOT_ACT_ON_SELF);
-      }
+      requireNotSelf(principal.personId, current.user_id);
       if ((current.access_blocked_at !== null) === blocked) {
         throw AppException.conflict(ErrorCode.INVALID_STATE);
       }
@@ -549,21 +546,14 @@ export class StaffService {
       const before = await this.staff.institutionIds(tx, id);
       if (sameIds(before, body.institutionIds)) return this.resourceOf(tx, current);
       const added = body.institutionIds.flatMap((institutionId, index) =>
-        before.includes(institutionId) ? [] : [{ institutionId, index }],
+        before.includes(institutionId)
+          ? []
+          : [{ id: institutionId, field: `institutionIds[${String(index)}]` }],
       );
-      for (const { institutionId, index } of added) {
-        const field = `institutionIds[${String(index)}]`;
-        if (institutionId === current.home_institution_id) {
-          throw AppException.validation([fieldError(field, FieldErrorCode.INVALID_VALUE)]);
-        }
-        const found = await this.institutions.find(tx, institutionId);
-        if (!found) throw AppException.notFound();
-        if (!found.active) {
-          throw new AppException(HttpStatus.UNPROCESSABLE_ENTITY, ErrorCode.REFERENCE_INACTIVE, {
-            errors: [fieldError(field, ErrorCode.REFERENCE_INACTIVE)],
-          });
-        }
-      }
+      const home = added.find((item) => item.id === current.home_institution_id);
+      if (home)
+        throw AppException.validation([fieldError(home.field, FieldErrorCode.INVALID_VALUE)]);
+      await this.institutions.requireActive(tx, added);
       await this.staff.replaceInstitutions(
         tx,
         id,
@@ -604,9 +594,7 @@ export class StaffService {
       .transaction(context.tenant, async (tx) => {
         const current = await this.lockedActive(tx, id);
         requireVersion(current, body.version);
-        if (current.user_id === principal.personId) {
-          throw AppException.conflict(ErrorCode.CANNOT_ACT_ON_SELF);
-        }
+        requireNotSelf(principal.personId, current.user_id);
         const change = await this.accounts.changeStaffEmail(tx, {
           userId: current.user_id,
           societyId: current.society_id,

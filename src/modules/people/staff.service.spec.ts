@@ -108,11 +108,9 @@ function build(current: StaffRow | null = staff()) {
     .fn<AccountDirectory['endStaffAccessSessions']>()
     .mockResolvedValue(3);
   const requireActive = vi.fn<SubjectDirectory['requireActive']>().mockResolvedValue();
-  const findInstitution = vi
-    .fn<InstitutionDirectory['find']>()
-    .mockImplementation((_tx, id) =>
-      Promise.resolve({ id, societyId: 'society-1', name: 'Other School', active: true }),
-    );
+  const requireActiveInstitutions = vi
+    .fn<InstitutionDirectory['requireActive']>()
+    .mockResolvedValue();
   const educations = vi.fn<StaffRepository['educations']>().mockResolvedValue([]);
   const emergencyContacts = vi.fn<StaffRepository['emergencyContacts']>().mockResolvedValue([]);
   const requireInstitution = vi.fn<ScopeService['requireInstitution']>().mockResolvedValue({
@@ -198,7 +196,7 @@ function build(current: StaffRow | null = staff()) {
           ],
         ]),
       ),
-      find: findInstitution,
+      requireActive: requireActiveInstitutions,
     } as unknown as InstitutionDirectory,
     { requireActive } as unknown as SubjectDirectory,
     { record } as unknown as AuditService,
@@ -225,7 +223,7 @@ function build(current: StaffRow | null = staff()) {
     subjectIds,
     institutionIds,
     requireActive,
-    findInstitution,
+    requireActiveInstitutions,
     changeStaffEmail,
     announceStaffEmail,
     hasActiveRecord,
@@ -746,8 +744,11 @@ describe('StaffService', () => {
       await t.service.setInstitutions(owner, 'staff-1', {
         institutionIds: ['institution-3', 'institution-2'],
       });
-      expect(t.findInstitution).toHaveBeenCalledTimes(1);
-      expect(t.findInstitution).toHaveBeenCalledWith(expect.anything(), 'institution-3');
+      // Only the Institution new to the person is checked, with its place in the list.
+      expect(t.requireActiveInstitutions).toHaveBeenCalledTimes(1);
+      expect(t.requireActiveInstitutions).toHaveBeenCalledWith(expect.anything(), [
+        { id: 'institution-3', field: 'institutionIds[0]' },
+      ]);
       expect(t.replaceInstitutions.mock.calls[0]![2]).toMatchObject([
         { staff_member_id: 'staff-1', institution_id: 'institution-3' },
         { staff_member_id: 'staff-1', institution_id: 'institution-2' },
@@ -779,23 +780,15 @@ describe('StaffService', () => {
       expect(t.replaceInstitutions).not.toHaveBeenCalled();
     });
 
-    it('is 404 for an Institution the Owner cannot see and 422 for one that is not active', async () => {
-      const missing = build();
-      missing.findInstitution.mockResolvedValue(undefined);
+    it('passes on the refusal of an Institution that is not there or not active, and writes nothing', async () => {
+      const t = build();
+      t.requireActiveInstitutions.mockRejectedValue(
+        AppException.referenceInactive('institutionIds[0]'),
+      );
       expect(
-        await fail(missing.service.setInstitutions(owner, 'staff-1', { institutionIds: ['x'] })),
-      ).toEqual({ status: 404, code: 'NOT_FOUND' });
-      const hidden = build();
-      hidden.findInstitution.mockResolvedValue({
-        id: 'x',
-        societyId: 'society-1',
-        name: 'Closed',
-        active: false,
-      });
-      expect(
-        await fail(hidden.service.setInstitutions(owner, 'staff-1', { institutionIds: ['x'] })),
+        await fail(t.service.setInstitutions(owner, 'staff-1', { institutionIds: ['x'] })),
       ).toEqual({ status: 422, code: 'REFERENCE_INACTIVE' });
-      expect(hidden.replaceInstitutions).not.toHaveBeenCalled();
+      expect(t.replaceInstitutions).not.toHaveBeenCalled();
     });
   });
 });

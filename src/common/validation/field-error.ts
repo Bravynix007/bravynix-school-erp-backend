@@ -1,4 +1,4 @@
-import type { FieldError } from '../http/app-exception.js';
+import type { FieldError } from '../http/field-error.type.js';
 import { message } from '../i18n/messages.js';
 import { RequestContext } from '../request-context/request-context.js';
 

@@ -1,11 +1,5 @@
 import { AppException } from '../../common/http/app-exception.js';
-import {
-  emailInUse,
-  maskEmail,
-  nextSeat,
-  requireCanHoldRole,
-  requireNotSelf,
-} from './account-rules.js';
+import { emailInUse, maskEmail, nextSeat, requireCanHoldRole } from './account-rules.js';
 import type { AccountRow } from './account.repository.js';
 import { AccountStatus } from './auth-codes.js';
 
@@ -37,15 +31,6 @@ describe('requireCanHoldRole', () => {
     );
     expect(() => requireCanHoldRole(person(AccountStatus.Inactive))).toThrow(
       expect.objectContaining({ status: 409, code: 'INVALID_STATE' }),
-    );
-  });
-});
-
-describe('requireNotSelf', () => {
-  it('refuses an administrator acting on their own account', () => {
-    expect(() => requireNotSelf('a', 'b')).not.toThrow();
-    expect(() => requireNotSelf('a', 'a')).toThrow(
-      expect.objectContaining({ status: 409, code: 'CANNOT_ACT_ON_SELF' }),
     );
   });
 });

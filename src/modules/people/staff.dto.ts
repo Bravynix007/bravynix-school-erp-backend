@@ -22,6 +22,7 @@ import {
 } from 'class-validator';
 import { PageQueryDto } from '../../common/pagination/pagination.js';
 import { AddressDto } from '../../common/validation/address.dto.js';
+import { BooleanQuery } from '../../common/validation/boolean-query.js';
 import { IsCalendarDate } from '../../common/validation/calendar-date.js';
 import { LowerCaseUuid } from '../../common/validation/lower-case-uuid.js';
 import { PhoneDto } from '../../common/validation/phone.dto.js';
@@ -348,11 +349,7 @@ export class ListStaffQueryDto extends PageQueryDto {
     type: Boolean,
     description: '`true` for the staff whose access is blocked, `false` for the others',
   })
-  @IsOptional()
-  @Transform(({ value }: { value: unknown }) =>
-    value === 'true' ? true : value === 'false' ? false : value,
-  )
-  @IsBoolean()
+  @BooleanQuery()
   blocked?: boolean;
 
   @ApiPropertyOptional({ format: 'uuid', description: 'Only the staff who can teach this subject' })

@@ -28,7 +28,9 @@ function build(found: SocietyRow | null = society()) {
   const find = vi.fn<SocietyRepository['find']>().mockResolvedValue(found ?? undefined);
   const refs = vi
     .fn<SocietyRepository['refs']>()
-    .mockResolvedValue(new Map([['society-1', { id: 'society-1', code: 'SUN', name: 'Sunrise' }]]));
+    .mockResolvedValue(
+      new Map([['society-1', { id: 'society-1', code: 'SUN', name: 'Sunrise', status: 1 }]]),
+    );
   const grant = vi.fn<AccountDirectory['grant']>().mockResolvedValue(granted);
   const revoke = vi.fn<AccountDirectory['revoke']>().mockResolvedValue(2);
   const welcome = vi.fn<AccountDirectory['welcome']>();

@@ -317,6 +317,42 @@ describe('staff access: block, subjects and extra Institutions', () => {
       }
     });
 
+    it('leaves the Owner role of the same person in the same Society working: the open token, the context and AUTH-06', async () => {
+      // The Owner of Society A is also a staff member of it, and the Admin of the home Institution blocks that record.
+      const staff = await added({ email: owner.email });
+      const asOwner = await actingAs(owner.email, OWNER);
+      expect((await block(staff.id, institutionAdmin.token)).status).toBe(200);
+
+      expect((await api('get', '/v1/staff', asOwner.token)).status).toBe(200);
+      const login = await signInMobile(t, owner.email);
+      const flagged = login.contexts.map((c) => `${c.roleCode}:${c.isBlocked}`);
+      expect(flagged.toSorted()).toEqual([`${OWNER}:false`, `${TEACHER}:true`]);
+      const chosen = await api('post', '/v1/auth/context', login.accessToken, {
+        roleCode: OWNER,
+        societyId: societyA,
+      });
+      expect(chosen.status).toBe(200);
+      const refused = await api('post', '/v1/auth/context', login.accessToken, {
+        roleCode: TEACHER,
+        societyId: societyA,
+      });
+      expect(refused.status).toBe(403);
+      expect(refused.body.code).toBe('ACCESS_BLOCKED');
+    });
+
+    it('ends only the sessions of the Society it is written in: a session open in another Society goes on', async () => {
+      const staff = await added();
+      const { society: societyB, ownerOfB, institution } = await secondSociety();
+      await added({ email: staff.person.email, homeInstitutionId: institution }, ownerOfB.token);
+      const inA = await actingAs(staff.person.email, TEACHER);
+      const inB = await actingAs(staff.person.email, TEACHER, societyB);
+      expect((await block(staff.id)).status).toBe(200);
+      expect((await api('get', '/v1/me', inA.token)).status).toBe(401);
+      expect((await api('get', '/v1/me', inB.token)).status).toBe(200);
+      const entry = (await audit(staff.id)).find((row) => row.action === 'staff.blocked');
+      expect(entry?.new_values).toMatchObject({ sessionsEnded: 1 });
+    });
+
     it('shows the block on the profile and in the list, which filters by it', async () => {
       const blocked = await added({ firstName: 'Asha' });
       const open = await added({ firstName: 'Dev' });
@@ -512,6 +548,30 @@ describe('staff access: block, subjects and extra Institutions', () => {
       expect((await asTeacherReads(token, second)).status).toBe(404);
     });
 
+    it('counts the context as blocked only when every Institution the teacher reaches has its staff section blocked', async () => {
+      const staff = await added();
+      await setInstitutions(staff.id, [second]);
+      await blocks.setBlock(ownerDb, societyA, first, 2, true);
+
+      // The home Institution is stopped, the extra one is not: the context is open and works where it can.
+      const { token, login } = await actingAs(staff.person.email, TEACHER);
+      expect(login.contexts).toEqual([
+        { roleCode: TEACHER, societyId: societyA, societyName: 'Sunrise Trust', isBlocked: false },
+      ]);
+      expect((await asTeacherReads(token, second)).status).toBe(200);
+      expect((await asTeacherReads(token, first)).status).toBe(423);
+
+      // Once the extra one is stopped too, nothing is left. A section block still lets the person choose the
+      // context, to read why (API design 6.3); the gate stops the calls.
+      await blocks.setBlock(ownerDb, societyA, second, 2, true);
+      const me = await api('get', '/v1/me', token);
+      expect((me.body.data as unknown as { contexts: unknown[] }).contexts[0]).toMatchObject({
+        roleCode: TEACHER,
+        isBlocked: true,
+      });
+      expect((await asTeacherReads(token, second)).status).toBe(423);
+    });
+
     it('does not make the Admin of the home Institution reach the extra one', async () => {
       const staff = await added();
       await setInstitutions(staff.id, [second]);
@@ -609,6 +669,57 @@ describe('staff access: block, subjects and extra Institutions', () => {
       expect((await asked(fromB, extraIn(societyA, staff.person.id))).result).toEqual([]);
       await api('delete', `/v1/staff/${inB.id}`, ownerOfB.token);
       expect((await asked(fromA, blockedIn(societyB, staff.person.id))).result).toBe(false);
+    });
+
+    it('do not read the records of the other Societies when the caller’s own tenant is the person', async () => {
+      const staff = await added();
+      const { society: societyB, ownerOfB, institution } = await secondSociety();
+      await added({ email: staff.person.email, homeInstitutionId: institution }, ownerOfB.token);
+      await block(staff.id);
+      // Blocked in A, not in B: asked about B, by the person themselves in B, the answer is no.
+      const self = { societyId: societyB, personId: staff.person.id };
+      expect((await asked(self, blockedIn(societyB, staff.person.id))).result).toBe(false);
+      expect((await asked(self, blockedIn(societyA, staff.person.id))).result).toBe(true);
+    });
+  });
+
+  describe('the tables of migration 0027 refuse what the policies and keys forbid', () => {
+    it('does not let one Society write rows for another, in either list', async () => {
+      const { society: societyB, ownerOfB, institution } = await secondSociety();
+      const inB = await added({ homeInstitutionId: institution }, ownerOfB.token);
+      const subjectInB = await makeSubject(undefined, ownerOfB.token);
+      // Foreign keys skip row-level security, so only the insert policy stops a tenant naming another Society.
+      await expect(
+        database.transaction({ societyId: societyA }, (tx) =>
+          sql`insert into staff_subjects (staff_member_id, subject_id, society_id)
+            values (${inB.id}, ${subjectInB}, ${societyB})`.execute(tx),
+        ),
+      ).rejects.toThrow(/row-level security/);
+      await expect(
+        database.transaction({ societyId: societyA }, (tx) =>
+          sql`insert into staff_institutions (staff_member_id, institution_id, society_id)
+            values (${inB.id}, ${institution}, ${societyB})`.execute(tx),
+        ),
+      ).rejects.toThrow(/row-level security/);
+    });
+
+    it('does not let a list point across Societies, or a block be half written', async () => {
+      const staff = await added();
+      const { institution } = await secondSociety();
+      // The Institution is another Society's: the composite key (id, society) has no such row.
+      await expect(
+        database.transaction({ societyId: societyA }, (tx) =>
+          sql`insert into staff_institutions (staff_member_id, institution_id, society_id)
+            values (${staff.id}, ${institution}, ${societyA})`.execute(tx),
+        ),
+      ).rejects.toThrow(/fk_staff_institutions_institution/);
+      await expect(
+        database.transaction({ societyId: societyA }, (tx) =>
+          sql`update staff_members set access_blocked_at = now() where id = ${staff.id}`.execute(
+            tx,
+          ),
+        ),
+      ).rejects.toThrow(/ck_staff_members_access_block/);
     });
   });
 });
