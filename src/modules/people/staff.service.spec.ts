@@ -143,8 +143,11 @@ function build(current: StaffRow | null = staff()) {
   const revokeAdminAccessOfStaff = vi
     .fn<AccountDirectory['revokeAdminAccessOfStaff']>()
     .mockResolvedValue({ institutionIds: [], sessionsEnded: 0 });
-  const administeredInstitutionIds = vi
-    .fn<AccountDirectory['administeredInstitutionIds']>()
+  const adminAccessOfStaff = vi
+    .fn<AccountDirectory['adminAccessOfStaff']>()
+    .mockResolvedValue({ active: [], dormant: [] });
+  const releaseDormantAdminAccess = vi
+    .fn<AccountDirectory['releaseDormantAdminAccess']>()
     .mockResolvedValue([]);
   const announceStaffEmail = vi.fn<AccountDirectory['announceStaffEmail']>(() => {
     order.push('announce');
@@ -178,7 +181,8 @@ function build(current: StaffRow | null = staff()) {
       endRoleSessions,
       endStaffAccessSessions,
       revokeAdminAccessOfStaff,
-      administeredInstitutionIds,
+      adminAccessOfStaff,
+      releaseDormantAdminAccess,
       changeStaffEmail,
       announceStaffEmail,
     } as unknown as AccountDirectory,
@@ -227,7 +231,8 @@ function build(current: StaffRow | null = staff()) {
     endRoleSessions,
     endStaffAccessSessions,
     revokeAdminAccessOfStaff,
-    administeredInstitutionIds,
+    adminAccessOfStaff,
+    releaseDormantAdminAccess,
     replaceSubjects,
     replaceInstitutions,
     subjectIds,
@@ -722,12 +727,12 @@ describe('StaffService', () => {
         'is for the Society Owner only: an Institution Admin gets 403 on %s, and nothing changes',
         async (action, record) => {
           const t = build(record);
-          t.administeredInstitutionIds.mockResolvedValue(['institution-1']);
+          t.adminAccessOfStaff.mockResolvedValue({ active: ['institution-1'], dormant: [] });
           expect(await fail(t.service[action](admin, 'staff-1'))).toEqual({
             status: 403,
             code: 'FORBIDDEN',
           });
-          expect(t.administeredInstitutionIds).toHaveBeenCalledWith(expect.anything(), 'staff-1');
+          expect(t.adminAccessOfStaff).toHaveBeenCalledWith(expect.anything(), 'staff-1');
           expect(t.update).not.toHaveBeenCalled();
           expect(t.endStaffAccessSessions).not.toHaveBeenCalled();
           expect(t.record).not.toHaveBeenCalled();
@@ -736,10 +741,10 @@ describe('StaffService', () => {
 
       it('lets the Society Owner block and unblock them, without asking whether they are an Admin', async () => {
         const t = build();
-        t.administeredInstitutionIds.mockResolvedValue(['institution-1']);
+        t.adminAccessOfStaff.mockResolvedValue({ active: ['institution-1'], dormant: [] });
         await t.service.block(owner, 'staff-1');
         expect(t.update).toHaveBeenCalledTimes(1);
-        expect(t.administeredInstitutionIds).not.toHaveBeenCalled();
+        expect(t.adminAccessOfStaff).not.toHaveBeenCalled();
       });
 
       it('lets an Institution Admin block a staff member who is not an Admin', async () => {
@@ -750,7 +755,7 @@ describe('StaffService', () => {
 
       it('answers the caller’s own record with 409 first', async () => {
         const t = build(staff({ user_id: 'admin-1' }));
-        t.administeredInstitutionIds.mockResolvedValue(['institution-1']);
+        t.adminAccessOfStaff.mockResolvedValue({ active: ['institution-1'], dormant: [] });
         expect(await fail(t.service.block(admin, 'staff-1'))).toEqual({
           status: 409,
           code: 'CANNOT_ACT_ON_SELF',
@@ -851,7 +856,7 @@ describe('StaffService', () => {
     it('refuses to drop an Institution the person is an Admin of, and keeps the ones that stay', async () => {
       const t = build();
       t.institutionIds.mockResolvedValue(['institution-2', 'institution-3']);
-      t.administeredInstitutionIds.mockResolvedValue(['institution-3']);
+      t.adminAccessOfStaff.mockResolvedValue({ active: ['institution-3'], dormant: [] });
       expect(
         await fail(
           t.service.setInstitutions(owner, 'staff-1', { institutionIds: ['institution-2'] }),
@@ -864,10 +869,43 @@ describe('StaffService', () => {
       expect(t.replaceInstitutions).toHaveBeenCalledTimes(1);
     });
 
+    it('ends dormant Admin access at a dropped Institution, keeps it where the Institution stays, and says so in the audit entry', async () => {
+      const t = build();
+      t.institutionIds.mockResolvedValue(['institution-2', 'institution-3']);
+      t.adminAccessOfStaff.mockResolvedValue({
+        active: [],
+        dormant: ['institution-2', 'institution-3'],
+      });
+      t.releaseDormantAdminAccess.mockResolvedValue(['institution-2']);
+      await t.service.setInstitutions(owner, 'staff-1', { institutionIds: ['institution-3'] });
+      expect(t.releaseDormantAdminAccess).toHaveBeenCalledWith(
+        expect.anything(),
+        'staff-1',
+        ['institution-2'],
+        'staff_institution_removed',
+      );
+      expect(t.record.mock.calls[0]![1]).toMatchObject({
+        after: { institutionIds: ['institution-3'], adminRevoked: ['institution-2'] },
+      });
+    });
+
+    it('writes nothing, not even the dormant access, when active Admin access holds a dropped Institution', async () => {
+      const t = build();
+      t.institutionIds.mockResolvedValue(['institution-2', 'institution-3']);
+      t.adminAccessOfStaff.mockResolvedValue({
+        active: ['institution-3'],
+        dormant: ['institution-2'],
+      });
+      expect(
+        await fail(t.service.setInstitutions(owner, 'staff-1', { institutionIds: [] })),
+      ).toEqual({ status: 409, code: 'ADMIN_ACCESS_HELD' });
+      expect(t.releaseDormantAdminAccess).not.toHaveBeenCalled();
+    });
+
     it('lets an Admin of the home Institution change the extras, as the home is never in the list', async () => {
       const t = build();
       t.institutionIds.mockResolvedValue(['institution-2']);
-      t.administeredInstitutionIds.mockResolvedValue(['institution-1']);
+      t.adminAccessOfStaff.mockResolvedValue({ active: ['institution-1'], dormant: [] });
       await t.service.setInstitutions(owner, 'staff-1', { institutionIds: ['institution-3'] });
       expect(t.replaceInstitutions).toHaveBeenCalledTimes(1);
     });

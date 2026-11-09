@@ -99,9 +99,10 @@ function toSession(row: {
   };
 }
 
-/** Sessions and refresh tokens (DDD 9.1). Only the Identity module touches these tables. */
 /** A Society ID that no Society has, for asking about a person's records in every Society. */
 const NO_SOCIETY = '00000000-0000-0000-0000-000000000000';
+
+/** Sessions and refresh tokens (DDD 9.1). Only the Identity module touches these tables. */
 
 @Injectable()
 export class SessionRepository {

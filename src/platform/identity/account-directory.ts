@@ -409,10 +409,11 @@ export class AccountDirectory {
    * after the commit.
    */
   async grantInstitutionAdmin(tx: Tx, request: AdminGrantRequest): Promise<AccessHolder> {
+    // The identity lock comes before the person row is locked, as everywhere else: the other order deadlocks.
+    await this.requireSeparateRoles(tx, request.userId, RoleCode.InstitutionAdmin);
     const person = await this.accounts.findById(tx, request.userId, true);
     if (!person) throw AppException.notFound();
     requireCanHoldRole(person);
-    await this.requireSeparateRoles(tx, person.id, RoleCode.InstitutionAdmin);
     try {
       await this.accounts.insertAdminGrant(tx, request);
     } catch (error) {
@@ -447,14 +448,46 @@ export class AccountDirectory {
   }
 
   /**
-   * The Institutions a staff record holds Institution Admin access to, or held it to until the Institution was
-   * deactivated and a reactivation could give it back (STF-10).
+   * The Institutions a staff record holds Institution Admin access to (`active`), and those it held it to until the
+   * Institution was deactivated, which a reactivation could give back (`dormant`) (STF-06, STF-10).
    */
-  async administeredInstitutionIds(tx: Tx, staffMemberId: string): Promise<string[]> {
+  async adminAccessOfStaff(
+    tx: Tx,
+    staffMemberId: string,
+  ): Promise<{ active: string[]; dormant: string[] }> {
     const grants = await this.accounts.adminGrantsOfStaff(tx, staffMemberId, {
       restorable: RESTORABLE_REVOKE_REASONS,
     });
-    return grants.map((grant) => grant.institution_id!);
+    const at = (dormant: boolean) =>
+      grants
+        .filter((grant) => (grant.revoked_at !== null) === dormant)
+        .map((grant) => grant.institution_id!);
+    return { active: at(false), dormant: at(true) };
+  }
+
+  /**
+   * Ends the dormant Admin access of a record at these Institutions, because the Owner takes the Institutions away
+   * from the record (STF-10): the grants keep their revoke time and take the new reason, so no reactivation gives
+   * them back. Returns the Institutions it ended access at.
+   */
+  async releaseDormantAdminAccess(
+    tx: Tx,
+    staffMemberId: string,
+    institutionIds: readonly string[],
+    reason: string,
+  ): Promise<string[]> {
+    const grants = await this.accounts.adminGrantsOfStaff(tx, staffMemberId, {
+      restorable: RESTORABLE_REVOKE_REASONS,
+    });
+    const dormant = grants.filter(
+      (grant) => grant.revoked_at !== null && institutionIds.includes(grant.institution_id!),
+    );
+    await this.accounts.restampRevokeReason(
+      tx,
+      dormant.map((grant) => grant.id),
+      reason,
+    );
+    return dormant.map((grant) => grant.institution_id!);
   }
 
   /**

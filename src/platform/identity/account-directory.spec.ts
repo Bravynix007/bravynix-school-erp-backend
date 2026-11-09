@@ -789,7 +789,16 @@ describe('AccountDirectory, Institution Admin access', () => {
       await expect(t.directory.grantInstitutionAdmin(tx, grantRequest)).rejects.toThrow('boom');
     });
 
-    it('refuses a Super Admin with 409 ROLE_CONFLICT, under the identity lock taken after the person', async () => {
+    it('takes the identity lock before it locks the person row, as every other change does, so the two cannot deadlock', async () => {
+      const t = admin();
+      await t.directory.grantInstitutionAdmin(tx, grantRequest);
+      expect(t.lockRoleSeparation).toHaveBeenCalledWith(tx);
+      expect(t.lockRoleSeparation.mock.invocationCallOrder[0]).toBeLessThan(
+        t.findById.mock.invocationCallOrder[0] ?? 0,
+      );
+    });
+
+    it('refuses a Super Admin with 409 ROLE_CONFLICT, before it locks the person', async () => {
       const t = admin();
       t.holdsActiveGrant.mockResolvedValue(true);
       await expect(t.directory.grantInstitutionAdmin(tx, grantRequest)).rejects.toMatchObject({
@@ -798,9 +807,7 @@ describe('AccountDirectory, Institution Admin access', () => {
       });
       expect(t.holdsActiveGrant).toHaveBeenCalledWith(tx, 'user-1', [1]);
       expect(t.insertAdminGrant).not.toHaveBeenCalled();
-      expect(t.findById.mock.invocationCallOrder[0]).toBeLessThan(
-        t.lockRoleSeparation.mock.invocationCallOrder[0] ?? 0,
-      );
+      expect(t.findById).not.toHaveBeenCalled();
     });
 
     it('is 404 for a person who is gone', async () => {
@@ -924,16 +931,39 @@ describe('AccountDirectory, Institution Admin access', () => {
     });
   });
 
-  describe('administeredInstitutionIds', () => {
-    it('lists the Institutions of the active and the restorable grants of the record', async () => {
-      const t = admin(user(), [held, { ...held, id: 'g2', institution_id: 'inst-2' }]);
-      expect(await t.directory.administeredInstitutionIds(tx, 'staff-1')).toEqual([
-        'inst-1',
-        'inst-2',
+  describe('adminAccessOfStaff', () => {
+    it('tells the Institutions of active grants from those of grants that went dormant with theirs', async () => {
+      const t = admin(user(), [
+        held,
+        { ...held, id: 'g2', institution_id: 'inst-2', revoked_at: new Date('2026-10-01') },
       ]);
+      expect(await t.directory.adminAccessOfStaff(tx, 'staff-1')).toEqual({
+        active: ['inst-1'],
+        dormant: ['inst-2'],
+      });
       expect(t.adminGrantsOfStaff).toHaveBeenCalledWith(tx, 'staff-1', {
         restorable: ['society_deactivated', 'institution_deactivated'],
       });
+    });
+  });
+
+  describe('releaseDormantAdminAccess', () => {
+    it('gives the dormant grants at the named Institutions the new reason, and leaves active ones and others alone', async () => {
+      const dormant = { ...held, revoked_at: new Date('2026-10-01') };
+      const t = admin(user(), [
+        held,
+        { ...dormant, id: 'g2', institution_id: 'inst-2' },
+        { ...dormant, id: 'g3', institution_id: 'inst-3' },
+      ]);
+      const released = await t.directory.releaseDormantAdminAccess(
+        tx,
+        'staff-1',
+        ['inst-1', 'inst-2'],
+        'staff_institution_removed',
+      );
+      expect(released).toEqual(['inst-2']);
+      expect(t.restampRevokeReason).toHaveBeenCalledWith(tx, ['g2'], 'staff_institution_removed');
+      expect(t.revokeGrant).not.toHaveBeenCalled();
     });
   });
 

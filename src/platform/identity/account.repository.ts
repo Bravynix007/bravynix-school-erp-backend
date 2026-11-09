@@ -67,7 +67,7 @@ export class AccountRepository {
    * record linked by email, and an email change. So a Super Admin grant and an Owner grant
    * for the same person cannot both pass the separation check (PRD 5.2), and an access
    * given to the person an email names cannot land on a person whose email is being
-   * changed at the same moment (STF-13). Taken after the seat lock and last of all. It is
+   * changed at the same moment (STF-13). Taken after any seat lock and before any person row is locked. It is
    * one lock, not one per person: onboarding grants several people in one
    * transaction, and per-person locks taken in the operator's order deadlock
    * when two onboardings name the same people in the opposite order. Grants are

@@ -548,13 +548,23 @@ describe('Institution Admins: promoted from the staff', () => {
         ]);
       });
 
-      it('STF-10 still refuses to drop the Institution, because the access could come back', async () => {
-        const { staff } = await dormant();
-        const held = await api('put', `/v1/staff/${staff.id}/institutions`, owner.token, {
+      it('STF-10 ends it when the Owner drops that Institution, so the Owner is not stuck, and says so in the audit entry', async () => {
+        const { staff, revokedAt } = await dormant();
+        const dropped = await api('put', `/v1/staff/${staff.id}/institutions`, owner.token, {
           institutionIds: [],
         });
-        expect(held.status).toBe(409);
-        expect(held.body.code).toBe('ADMIN_ACCESS_HELD');
+        expect(dropped.status).toBe(200);
+        expect(await grantRows(staff.id)).toEqual([
+          {
+            institution_id: second,
+            revoked_at: revokedAt,
+            revoke_reason: 'staff_institution_removed',
+          },
+        ]);
+        const entry = (await audit(staff.id)).findLast(
+          (row) => row.action === 'staff.institutions_changed',
+        );
+        expect(entry?.new_values).toMatchObject({ adminRevoked: [second] });
       });
     });
 
@@ -607,6 +617,26 @@ describe('Institution Admins: promoted from the staff', () => {
       expect(made.status).toBe(201);
       await api('delete', `/v1/platform/super-admins/${staff.person.id}`, admin);
     });
+  });
+
+  it('INS-09 and STF-03 of the same person in another Society, at the same moment, both succeed: the two take the identity lock first, so they cannot deadlock', async () => {
+    const other = await makeSociety();
+    const ownerB = await fixtures.owner(other);
+    const institutionB = await makeInstitution(ownerB.token);
+    for (let run = 0; run < 8; run += 1) {
+      const staff = await added();
+      const [granted, linked] = await Promise.all([
+        grant(first, staff.id),
+        api('post', '/v1/staff', ownerB.token, {
+          homeInstitutionId: institutionB,
+          email: staff.person.email,
+          firstName: 'Meera',
+          classCategoryId: categoryId,
+          mobile: { countryCode: '91', number: '9876500002' },
+        }),
+      ]);
+      expect([granted.status, linked.status]).toEqual([201, 201]);
+    }
   });
 
   it('keeps the grants and sessions of one Society out of reach of another: a database transaction for B sees none of A’s admin grants through the app', async () => {

@@ -58,6 +58,9 @@ import {
 } from './staff.resource.js';
 import { requireValidStaff, staffAuditView } from './staff.rules.js';
 
+/** Why dormant Admin access ended when the Owner took its Institution away from the record (STF-10). */
+const STAFF_INSTITUTION_REMOVED = 'staff_institution_removed';
+
 /** Why the Admin grants of a staff record were revoked when the record was deactivated. */
 const STAFF_DEACTIVATED = 'staff_deactivated';
 
@@ -510,9 +513,8 @@ export class StaffService {
    */
   private async requireOwnerForAdmin(tx: Tx, principal: Principal, id: string): Promise<void> {
     if (principal.roleCode === RoleCode.SocietyOwner) return;
-    if ((await this.accounts.administeredInstitutionIds(tx, id)).length > 0) {
-      throw AppException.forbidden();
-    }
+    const { active, dormant } = await this.accounts.adminAccessOfStaff(tx, id);
+    if (active.length + dormant.length > 0) throw AppException.forbidden();
   }
 
   /**
@@ -574,17 +576,15 @@ export class StaffService {
       const current = await this.lockedActive(tx, id);
       const before = await this.staff.institutionIds(tx, id);
       if (sameIds(before, body.institutionIds)) return this.resourceOf(tx, current);
-      // An Admin of an Institution must keep it as an extra Institution: revoke the access first. Access that an
-      // Institution's deactivation took away, and a reactivation could return, counts as held.
-      const administered = await this.accounts.administeredInstitutionIds(tx, id);
+      // An Admin of an Institution must keep it as an extra Institution: revoke the access first.
+      const access = await this.accounts.adminAccessOfStaff(tx, id);
       const kept = new Set(body.institutionIds);
-      if (
-        administered.some(
+      const dropped = (institutionIds: string[]) =>
+        institutionIds.filter(
           (institutionId) => before.includes(institutionId) && !kept.has(institutionId),
-        )
-      ) {
+        );
+      if (dropped(access.active).length > 0)
         throw AppException.conflict(ErrorCode.ADMIN_ACCESS_HELD);
-      }
       const added = body.institutionIds.flatMap((institutionId, index) =>
         before.includes(institutionId)
           ? []
@@ -594,6 +594,13 @@ export class StaffService {
       if (home)
         throw AppException.validation([fieldError(home.field, FieldErrorCode.INVALID_VALUE)]);
       await this.institutions.requireActive(tx, added);
+      // Access that the deactivation of an Institution took away goes with the Institution the Owner drops.
+      const released = await this.accounts.releaseDormantAdminAccess(
+        tx,
+        id,
+        dropped(access.dormant),
+        STAFF_INSTITUTION_REMOVED,
+      );
       await this.staff.replaceInstitutions(
         tx,
         id,
@@ -610,7 +617,10 @@ export class StaffService {
         entityType: 'staff_member',
         entityId: id,
         before: { institutionIds: before },
-        after: { institutionIds: body.institutionIds.toSorted() },
+        after: {
+          institutionIds: body.institutionIds.toSorted(),
+          ...(released.length > 0 ? { adminRevoked: released } : {}),
+        },
       });
       return this.resourceOf(tx, current);
     });
