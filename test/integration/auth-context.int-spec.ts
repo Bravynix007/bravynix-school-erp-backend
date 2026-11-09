@@ -1,5 +1,6 @@
 import { Kysely, PostgresDialect, sql, type RawBuilder } from 'kysely';
 import request from 'supertest';
+import { newId } from '../../src/common/ids/ids.js';
 import { createPool } from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
 import { OtpService } from '../../src/platform/identity/otp.service.js';
@@ -9,6 +10,7 @@ import { institutions, personaByKey, societies } from '../../src/seeds/two-world
 import { FixtureModule } from '../support/fixture.module.js';
 import { readAuditRows } from '../support/audit-rows.js';
 import { clearLoginState } from '../support/login-state.js';
+import { removeScratchPeople, scratchEmail } from '../support/scratch-people.js';
 import { signInMobile } from '../support/sessions.js';
 import { createTestApp, type TestApp } from '../support/test-app.js';
 
@@ -132,22 +134,30 @@ describe('AUTH-06 switch context and ME-01', () => {
     });
 
     it('is one context for an Institution Admin of two Institutions in one Society', async () => {
-      for (const key of ['A1', 'A2']) {
-        const institution = institutions.find((i) => i.key === key)!;
-        await sql`insert into role_assignments (user_id, role_code, society_id, institution_id, staff_member_id)
-          values (${admin.id}, 3, ${societyA.id}, ${institution.id}, gen_random_uuid())`.execute(
-          ownerDb,
-        );
+      // A person of its own, so what other files leave behind (the seeded staff records) cannot add a context.
+      const person = newId();
+      const email = scratchEmail();
+      await sql`insert into users (id, email) values (${person}, ${email})`.execute(ownerDb);
+      try {
+        for (const key of ['A1', 'A2']) {
+          const institution = institutions.find((i) => i.key === key)!;
+          await sql`insert into role_assignments (user_id, role_code, society_id, institution_id, staff_member_id)
+            values (${person}, 3, ${societyA.id}, ${institution.id}, gen_random_uuid())`.execute(
+            ownerDb,
+          );
+        }
+        const login = await signIn(email);
+        const expected = {
+          roleCode: 3,
+          societyId: societyA.id,
+          societyName: societyA.name,
+          isBlocked: false,
+        };
+        expect(login.contexts).toEqual([expected]);
+        expect(login.session.activeContext).toEqual(expected);
+      } finally {
+        await removeScratchPeople(ownerDb, [email]);
       }
-      const login = await signIn(admin.email);
-      const expected = {
-        roleCode: 3,
-        societyId: societyA.id,
-        societyName: societyA.name,
-        isBlocked: false,
-      };
-      expect(login.contexts).toEqual([expected]);
-      expect(login.session.activeContext).toEqual(expected);
     });
 
     it('answers /me for a person with no context, and for a Super Admin on the console', async () => {

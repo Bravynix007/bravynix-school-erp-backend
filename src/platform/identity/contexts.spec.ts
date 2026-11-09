@@ -36,6 +36,15 @@ describe('mobileContexts', () => {
     ).toEqual([choice(3, 'soc-1'), choice(3, 'soc-2')]);
   });
 
+  it('lists a teacher context for a staff record, blocked when the home Institution has its staff blocked', () => {
+    const open = { ...grant(4, 'soc-1', 'ins-1') };
+    const blocked = { ...grant(4, 'soc-2', 'ins-2'), staffBlocked: true };
+    expect(mobileContexts([open, blocked])).toEqual([
+      choice(4, 'soc-1'),
+      { ...choice(4, 'soc-2'), isBlocked: true },
+    ]);
+  });
+
   it('names the Society of each context, so two Owner seats can be told apart', () => {
     expect(
       mobileContexts([grant(2, 'soc-1'), grant(2, 'soc-2')]).map((c) => c.societyName),

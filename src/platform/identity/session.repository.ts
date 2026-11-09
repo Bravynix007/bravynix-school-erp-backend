@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { sql } from 'kysely';
+import { RoleCode } from '../../common/auth/roles.js';
 import type { Db, Tx } from '../database/index.js';
 
 /** One active grant: a role, in a Society for roles 2 and 3, in an Institution for role 3. */
@@ -96,8 +97,33 @@ function toSession(row: {
 /** Sessions and refresh tokens (DDD 9.1). Only the Identity module touches these tables. */
 @Injectable()
 export class SessionRepository {
-  /** The grants that let this person act as Super Admin, Owner or Institution Admin. */
+  /**
+   * The roles this person can act as: Super Admin, Owner and Institution Admin by a grant, Teacher / Staff by an
+   * active staff record (DDD 7.2, M1), one entry for the record's home Institution.
+   */
   async activeGrants(tx: Db, userId: string): Promise<Grant[]> {
+    return [...(await this.explicitGrants(tx, userId)), ...(await this.staffRoles(tx, userId))];
+  }
+
+  /** The active staff records of a person, as role 4 entries; read through the definer function, since sign-in has no role set. */
+  async staffRoles(db: Db, userId: string): Promise<Grant[]> {
+    const { rows } = await sql<{
+      society_id: string;
+      home_institution_id: string;
+      society_name: string | null;
+      staff_blocked: boolean;
+    }>`select * from app_staff_roles(${userId})`.execute(db);
+    return rows.map((row) => ({
+      roleCode: RoleCode.TeacherStaff,
+      societyId: row.society_id,
+      societyName: row.society_name,
+      institutionId: row.home_institution_id,
+      ownersBlocked: false,
+      staffBlocked: row.staff_blocked,
+    }));
+  }
+
+  private async explicitGrants(tx: Db, userId: string): Promise<Grant[]> {
     // Sign-in has no role set, so row-level security hides every Society and block; the
     // functions hand back the one name, and the active blocks, of a Society the person
     // holds a grant in.
@@ -262,13 +288,16 @@ export class SessionRepository {
     return Number((await query.executeTakeFirst()).numUpdatedRows);
   }
 
-  /** Is this role still granted to the person, in this Society for roles 2 and 3? */
+  /** Is this role still the person's: a grant for roles 1 to 3, an active staff record in the Society for role 4? */
   async hasGrant(
     db: Db,
     userId: string,
     roleCode: number,
     societyId: string | null,
   ): Promise<boolean> {
+    if (roleCode === RoleCode.TeacherStaff) {
+      return (await this.staffRoles(db, userId)).some((role) => role.societyId === societyId);
+    }
     let query = db
       .selectFrom('role_assignments')
       .select('id')

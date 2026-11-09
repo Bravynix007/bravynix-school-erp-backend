@@ -11,6 +11,8 @@ import type { StaffResource } from './staff.resource.js';
 import { StaffService } from './staff.service.js';
 
 const ADMINS = [RoleCode.SocietyOwner, RoleCode.InstitutionAdmin];
+/** A teacher reads their own profile (STF-03, "TS self"). */
+const ADMINS_AND_SELF = [...ADMINS, RoleCode.TeacherStaff];
 
 /** STF-02 to STF-05 (API design 9.5): the staff of a Society. */
 @ApiTags('Staff')
@@ -33,10 +35,10 @@ export class StaffController {
   }
 
   @Policy({
-    roles: ADMINS,
+    roles: ADMINS_AND_SELF,
     scope: 'institution',
     operationId: 'STF-03',
-    rule: 'The profile of a staff member whose home Institution the caller reaches; a teacher’s own profile arrives with the teacher sign-in',
+    rule: 'The profile of a staff member whose home Institution the caller reaches; a teacher reads only their own',
   })
   @Get(':staffMemberId')
   get(

@@ -51,10 +51,10 @@ export interface InstitutionContext {
  * exists (SDD 12.4); an Institution whose staff are blocked answers 423 to
  * its staff, and not to the Owner.
  *
- * Roles 2 and 3 only for now: a Society Owner reaches every active Institution
- * of their Society, an Institution Admin those they hold a grant for. Roles 4
- * and 5 reach none until the People module adds their records, so they fail
- * closed. Super Admin has no Society: platform endpoints address Societies and
+ * A Society Owner reaches every active Institution of their Society, an
+ * Institution Admin those they hold a grant for, a Teacher / Staff the home
+ * Institution of their staff record. Role 5 reaches none until guardians
+ * exist, so it fails closed. Super Admin has no Society: platform endpoints address Societies and
  * Institutions by ID under the Super Admin policy of row-level security, and do
  * not use this check.
  */
@@ -151,6 +151,12 @@ export class ScopeService {
           tenant,
           societyId,
           await this.grants.adminInstitutionIds(personId, societyId),
+        );
+      case RoleCode.TeacherStaff:
+        return this.repository.activeInstitutionIds(
+          tenant,
+          societyId,
+          await this.grants.staffInstitutionIds(personId, societyId),
         );
       default:
         return [];

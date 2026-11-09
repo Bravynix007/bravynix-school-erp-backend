@@ -26,6 +26,14 @@ export class GrantDirectory {
     return rows.flatMap((row) => (row.institution_id === null ? [] : [row.institution_id]));
   }
 
+  /** The home Institutions of a person's active staff records in one Society, for a Teacher / Staff. */
+  async staffInstitutionIds(userId: string, societyId: string): Promise<string[]> {
+    const { rows } = await sql<{ home_institution_id: string }>`
+      select home_institution_id from app_staff_roles(${userId}) where society_id = ${societyId}
+    `.execute(this.database.db);
+    return rows.map((row) => row.home_institution_id);
+  }
+
   /** The people with an active Society Owner grant in a Society, by name. */
   async societyOwners(societyId: string): Promise<SocietyOwner[]> {
     const rows = await this.database.db

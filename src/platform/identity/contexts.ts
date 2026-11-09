@@ -9,7 +9,7 @@ export interface Context {
 
 /**
  * One role the person can choose from the list in AUTH-02 and ME-01 (API
- * design 6.3). Staff and children arrive with the People module. `isBlocked`
+ * design 6.3). Children arrive with the guardians. `isBlocked`
  * says a section block stops the role there (PLT-42): the Owners of the Society
  * are blocked, or every Institution the person reaches has its staff blocked.
  */
@@ -62,9 +62,9 @@ export function onlyContext<T extends Context>(contexts: readonly T[]): T | null
 
 /**
  * The listed context for `roleCode` in `societyId`, which is what the person
- * may act as (roles 2 and 3 by a grant). Roles 4 and 5 come from staff and
- * guardian records, which exist from the People module on; until then they
- * are never listed.
+ * may act as (roles 2 and 3 by a grant, role 4 by an active staff record).
+ * Role 5 comes from a guardian link, which exists from a later slice on;
+ * until then it is never listed.
  */
 export function findContext<T extends Context>(
   contexts: readonly T[],

@@ -45,7 +45,7 @@ export class InstitutionController {
     roles: [RoleCode.SocietyOwner, RoleCode.InstitutionAdmin, RoleCode.TeacherStaff],
     scope: 'institution',
     operationId: 'INS-03',
-    rule: 'An Institution in the caller’s scope; staff reach theirs when the People module lands',
+    rule: 'An Institution in the caller’s scope; a teacher reaches theirs; parents when guardians exist',
   })
   @Get(':institutionId')
   get(

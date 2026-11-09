@@ -383,13 +383,17 @@ export class StaffService {
 
   /**
    * The Institution context of a staff member's home, once the caller is known to reach it: 404 for a person who is
-   * not there, or who is at an Institution the caller does not reach; 423 for an Admin whose Institution has its
+   * not there, who is at an Institution the caller does not reach, or, for a teacher, is not the teacher; 423 for an Admin whose Institution has its
    * staff blocked.
    */
   private async contextOf(principal: Principal, id: string) {
     const scope = await this.scope.forPrincipal(principal);
     const home = await this.database.transaction(scope.tenant, async (tx) => {
       const found = await this.staff.find(tx, id);
+      // A teacher reaches their own record and nobody else's, as if the others did not exist.
+      if (principal.roleCode === RoleCode.TeacherStaff && found?.user_id !== principal.personId) {
+        return undefined;
+      }
       return found?.home_institution_id;
     });
     if (!home) throw AppException.notFound();
