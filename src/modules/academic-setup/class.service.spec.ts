@@ -8,6 +8,7 @@ import type { InstitutionContext, ScopeService } from '../../platform/tenancy/in
 import type { ClassRepository, ClassRow, ClassView } from './class.repository.js';
 import { ClassService } from './class.service.js';
 import type { SectionRepository, SectionRow } from './section.repository.js';
+import type { TeachingStaff } from './teaching-staff.js';
 
 const owner = {
   personId: 'owner-1',
@@ -85,6 +86,8 @@ const fail = async (work: Promise<unknown>) => {
 const unique = (constraint: string) =>
   Object.assign(new Error('unique'), { code: '23505', constraint });
 
+const teacher = { ...owner, personId: 'teacher-1', roleCode: 4 } as Principal;
+
 function build(current: ClassRow | null = row(), offeredIds: string[] = ['cat-hs']) {
   const tx = {} as Tx;
   const transaction = vi.fn<DatabaseService['transaction']>((_tenant, work) => work(tx));
@@ -137,6 +140,9 @@ function build(current: ClassRow | null = row(), offeredIds: string[] = ['cat-hs
   const forPrincipal = vi
     .fn<ScopeService['forPrincipal']>()
     .mockResolvedValue({ tenant } as Awaited<ReturnType<ScopeService['forPrincipal']>>);
+  const ownSectionIds = vi
+    .fn<TeachingStaff['ownSectionIds']>()
+    .mockResolvedValue(new Set(['section-1']));
   const record = vi.fn<AuditService['record']>().mockResolvedValue('audit-1');
   const service = new ClassService(
     { transaction } as unknown as DatabaseService,
@@ -147,9 +153,20 @@ function build(current: ClassRow | null = row(), offeredIds: string[] = ['cat-hs
     {
       describe: vi.fn<PersonDirectory['describe']>().mockResolvedValue(new Map()),
     } as unknown as PersonDirectory,
+    { ownSectionIds } as unknown as TeachingStaff,
     { record } as unknown as AuditService,
   );
-  return { service, active, find, insert, update, sectionUpdate, record, requireInstitution };
+  return {
+    service,
+    ownSectionIds,
+    active,
+    find,
+    insert,
+    update,
+    sectionUpdate,
+    record,
+    requireInstitution,
+  };
 }
 
 const one = { institutionId: 'inst-1', predefinedClassId: 'pc-9' };
@@ -161,6 +178,25 @@ describe('ClassService', () => {
       const result = await t.service.list(owner, { institutionId: 'inst-1' });
       expect(result.data).toEqual([expect.objectContaining({ id: 'class-1', displayName: '9th' })]);
       expect(t.active).toHaveBeenCalledWith(expect.anything(), 'inst-1');
+      expect(t.ownSectionIds).not.toHaveBeenCalled();
+    });
+
+    it('shows a teacher only the classes of the sections they lead or teach this year', async () => {
+      const t = build();
+      t.ownSectionIds.mockResolvedValue(new Set(['section-1', 'section-2']));
+      await t.service.list(teacher, { institutionId: 'inst-1' });
+      expect(t.ownSectionIds).toHaveBeenCalledWith(expect.anything(), 'teacher-1', 'inst-1');
+      expect(t.active).toHaveBeenCalledWith(expect.anything(), 'inst-1', [
+        'section-1',
+        'section-2',
+      ]);
+    });
+
+    it('shows a teacher with no section no class, without asking the database', async () => {
+      const t = build();
+      t.ownSectionIds.mockResolvedValue(new Set());
+      expect((await t.service.list(teacher, { institutionId: 'inst-1' })).data).toEqual([]);
+      expect(t.active).not.toHaveBeenCalled();
     });
   });
 

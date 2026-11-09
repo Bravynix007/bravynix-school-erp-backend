@@ -6,6 +6,7 @@ import type { PersonDirectory } from '../../platform/identity/index.js';
 import type { InstitutionContext, ScopeService } from '../../platform/tenancy/index.js';
 import type { AcademicYearRepository, AcademicYearRow } from './academic-year.repository.js';
 import { AcademicYearService } from './academic-year.service.js';
+import type { TeachingStaff } from './teaching-staff.js';
 
 const owner = {
   personId: 'owner-1',
@@ -51,6 +52,8 @@ const fail = async (work: Promise<unknown>) => {
   throw new Error('expected a refusal');
 };
 
+const teacher = { ...owner, personId: 'teacher-1', roleCode: 4 } as Principal;
+
 function build(current: AcademicYearRow | null = year(), hasActive = true) {
   const tx = {} as Tx;
   const transaction = vi.fn<DatabaseService['transaction']>((_tenant, work) => work(tx));
@@ -77,6 +80,7 @@ function build(current: AcademicYearRow | null = year(), hasActive = true) {
   const forPrincipal = vi
     .fn<ScopeService['forPrincipal']>()
     .mockResolvedValue({ tenant } as Awaited<ReturnType<ScopeService['forPrincipal']>>);
+  const ownYearIds = vi.fn<TeachingStaff['ownYearIds']>().mockResolvedValue(new Set(['year-1']));
   const record = vi.fn<AuditService['record']>().mockResolvedValue('audit-1');
   const service = new AcademicYearService(
     { transaction } as unknown as DatabaseService,
@@ -93,9 +97,10 @@ function build(current: AcademicYearRow | null = year(), hasActive = true) {
     {
       describe: vi.fn<PersonDirectory['describe']>().mockResolvedValue(new Map()),
     } as unknown as PersonDirectory,
+    { ownYearIds } as unknown as TeachingStaff,
     { record } as unknown as AuditService,
   );
-  return { service, lockInstitution, active, find, currentOf, insert, update, record };
+  return { service, lockInstitution, ownYearIds, active, find, currentOf, insert, update, record };
 }
 
 const body = {
@@ -112,6 +117,24 @@ describe('AcademicYearService', () => {
       const result = await t.service.list(owner, { institutionId: 'inst-1' });
       expect(result.data).toEqual([expect.objectContaining({ id: 'year-1', name: '2026-2027' })]);
       expect(t.active).toHaveBeenCalledWith(expect.anything(), 'inst-1');
+      expect(t.ownYearIds).not.toHaveBeenCalled();
+    });
+
+    it('shows a teacher only the years in which they hold an assignment', async () => {
+      const t = build();
+      t.ownYearIds.mockResolvedValue(new Set(['year-1', 'year-2']));
+      const result = await t.service.list(teacher, { institutionId: 'inst-1' });
+      expect(result.data).toHaveLength(1);
+      expect(t.ownYearIds).toHaveBeenCalledWith(expect.anything(), 'teacher-1', 'inst-1');
+      expect(t.active).toHaveBeenCalledWith(expect.anything(), 'inst-1', ['year-1', 'year-2']);
+    });
+
+    it('shows a teacher with no assignment no year, without asking the database', async () => {
+      const t = build();
+      t.ownYearIds.mockResolvedValue(new Set());
+      const result = await t.service.list(teacher, { institutionId: 'inst-1' });
+      expect(result.data).toEqual([]);
+      expect(t.active).not.toHaveBeenCalled();
     });
   });
 

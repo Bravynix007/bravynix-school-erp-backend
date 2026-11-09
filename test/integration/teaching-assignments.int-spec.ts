@@ -1,5 +1,4 @@
 import { Kysely, PostgresDialect, sql } from 'kysely';
-import { newId } from '../../src/common/ids/ids.js';
 import { DatabaseService } from '../../src/platform/database/index.js';
 import { createPool } from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
@@ -11,8 +10,7 @@ import { readAuditRows } from '../support/audit-rows.js';
 import { FixtureModule } from '../support/fixture.module.js';
 import { clearLoginState } from '../support/login-state.js';
 import { PlatformFixtures, type SignedInPerson } from '../support/platform-fixtures.js';
-import { removeScratchSocieties } from '../support/scratch-society.js';
-import { signInMobile } from '../support/sessions.js';
+import { SchoolKit, type SchoolStaff } from '../support/school-kit.js';
 import { createTestApp, type TestApp } from '../support/test-app.js';
 
 const migrationUrl = process.env.TEST_DATABASE_MIGRATION_URL!;
@@ -20,14 +18,8 @@ const superAdmin = personaByKey('SA1');
 const TEACHER = 4;
 const missing = '00000000-0000-7000-8000-00000000ffff';
 
-interface Entry {
-  id: string;
-  code: string;
-}
-interface StaffData {
-  id: string;
+interface StaffData extends SchoolStaff {
   classTeachers: { academicYearId: string; sectionId: string }[];
-  person: { id: string; email: string };
 }
 interface AssignmentBody {
   id: string;
@@ -48,8 +40,7 @@ describe('class teachers and teaching assignments', () => {
   let fixtures: PlatformFixtures;
   let admin: string;
   let api: ReturnType<typeof apiCaller>;
-  const societies: string[] = [];
-  const staffUsers: string[] = [];
+  let kit: SchoolKit;
 
   let owner: SignedInPerson;
   let institutionAdmin: SignedInPerson;
@@ -65,55 +56,15 @@ describe('class teachers and teaching assignments', () => {
   let teacher: StaffData;
   let other: StaffData;
 
-  const masters = async (type: string) =>
-    (await api('get', `/v1/masters/${type}`, admin)).body.data as unknown as Entry[];
-
-  const makeSociety = async () => {
-    const res = await api('post', '/v1/platform/societies', admin, {
-      name: 'Sunrise Trust',
-      code: `S${newId().slice(-12)}`,
-    });
-    societies.push(res.body.data.id);
-    return res.body.data.id as string;
-  };
-  const makeInstitution = async (token: string) => {
-    const res = await api('post', '/v1/institutions', token, {
-      name: 'Green Valley School',
-      code: `I${newId().slice(-10)}`,
-      address: { line1: '12 Lake Road' },
-      classesOffered: [categoryId],
-    });
-    expect(res.status).toBe(201);
-    return res.body.data.id as string;
-  };
-  const makeYear = async (institutionId: string, fields: object = {}, token = owner.token) => {
-    const res = await api('post', '/v1/academic-years', token, {
-      institutionId,
-      name: '2026-2027',
-      startDate: '2026-06-01',
-      endDate: '2027-03-31',
-      ...fields,
-    });
-    expect(res.status).toBe(201);
-    return res.body.data.id as string;
-  };
-  const makeClass = async (
-    institutionId: string,
-    predefinedClassId: string,
-    token = owner.token,
-  ) => {
-    const res = await api('post', '/v1/classes', token, { institutionId, predefinedClassId });
-    expect(res.status).toBe(201);
-    return res.body.data.id as string;
-  };
-  const makeSection = async (cls: string, predefinedSectionId: string, token = owner.token) => {
-    const res = await api('post', '/v1/sections', token, {
-      classId: cls,
-      predefinedSectionId,
-    });
-    expect(res.status).toBe(201);
-    return res.body.data.id as string;
-  };
+  const masters = (type: string) => kit.masters(admin, type);
+  const makeSociety = () => kit.society(admin);
+  const makeInstitution = (token: string) => kit.institution(token, categoryId);
+  const makeYear = (institutionId: string, fields: object = {}, token = owner.token) =>
+    kit.year(token, institutionId, fields);
+  const makeClass = (institutionId: string, predefinedClassId: string, token = owner.token) =>
+    kit.klass(token, institutionId, predefinedClassId);
+  const makeSection = (cls: string, predefinedSectionId: string, token = owner.token) =>
+    kit.section(token, cls, predefinedSectionId);
   /** A section of the other Institution, which the teacher's home is not. */
   const sectionOfSecond = async () => {
     const classes = await masters('predefined-classes');
@@ -121,38 +72,14 @@ describe('class teachers and teaching assignments', () => {
     const secondClass = await makeClass(second, classes.find((c) => c.code === 'C09')!.id);
     return makeSection(secondClass, sectionCodes.find((s) => s.code === 'A')!.id);
   };
-  const makeSubject = async (name = `Subject ${newId().slice(-6)}`, token = owner.token) => {
-    const res = await api('post', '/v1/subjects', token, { name });
-    expect(res.status).toBe(201);
-    return res.body.data.id as string;
-  };
-  const added = async (fields: object = {}, token = owner.token) => {
-    const res = await api('post', '/v1/staff', token, {
-      homeInstitutionId: first,
-      email: `${newId()}@staff.test`,
-      firstName: 'Meera',
-      classCategoryId: categoryId,
-      mobile: { countryCode: '91', number: '9876500001' },
-      ...fields,
-    });
-    expect(res.status).toBe(201);
-    const staff = res.body.data as unknown as StaffData;
-    staffUsers.push(staff.person.id);
-    return staff;
-  };
+  const makeSubject = (name?: string, token = owner.token) => kit.subject(token, name);
+  const added = (fields: object = {}, token = owner.token): Promise<StaffData> =>
+    kit.staff(token, first, categoryId, fields) as Promise<StaffData>;
   const teachesMath = async (staff: StaffData, subjectIds = [math]) => {
     const res = await api('put', `/v1/staff/${staff.id}/subjects`, owner.token, { subjectIds });
     expect(res.status).toBe(200);
   };
-  const actingAs = async (address: string, roleCode: number) => {
-    const login = await signInMobile(t, address);
-    const chosen = await api('post', '/v1/auth/context', login.accessToken, {
-      roleCode,
-      societyId: societyA,
-    });
-    expect(chosen.status).toBe(200);
-    return chosen.body.data.accessToken as string;
-  };
+  const actingAs = (email: string, roleCode: number) => kit.actingAs(email, roleCode, societyA);
 
   const lead = (id: string, sectionId: string | null, academicYearId = year, token = owner.token) =>
     api('put', `/v1/staff/${id}/class-teacher`, token, { academicYearId, sectionId });
@@ -230,6 +157,7 @@ describe('class teachers and teaching assignments', () => {
     database = t.app.get(DatabaseService);
     fixtures = new PlatformFixtures(t, ownerDb);
     api = apiCaller(t);
+    kit = new SchoolKit(t, api);
   });
 
   afterAll(async () => {
@@ -262,11 +190,7 @@ describe('class teachers and teaching assignments', () => {
 
   afterEach(async () => {
     await clearLoginState(ownerDb);
-    await removeScratchSocieties(ownerDb, societies.splice(0));
-    for (const id of staffUsers.splice(0)) {
-      await sql`delete from role_assignments where user_id = ${id}`.execute(ownerDb);
-      await sql`delete from users where id = ${id}`.execute(ownerDb);
-    }
+    await kit.cleanup(ownerDb);
     await fixtures.cleanup();
   });
 

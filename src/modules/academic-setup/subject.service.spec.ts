@@ -5,6 +5,7 @@ import type { DatabaseService, Tx } from '../../platform/database/index.js';
 import type { PersonDirectory } from '../../platform/identity/index.js';
 import type { SubjectRepository, SubjectRow } from './subject.repository.js';
 import { SubjectService } from './subject.service.js';
+import type { TeachingStaff } from './teaching-staff.js';
 
 const owner = {
   personId: 'owner-1',
@@ -42,6 +43,8 @@ const fail = async (work: Promise<unknown>) => {
 const unique = (constraint: string) =>
   Object.assign(new Error('unique'), { code: '23505', constraint });
 
+const teacher = { ...owner, personId: 'teacher-1', roleCode: 4 } as Principal;
+
 function build(current: SubjectRow | null = subject()) {
   const tx = {} as Tx;
   const transaction = vi.fn<DatabaseService['transaction']>((_tenant, work) => work(tx));
@@ -57,6 +60,9 @@ function build(current: SubjectRow | null = subject()) {
     .mockImplementation((_tx, id, changes) =>
       Promise.resolve(subject({ ...current, ...(changes as Partial<SubjectRow>), id, version: 2 })),
     );
+  const ownSubjectIds = vi
+    .fn<TeachingStaff['ownSubjectIds']>()
+    .mockResolvedValue(new Set(['subject-1']));
   const record = vi.fn<AuditService['record']>().mockResolvedValue('audit-1');
   const service = new SubjectService(
     { transaction } as unknown as DatabaseService,
@@ -64,9 +70,10 @@ function build(current: SubjectRow | null = subject()) {
     {
       describe: vi.fn<PersonDirectory['describe']>().mockResolvedValue(new Map()),
     } as unknown as PersonDirectory,
+    { ownSubjectIds } as unknown as TeachingStaff,
     { record } as unknown as AuditService,
   );
-  return { service, active, find, insert, update, record };
+  return { service, ownSubjectIds, active, find, insert, update, record };
 }
 
 describe('SubjectService', () => {
@@ -85,6 +92,25 @@ describe('SubjectService', () => {
         expect.objectContaining({ id: 'subject-1', name: 'Mathematics' }),
       ]);
       expect(t.active).toHaveBeenCalledWith(expect.anything(), 'society-1');
+      expect(t.ownSubjectIds).not.toHaveBeenCalled();
+    });
+
+    it('shows a teacher only the subjects they can teach', async () => {
+      const t = build();
+      t.ownSubjectIds.mockResolvedValue(new Set(['subject-1', 'subject-2']));
+      await t.service.list(teacher);
+      expect(t.ownSubjectIds).toHaveBeenCalledWith(expect.anything(), 'teacher-1');
+      expect(t.active).toHaveBeenCalledWith(expect.anything(), 'society-1', [
+        'subject-1',
+        'subject-2',
+      ]);
+    });
+
+    it('shows a teacher who can teach nothing no subject, without asking the database', async () => {
+      const t = build();
+      t.ownSubjectIds.mockResolvedValue(new Set());
+      expect((await t.service.list(teacher)).data).toEqual([]);
+      expect(t.active).not.toHaveBeenCalled();
     });
   });
 
