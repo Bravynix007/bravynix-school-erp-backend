@@ -1,6 +1,13 @@
-import { parseEnv } from './env.schema.js';
+import { readFileSync } from 'node:fs';
+import { parseEnv, PUBLISHED_IDENTITY_KEYS } from './env.schema.js';
 
-const base = { DATABASE_URL: 'postgres://u:p@localhost:5432/db' };
+const ENCRYPTION = Buffer.alloc(32, 3).toString('base64');
+const HMAC = Buffer.alloc(32, 5).toString('base64');
+const base = {
+  DATABASE_URL: 'postgres://u:p@localhost:5432/db',
+  IDENTITY_ENCRYPTION_KEY: ENCRYPTION,
+  IDENTITY_HMAC_KEY: HMAC,
+};
 const SECRET = 'unit-test-secret-not-used-anywhere-0123456789';
 const KEY = Buffer.alloc(32, 9).toString('base64');
 
@@ -87,6 +94,86 @@ describe('parseEnv', () => {
     }
     expect(() => parseEnv({ ...base, STORAGE_DRIVER: 's3' })).toThrow(/STORAGE_DRIVER/);
   });
+
+  it('needs both Aadhaar keys, 32 bytes each and different, in every environment', () => {
+    const { IDENTITY_ENCRYPTION_KEY, IDENTITY_HMAC_KEY: _hmac, ...bare } = base;
+    expect(() => parseEnv(bare)).toThrow(/IDENTITY_ENCRYPTION_KEY/);
+    expect(() => parseEnv({ ...bare, IDENTITY_ENCRYPTION_KEY })).toThrow(/IDENTITY_HMAC_KEY/);
+    expect(() => parseEnv({ ...base, IDENTITY_HMAC_KEY: 'c2hvcnQ=' })).toThrow(/IDENTITY_HMAC_KEY/);
+    expect(() => parseEnv({ ...base, IDENTITY_HMAC_KEY: ENCRYPTION })).toThrow(/IDENTITY_HMAC_KEY/);
+    expect(parseEnv(base).IDENTITY_HMAC_KEY).toBe(HMAC);
+  });
+
+  it.each(['staging', 'production'])(
+    'refuses the Aadhaar keys published in the repository in %s',
+    (NODE_ENV) => {
+      const deployed = {
+        ...base,
+        NODE_ENV,
+        EMAIL_DRIVER: 'smtp',
+        STORAGE_DRIVER: 'r2',
+        SMTP_URL: 'smtp://x',
+        EMAIL_FROM: 'BravyNix <no-reply@bravynix.in>',
+        OTP_HMAC_SECRET: SECRET,
+        JWT_SIGNING_KEY: 'pem',
+        MFA_ENCRYPTION_KEY: KEY,
+      };
+      expect(parseEnv(deployed).IDENTITY_HMAC_KEY).toBe(HMAC);
+      for (const published of PUBLISHED_IDENTITY_KEYS) {
+        expect(() => parseEnv({ ...deployed, IDENTITY_ENCRYPTION_KEY: published })).toThrow(
+          /IDENTITY_ENCRYPTION_KEY/,
+        );
+        expect(() => parseEnv({ ...deployed, IDENTITY_HMAC_KEY: published })).toThrow(
+          /IDENTITY_HMAC_KEY/,
+        );
+        // In development they are fine: that is what they are for.
+        expect(parseEnv({ ...base, IDENTITY_HMAC_KEY: published }).IDENTITY_HMAC_KEY).toBe(
+          published,
+        );
+      }
+    },
+  );
+
+  it('compares keys by the bytes they decode to, not by how they are spelt', () => {
+    const published = PUBLISHED_IDENTITY_KEYS[2]!;
+    const spellings = [
+      published.replace(/=+$/, ''),
+      published.replaceAll('+', '-').replaceAll('/', '_'),
+      `${published}\n`,
+    ];
+    const deployed = {
+      ...base,
+      NODE_ENV: 'production',
+      EMAIL_DRIVER: 'smtp',
+      STORAGE_DRIVER: 'r2',
+      SMTP_URL: 'smtp://x',
+      EMAIL_FROM: 'BravyNix <no-reply@bravynix.in>',
+      OTP_HMAC_SECRET: SECRET,
+      JWT_SIGNING_KEY: 'pem',
+      MFA_ENCRYPTION_KEY: KEY,
+    };
+    for (const spelt of spellings) {
+      expect(() => parseEnv({ ...deployed, IDENTITY_HMAC_KEY: spelt })).toThrow(
+        /IDENTITY_HMAC_KEY/,
+      );
+      // The same key spelt two ways is still one key.
+      expect(() =>
+        parseEnv({ ...base, IDENTITY_ENCRYPTION_KEY: published, IDENTITY_HMAC_KEY: spelt }),
+      ).toThrow(/IDENTITY_HMAC_KEY/);
+    }
+  });
+
+  it.each(['.env.example', 'demo.env'])(
+    'lists every Aadhaar key that %s publishes, so production refuses it',
+    (file) => {
+      const text = readFileSync(new URL(`../../${file}`, import.meta.url), 'utf8');
+      const published = [...text.matchAll(/^IDENTITY_(?:ENCRYPTION|HMAC)_KEY=(\S+)$/gm)].map(
+        (match) => match[1],
+      );
+      expect(published).toHaveLength(2);
+      for (const key of published) expect(PUBLISHED_IDENTITY_KEYS).toContain(key);
+    },
+  );
 
   it('validates minimum app versions', () => {
     expect(() => parseEnv({ ...base, MIN_APP_VERSION_IOS: '1.2' })).toThrow(/MIN_APP_VERSION_IOS/);

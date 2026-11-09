@@ -155,6 +155,52 @@ describe('buildAuditRow', () => {
     ).toBeNull();
   });
 
+  it('masks an Aadhaar number quoted in a reason, whether spaced, unspaced or hyphenated', () => {
+    for (const quoted of [
+      '2345 6789 0124',
+      '234567890124',
+      '2345-6789-0124',
+      '2345  6789  0124',
+      '2345\t6789\t0124',
+      '2345\u00a06789\u00a00124',
+      '2345.6789.0124',
+      '2345/6789/0124',
+    ]) {
+      const row = buildAuditRow(
+        {
+          action: 'identity.reveal',
+          institutionId: null,
+          reason: `Parent says ${quoted} is on the form`,
+        },
+        context,
+        NOW,
+        ID,
+      );
+      expect(row.reason).toBe('Parent says XXXX XXXX 0124 is on the form');
+    }
+  });
+
+  it('cuts a reason back to 500 characters after masking lengthens it', () => {
+    const row = buildAuditRow(
+      {
+        action: 'identity.reveal',
+        institutionId: null,
+        reason: `${'234567890124 '.repeat(38)}xxxxxx`,
+      },
+      context,
+      NOW,
+      ID,
+    );
+    expect(row.reason).toHaveLength(500);
+    expect(row.reason).not.toMatch(/\d{12}/);
+  });
+
+  it('keeps no reason as null', () => {
+    expect(
+      buildAuditRow({ action: 'student.update', institutionId: null }, context, NOW, ID).reason,
+    ).toBeNull();
+  });
+
   it('refuses a reason over 500 characters', () => {
     expect(() =>
       buildAuditRow(

@@ -9,12 +9,12 @@ const AUTH_FAILED = 'unable to authenticate data';
 
 describe('SecretBox', () => {
   it('opens what it sealed', () => {
-    const box = new SecretBox(key);
+    const box = new SecretBox(key, 'TEST_KEY');
     expect(box.open(box.seal(secret, 'user-1'), 'user-1')).toEqual(secret);
   });
 
   it('seals the same secret differently each time, and does not contain it', () => {
-    const box = new SecretBox(key);
+    const box = new SecretBox(key, 'TEST_KEY');
     const a = box.seal(secret, 'user-1');
     const b = box.seal(secret, 'user-1');
     expect(a.equals(b)).toBe(false);
@@ -22,7 +22,7 @@ describe('SecretBox', () => {
   });
 
   it('refuses a value that was changed anywhere', () => {
-    const box = new SecretBox(key);
+    const box = new SecretBox(key, 'TEST_KEY');
     const sealed = box.seal(secret, 'user-1');
     for (const index of [0, 12, sealed.length - 1]) {
       const tampered = Buffer.from(sealed);
@@ -32,21 +32,25 @@ describe('SecretBox', () => {
   });
 
   it('refuses a value copied to another person, or opened with another key', () => {
-    const box = new SecretBox(key);
+    const box = new SecretBox(key, 'TEST_KEY');
     const sealed = box.seal(secret, 'user-1');
     expect(() => box.open(sealed, 'user-2')).toThrow(AUTH_FAILED);
-    expect(() => new SecretBox(randomBytes(32).toString('base64')).open(sealed, 'user-1')).toThrow(
-      AUTH_FAILED,
-    );
+    expect(() =>
+      new SecretBox(randomBytes(32).toString('base64'), 'TEST_KEY').open(sealed, 'user-1'),
+    ).toThrow(AUTH_FAILED);
   });
 
   it('refuses a value too short to hold the parts', () => {
-    expect(() => new SecretBox(key).open(Buffer.alloc(20), 'user-1')).toThrow(/too short/);
+    expect(() => new SecretBox(key, 'TEST_KEY').open(Buffer.alloc(20), 'user-1')).toThrow(
+      /too short/,
+    );
   });
 
   it('refuses a key of the wrong size, and makes its own when none is given', () => {
-    expect(() => new SecretBox(randomBytes(16).toString('base64'))).toThrow(/32 bytes/);
-    const box = new SecretBox(undefined);
+    expect(() => new SecretBox(randomBytes(16).toString('base64'), 'TEST_KEY')).toThrow(
+      'TEST_KEY must be 32 bytes, base64 encoded',
+    );
+    const box = new SecretBox(undefined, 'TEST_KEY');
     expect(box.open(box.seal(secret, 'x'), 'x')).toEqual(secret);
   });
 });

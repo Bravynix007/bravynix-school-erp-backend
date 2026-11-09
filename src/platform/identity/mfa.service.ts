@@ -17,7 +17,7 @@ import { MfaRepository, type TotpFactor } from './mfa.repository.js';
 import { MFA_LOCK } from './otp-limits.js';
 import { PublicCallLimiter } from './public-call-limiter.js';
 import { requestIp } from './request-ip.js';
-import { SecretBox } from './secret-box.js';
+import { SecretBox } from '../crypto/index.js';
 import { CONSOLE_SESSION_MS } from './session-rules.js';
 import { SessionRepository } from './session.repository.js';
 import { secondsUntil } from './time-rules.js';

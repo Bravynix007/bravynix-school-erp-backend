@@ -59,12 +59,13 @@ const MASKED = [
 const LAST4_SUFFIX = /_last4$/;
 
 /**
- * A 12-digit Aadhaar shape, with or without separators, inside any text. Not
- * part of a longer word or dash-joined token, so the 12-digit last group of a
- * UUID is left alone (about 1 UUID in 90 has one). The cost: "ID-123456789012"
- * is not caught here; the key patterns catch named fields.
+ * A 12-digit Aadhaar shape inside any text, with up to two spaces, tabs, no-break spaces, dots, slashes or hyphens
+ * between the groups of four (as typed, or copied from a PDF). Not part of a longer word or dash-joined token, so the
+ * 12-digit last group of a UUID is left alone (about 1 UUID in 90 has one). The cost: "ID-123456789012" is not
+ * caught here, nor a number glued to letters, nor one written in full-width digits; the key patterns catch named
+ * fields.
  */
-const AADHAAR_SHAPE = /(?<![\w-])(\d{4})[ -]?(\d{4})[ -]?(\d{4})(?![\w-])/g;
+const AADHAAR_SHAPE = /(?<![\w-])(\d{4})[\s./-]{0,2}(\d{4})[\s./-]{0,2}(\d{4})(?![\w-])/g;
 
 function snake(name: string): string {
   return name
@@ -81,7 +82,7 @@ function last4(value: unknown): string | null {
 }
 
 /** Whatever the key, an Aadhaar-shaped number in text is masked (a safe failure for a 12-digit phone number). */
-function scrubText(text: string): string {
+export function scrubText(text: string): string {
   return text.replace(AADHAAR_SHAPE, (_match, _a, _b, c: string) => `XXXX XXXX ${c}`);
 }
 

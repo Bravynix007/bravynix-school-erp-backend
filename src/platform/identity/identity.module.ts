@@ -18,7 +18,7 @@ import { OtpHasher } from './otp-hasher.js';
 import { OtpService } from './otp.service.js';
 import { PersonDirectory } from './person-directory.js';
 import { PublicCallLimiter } from './public-call-limiter.js';
-import { SecretBox } from './secret-box.js';
+import { SecretBox } from '../crypto/index.js';
 import { SessionService } from './session.service.js';
 import { SessionTokenVerifier } from './session-token-verifier.js';
 import { SessionRepository } from './session.repository.js';
@@ -56,7 +56,8 @@ import { TokenService } from './token.service.js';
     {
       provide: SecretBox,
       inject: [AppConfig],
-      useFactory: ({ env }: AppConfig) => new SecretBox(env.MFA_ENCRYPTION_KEY),
+      useFactory: ({ env }: AppConfig) =>
+        new SecretBox(env.MFA_ENCRYPTION_KEY, 'MFA_ENCRYPTION_KEY'),
     },
     {
       provide: OtpHasher,
