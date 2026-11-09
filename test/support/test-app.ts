@@ -63,7 +63,10 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
   const gate =
     options.tenantGate ??
     (options.verifier
-      ? ({ blockedSection: () => Promise.resolve(null) } as TenantAccessGate)
+      ? ({
+          blockedSection: () => Promise.resolve(null),
+          staffAccessBlocked: () => Promise.resolve(false),
+        } as TenantAccessGate)
       : null);
   if (gate) builder = builder.overrideProvider(TenantAccessGate).useValue(gate);
   const moduleRef = await builder.compile();

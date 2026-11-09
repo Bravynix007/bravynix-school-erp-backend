@@ -64,6 +64,10 @@ export class PolicyGuard implements CanActivate {
     if (!policy.allowWhenBlocked && principal.roleCode !== RoleCode.SuperAdmin) {
       const section = await this.tenantGate.blockedSection(principal);
       if (section !== null) throw AppException.sectionBlocked(section);
+      // A staff record blocked from its profile stops the staff roles of that Society (STF-06).
+      if (await this.tenantGate.staffAccessBlocked(principal)) {
+        throw AppException.forbidden(ErrorCode.ACCESS_BLOCKED);
+      }
     }
 
     request.principal = principal;

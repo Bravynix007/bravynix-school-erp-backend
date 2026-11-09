@@ -12,7 +12,9 @@ import type { StaffSortField } from './staff.dto.js';
 import type {
   StaffEducationsTable,
   StaffEmergencyContactsTable,
+  StaffInstitutionsTable,
   StaffMembersTable,
+  StaffSubjectsTable,
 } from './people.tables.js';
 
 export type StaffRow = Selectable<StaffMembersTable>;
@@ -22,6 +24,8 @@ export type EducationRow = Selectable<StaffEducationsTable>;
 export type NewEducation = Insertable<StaffEducationsTable>;
 export type EmergencyContactRow = Selectable<StaffEmergencyContactsTable>;
 export type NewEmergencyContact = Insertable<StaffEmergencyContactsTable>;
+export type NewStaffInstitution = Insertable<StaffInstitutionsTable>;
+export type NewStaffSubject = Insertable<StaffSubjectsTable>;
 
 /** What STF-01 asks for: only staff whose home Institution is one of `institutionIds`. */
 export interface StaffFilter {
@@ -30,6 +34,10 @@ export interface StaffFilter {
   statuses: readonly number[];
   designationId?: string;
   classCategoryId?: string;
+  /** Only the staff whose access is blocked (`true`) or not (`false`). */
+  blocked?: boolean;
+  /** Only the staff who can teach this subject. */
+  subjectId?: string;
 }
 
 const NAME = sql`lower(concat_ws(' ', staff_members.first_name, staff_members.last_name))`;
@@ -68,6 +76,22 @@ export class StaffRepository {
       }
       if (filter.classCategoryId) {
         conditions.push(eb('staff_members.class_category_id', '=', filter.classCategoryId));
+      }
+      if (filter.blocked !== undefined) {
+        conditions.push(
+          eb('staff_members.access_blocked_at', filter.blocked ? 'is not' : 'is', null),
+        );
+      }
+      if (filter.subjectId) {
+        conditions.push(
+          eb.exists(
+            eb
+              .selectFrom('staff_subjects')
+              .select('staff_subjects.staff_member_id')
+              .whereRef('staff_subjects.staff_member_id', '=', 'staff_members.id')
+              .where('staff_subjects.subject_id', '=', filter.subjectId),
+          ),
+        );
       }
       return eb.and(conditions);
     };
@@ -163,5 +187,37 @@ export class StaffRepository {
       .where('staff_member_id', '=', staffId)
       .execute();
     if (rows.length > 0) await tx.insertInto('staff_emergency_contacts').values(rows).execute();
+  }
+
+  /** The subjects a staff member can teach, as IDs. */
+  async subjectIds(tx: Tx, staffId: string): Promise<string[]> {
+    const rows = await tx
+      .selectFrom('staff_subjects')
+      .select('subject_id')
+      .where('staff_member_id', '=', staffId)
+      .orderBy('subject_id')
+      .execute();
+    return rows.map((row) => row.subject_id);
+  }
+
+  /** The extra Institutions of a staff member, as IDs. */
+  async institutionIds(tx: Tx, staffId: string): Promise<string[]> {
+    const rows = await tx
+      .selectFrom('staff_institutions')
+      .select('institution_id')
+      .where('staff_member_id', '=', staffId)
+      .orderBy('institution_id')
+      .execute();
+    return rows.map((row) => row.institution_id);
+  }
+
+  async replaceSubjects(tx: Tx, staffId: string, rows: NewStaffSubject[]): Promise<void> {
+    await tx.deleteFrom('staff_subjects').where('staff_member_id', '=', staffId).execute();
+    if (rows.length > 0) await tx.insertInto('staff_subjects').values(rows).execute();
+  }
+
+  async replaceInstitutions(tx: Tx, staffId: string, rows: NewStaffInstitution[]): Promise<void> {
+    await tx.deleteFrom('staff_institutions').where('staff_member_id', '=', staffId).execute();
+    if (rows.length > 0) await tx.insertInto('staff_institutions').values(rows).execute();
   }
 }

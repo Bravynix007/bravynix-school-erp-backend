@@ -10,6 +10,7 @@ import { createTestApp, type TestApp } from '../support/test-app.js';
 
 const BLOCKED_SOCIETY = '0192f6a1-7c40-7e21-8b55-0000000000a1';
 const OPEN_SOCIETY = '0192f6a1-7c40-7e21-8b55-0000000000b1';
+const STAFF_BLOCKED_SOCIETY = '0192f6a1-7c40-7e21-8b55-0000000000c1';
 
 /** `owner-blocked`, `owner-open`, `admin` (Super Admin with no Society). */
 class FakeVerifier extends AccessTokenVerifier {
@@ -25,6 +26,8 @@ class FakeVerifier extends AccessTokenVerifier {
         return Promise.resolve({ ...base, roleCode: 2, societyId: BLOCKED_SOCIETY });
       case 'owner-open':
         return Promise.resolve({ ...base, roleCode: 2, societyId: OPEN_SOCIETY });
+      case 'staff-blocked':
+        return Promise.resolve({ ...base, roleCode: 2, societyId: STAFF_BLOCKED_SOCIETY });
       case 'admin':
         return Promise.resolve({ ...base, roleCode: 1, societyId: null });
       default:
@@ -38,6 +41,9 @@ class FakeGate extends TenantAccessGate {
   blockedSection(principal: Principal): Promise<BlockSection | null> {
     this.asked.push(principal.societyId);
     return Promise.resolve(principal.societyId === BLOCKED_SOCIETY ? BlockSection.Owners : null);
+  }
+  staffAccessBlocked(principal: Principal): Promise<boolean> {
+    return Promise.resolve(principal.societyId === STAFF_BLOCKED_SOCIETY);
   }
 }
 
@@ -74,6 +80,23 @@ describe('Section blocks on every request (API design 6.5)', () => {
       data: { section: 'owners' },
     });
     expect(JSON.stringify(res.body)).not.toContain('reason');
+  });
+
+  it('answers 403 ACCESS_BLOCKED when the gate says the caller’s own staff record is blocked, and still serves what is declared open', async () => {
+    const res = await request(http)
+      .post('/v1/fixtures/owner-write')
+      .set('Authorization', 'Bearer staff-blocked')
+      .send({});
+    expect(res.status).toBe(403);
+    expect(res.body).toMatchObject({
+      success: false,
+      code: 'ACCESS_BLOCKED',
+      message: 'Your access has been blocked, please contact your Institution',
+    });
+    await request(http)
+      .get('/v1/fixtures/owner-read-when-blocked')
+      .set('Authorization', 'Bearer staff-blocked')
+      .expect(200);
   });
 
   it('serves the same call to a Society that is not blocked', async () => {

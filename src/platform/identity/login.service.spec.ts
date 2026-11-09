@@ -117,6 +117,7 @@ const owner: Grant = {
   institutionId: null,
   ownersBlocked: false,
   staffBlocked: false,
+  accessBlocked: false,
 };
 const fail = async (promise: Promise<unknown>) =>
   (await promise.then(
@@ -203,6 +204,7 @@ describe('LoginService.verify', () => {
           institutionId: 'ins-1',
           ownersBlocked: false,
           staffBlocked: false,
+          accessBlocked: false,
         },
       ],
     });
@@ -222,6 +224,7 @@ describe('LoginService.verify', () => {
           institutionId: null,
           ownersBlocked: false,
           staffBlocked: false,
+          accessBlocked: false,
         },
       ],
     });
@@ -437,6 +440,7 @@ describe('LoginService.verify', () => {
           institutionId: null,
           ownersBlocked: false,
           staffBlocked: false,
+          accessBlocked: false,
         },
       ],
     });
@@ -461,6 +465,7 @@ describe('LoginService.verify', () => {
           institutionId: null,
           ownersBlocked: false,
           staffBlocked: false,
+          accessBlocked: false,
         },
       ],
       mfaLock: new Date(admin.clock.now().getTime() + 7200_000),

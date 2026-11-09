@@ -10,8 +10,9 @@ export interface Context {
 /**
  * One role the person can choose from the list in AUTH-02 and ME-01 (API
  * design 6.3). Children arrive with the guardians. `isBlocked`
- * says a section block stops the role there (PLT-42): the Owners of the Society
- * are blocked, or every Institution the person reaches has its staff blocked.
+ * says a block stops the role there: a section block (PLT-42) when the Owners of the Society are blocked or every
+ * Institution the person reaches has its staff blocked, or, for the staff roles, the person's own staff record in the
+ * Society is blocked (STF-06).
  */
 export interface ContextChoice extends Context {
   societyName: string | null;
@@ -38,7 +39,9 @@ export function mobileContexts(grants: readonly Grant[]): ContextChoice[] {
     if (grant.roleCode === 1) continue;
     const key = `${String(grant.roleCode)}:${grant.societyId ?? ''}`;
     const blocked =
-      grant.roleCode === RoleCode.SocietyOwner ? grant.ownersBlocked : grant.staffBlocked;
+      grant.roleCode === RoleCode.SocietyOwner
+        ? grant.ownersBlocked
+        : grant.staffBlocked || grant.accessBlocked;
     const listed = contexts.get(key);
     if (listed) {
       // One context for several Institutions: blocked only when none is left open.
@@ -53,6 +56,20 @@ export function mobileContexts(grants: readonly Grant[]): ContextChoice[] {
     }
   }
   return [...contexts.values()];
+}
+
+/**
+ * Is the person's own staff record blocked in the context they chose (STF-06)? It is a property of the person in the
+ * Society, so one entry of the role there is enough.
+ */
+export function accessBlockedIn(
+  grants: readonly Grant[],
+  roleCode: number,
+  societyId: string | null,
+): boolean {
+  return grants.some(
+    (grant) => grant.roleCode === roleCode && grant.societyId === societyId && grant.accessBlocked,
+  );
 }
 
 /** The one context a session starts in; with none or several the person chooses (AUTH-06). */

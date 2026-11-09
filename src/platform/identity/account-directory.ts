@@ -324,6 +324,31 @@ export class AccountDirectory {
     );
   }
 
+  /**
+   * A staff record was blocked from its profile (STF-06): the person's sessions that act as Institution Admin or as
+   * Teacher / Staff in this Society end, reading `blocked` (API design 6.5). Their sessions in other Societies, and as
+   * Owner or parent, go on. Returns how many ended.
+   */
+  async endStaffAccessSessions(
+    tx: Tx,
+    userId: string,
+    societyId: string,
+    now: Date,
+  ): Promise<number> {
+    let ended = 0;
+    for (const roleCode of [RoleCode.InstitutionAdmin, RoleCode.TeacherStaff]) {
+      ended += await this.accounts.endRoleSessions(
+        tx,
+        userId,
+        roleCode,
+        societyId,
+        SessionEndReason.AccountBlocked,
+        now,
+      );
+    }
+    return ended;
+  }
+
   /** Under the separation lock, so a concurrent grant of the other role sees this one or is seen by it. */
   private async requireSeparateRoles(tx: Tx, userId: string, roleCode: RoleCode): Promise<void> {
     await this.accounts.lockRoleSeparation(tx);

@@ -913,6 +913,7 @@ describe('STF-02 to STF-05 staff (API design 9.5)', () => {
         classCategoryId: categoryId,
         mobile: { countryCode: '91', number: '9876500001' },
         joiningDate: null,
+        isBlocked: false,
         status: 1,
         version: 1,
       });

@@ -35,6 +35,8 @@ const row = {
   joining_date: '2024-06-03',
   resignation_date: null,
   employment_type: 1,
+  access_blocked_at: null,
+  access_blocked_by: null,
 } as StaffRow;
 
 describe('staffResource', () => {
@@ -62,7 +64,16 @@ describe('staffResource', () => {
         is_primary: true,
       },
     ] as EmergencyContactRow[];
-    expect(staffResource(row, educations, contacts, 'meera@example.com', people)).toEqual({
+    expect(
+      staffResource(
+        row,
+        educations,
+        contacts,
+        'meera@example.com',
+        { subjectIds: ['subject-1'], institutionIds: ['institution-2'] },
+        people,
+      ),
+    ).toEqual({
       id: 'staff-1',
       homeInstitutionId: 'institution-1',
       person: { id: 'user-1', email: 'meera@example.com' },
@@ -107,6 +118,10 @@ describe('staffResource', () => {
           isPrimary: true,
         },
       ],
+      isBlocked: false,
+      blockedAt: null,
+      subjectIds: ['subject-1'],
+      institutionIds: ['institution-2'],
       status: 1,
       version: 3,
       createdBy: { id: 'owner-1', displayName: 'Asha Rao', roleName: 'Society Owner' },

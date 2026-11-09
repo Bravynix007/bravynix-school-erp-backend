@@ -88,6 +88,25 @@ describe('StaffRepository.page', () => {
     expect(list!.parameters.slice(3, 5)).toEqual(['designation-1', 'category-1']);
   });
 
+  it('filters by block, with the staff who are blocked or who are not', async () => {
+    const [blocked] = await page({ blocked: true });
+    expect(blocked!.sql).toContain('"staff_members"."access_blocked_at" is not null');
+    const [open] = await page({ blocked: false });
+    expect(open!.sql).toContain('"staff_members"."access_blocked_at" is null');
+    const [any] = await page({});
+    expect(any!.sql).not.toContain('access_blocked_at');
+  });
+
+  it('filters by a subject the person can teach, in the list and in the count', async () => {
+    const [list, count] = await page({ subjectId: 'subject-1' });
+    for (const query of [list!, count!]) {
+      expect(query.sql).toContain('from "staff_subjects"');
+      expect(query.sql).toContain('"staff_subjects"."staff_member_id" = "staff_members"."id"');
+      expect(query.sql).toContain('"staff_subjects"."subject_id" = $4');
+      expect(query.parameters[3]).toBe('subject-1');
+    }
+  });
+
   it.each([
     ['name', 'lower(concat_ws'],
     ['employeeCode', 'lower(staff_members.employee_code)'],

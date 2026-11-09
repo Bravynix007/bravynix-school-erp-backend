@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional, IntersectionType } from '@nestjs/swag
 import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
+  ArrayUnique,
   IsArray,
   IsBoolean,
   IsEmail,
@@ -30,6 +31,9 @@ import { WhenPresent } from '../../common/validation/when-present.js';
 
 export const MAX_EDUCATIONS = 20;
 export const MAX_EMERGENCY_CONTACTS = 10;
+/** The subjects of one staff member, and their extra Institutions (STF-08, STF-10). */
+export const MAX_STAFF_SUBJECTS = 50;
+export const MAX_STAFF_INSTITUTIONS = 50;
 export const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'] as const;
 /** 1 Male, 2 Female, 3 Other (DDD 9.5). */
 export const GENDERS = [1, 2, 3] as const;
@@ -339,4 +343,43 @@ export class ListStaffQueryDto extends PageQueryDto {
   @LowerCaseUuid()
   @IsUUID()
   classCategoryId?: string;
+
+  @ApiPropertyOptional({
+    type: Boolean,
+    description: '`true` for the staff whose access is blocked, `false` for the others',
+  })
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    value === 'true' ? true : value === 'false' ? false : value,
+  )
+  @IsBoolean()
+  blocked?: boolean;
+
+  @ApiPropertyOptional({ format: 'uuid', description: 'Only the staff who can teach this subject' })
+  @IsOptional()
+  @LowerCaseUuid()
+  @IsUUID()
+  subjectId?: string;
+}
+
+/** STF-08: the whole list of subjects the person can teach; an empty list clears it. */
+export class SetStaffSubjectsDto {
+  @ApiProperty({ type: [String], format: 'uuid', maxItems: MAX_STAFF_SUBJECTS })
+  @LowerCaseUuid()
+  @IsArray()
+  @ArrayMaxSize(MAX_STAFF_SUBJECTS)
+  @ArrayUnique()
+  @IsUUID('all', { each: true })
+  subjectIds!: string[];
+}
+
+/** STF-10: the whole list of extra Institutions, besides the home one; an empty list clears it. */
+export class SetStaffInstitutionsDto {
+  @ApiProperty({ type: [String], format: 'uuid', maxItems: MAX_STAFF_INSTITUTIONS })
+  @LowerCaseUuid()
+  @IsArray()
+  @ArrayMaxSize(MAX_STAFF_INSTITUTIONS)
+  @ArrayUnique()
+  @IsUUID('all', { each: true })
+  institutionIds!: string[];
 }

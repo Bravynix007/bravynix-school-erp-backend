@@ -76,6 +76,7 @@ const owner: Grant = {
   institutionId: null,
   ownersBlocked: false,
   staffBlocked: false,
+  accessBlocked: false,
 };
 const admin: Grant = {
   roleCode: 3,
@@ -84,6 +85,7 @@ const admin: Grant = {
   institutionId: 'ins-1',
   ownersBlocked: false,
   staffBlocked: false,
+  accessBlocked: false,
 };
 
 describe('ContextService.me', () => {
@@ -129,6 +131,7 @@ describe('ContextService.me', () => {
       institutionId: null,
       ownersBlocked: false,
       staffBlocked: false,
+      accessBlocked: false,
     };
     const consoleView = await build([sa, owner]).service.me(
       principal({ clientType: 'console', roleCode: 1 }),
@@ -192,6 +195,7 @@ describe('ContextService.switchContext', () => {
       institutionId: null,
       ownersBlocked: false,
       staffBlocked: false,
+      accessBlocked: false,
     };
     const t = build([owner, sa]);
     for (const body of [
@@ -206,6 +210,21 @@ describe('ContextService.switchContext', () => {
       });
     }
     expect(t.sessions.setActiveContext).not.toHaveBeenCalled();
+  });
+
+  it('refuses a context whose staff record is blocked with 403 ACCESS_BLOCKED, and moves nothing', async () => {
+    const blocked: Grant = { ...admin, accessBlocked: true };
+    const t = build([owner, blocked]);
+    expect(
+      await fail(
+        t.service.switchContext(principal({ roleCode: 2, societyId: SOCIETY }), {
+          roleCode: 3,
+          societyId: OTHER,
+        }),
+      ),
+    ).toMatchObject({ status: 403, code: 'ACCESS_BLOCKED' });
+    expect(t.sessions.setActiveContext).not.toHaveBeenCalled();
+    expect(t.record).not.toHaveBeenCalled();
   });
 
   it('answers SESSION_ENDED, with the reason, when the session ended a moment ago', async () => {

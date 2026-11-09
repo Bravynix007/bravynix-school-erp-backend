@@ -1,7 +1,13 @@
 import { body, problems } from '../../../test/support/dto-validation.js';
 import { createValidationPipe } from '../../common/validation/validation.js';
 import { AppException } from '../../common/http/app-exception.js';
-import { CreateStaffDto, ListStaffQueryDto, UpdateStaffDto } from './staff.dto.js';
+import {
+  CreateStaffDto,
+  ListStaffQueryDto,
+  SetStaffInstitutionsDto,
+  SetStaffSubjectsDto,
+  UpdateStaffDto,
+} from './staff.dto.js';
 
 const id = '0192f3b0-0000-7000-8000-000000000001';
 const valid = {
@@ -177,7 +183,16 @@ describe('ListStaffQueryDto', () => {
     ).toMatchObject({ institutionId: id, designationId: id, classCategoryId: id, q: 'me' });
   });
 
+  it('reads blocked as a boolean and the subject ID in lower case', async () => {
+    expect(await query({ blocked: 'true' })).toMatchObject({ blocked: true });
+    expect(await query({ blocked: 'false' })).toMatchObject({ blocked: false });
+    expect(await query({ subjectId: id.toUpperCase() })).toMatchObject({ subjectId: id });
+  });
+
   it.each([
+    { blocked: 'yes' },
+    { blocked: '1' },
+    { subjectId: 'nope' },
     { status: '2' },
     { status: 'x' },
     { status: '' },
@@ -188,5 +203,48 @@ describe('ListStaffQueryDto', () => {
     { limit: '101' },
   ])('refuses %j', async (value) => {
     await expect(query(value)).rejects.toBeInstanceOf(AppException);
+  });
+});
+
+describe.each([
+  ['SetStaffSubjectsDto', SetStaffSubjectsDto, 'subjectIds'],
+  ['SetStaffInstitutionsDto', SetStaffInstitutionsDto, 'institutionIds'],
+] as const)('%s', (_name, metatype, field) => {
+  const dto = metatype as new () => object;
+  const other = '0192f3b0-0000-7000-8000-000000000002';
+
+  it('takes a list of IDs, an empty one, and IDs in either case', async () => {
+    expect(await problems(body(dto, { [field]: [id, other] }))).toEqual([]);
+    expect(await problems(body(dto, { [field]: [] }))).toEqual([]);
+    expect(await problems(body(dto, { [field]: [id.toUpperCase()] }))).toEqual([]);
+  });
+
+  it.each([
+    ['nothing', {}],
+    ['null', { value: null }],
+    ['a single ID', { value: id }],
+    ['a word', { value: ['nope'] }],
+    ['a repeat', { value: [id, id] }],
+    ['a repeat in another case', { value: [id, id.toUpperCase()] }],
+    [
+      'more than 50',
+      {
+        value: Array.from(
+          { length: 51 },
+          (_, i) => `0192f3b0-0000-7000-8000-${String(i).padStart(12, '0')}`,
+        ),
+      },
+    ],
+  ])('refuses %s', async (_case, shape) => {
+    const sent = 'value' in shape ? { [field]: shape.value } : {};
+    expect((await problems(body(dto, sent))).map((p) => p.field)).toEqual([field]);
+  });
+
+  it('takes exactly 50', async () => {
+    const fifty = Array.from(
+      { length: 50 },
+      (_, i) => `0192f3b0-0000-7000-8000-${String(i).padStart(12, '0')}`,
+    );
+    expect(await problems(body(dto, { [field]: fifty }))).toEqual([]);
   });
 });

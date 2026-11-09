@@ -26,12 +26,21 @@ export class GrantDirectory {
     return rows.flatMap((row) => (row.institution_id === null ? [] : [row.institution_id]));
   }
 
-  /** The home Institutions of a person's active staff records in one Society, for a Teacher / Staff. */
+  /**
+   * The Institutions a Teacher / Staff member reaches in one Society: the home Institution of their active staff
+   * record and the extra ones a Society Owner assigned (PRD 4, STF-10). Both come through definer functions, because
+   * the caller's tenant is not narrowed to the person yet.
+   */
   async staffInstitutionIds(userId: string, societyId: string): Promise<string[]> {
-    const { rows } = await sql<{ home_institution_id: string }>`
+    const { rows: homes } = await sql<{ home_institution_id: string }>`
       select home_institution_id from app_staff_roles(${userId}) where society_id = ${societyId}
     `.execute(this.database.db);
-    return rows.map((row) => row.home_institution_id);
+    const { rows: extras } = await sql<{ id: string }>`
+      select i.id from app_staff_extra_institutions(${societyId}::uuid, ${userId}::uuid) as i(id)
+    `.execute(this.database.db);
+    return [
+      ...new Set([...homes.map((row) => row.home_institution_id), ...extras.map((row) => row.id)]),
+    ];
   }
 
   /** The people with an active Society Owner grant in a Society, by name. */

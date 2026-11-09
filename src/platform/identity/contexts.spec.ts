@@ -1,4 +1,4 @@
-import { findContext, mobileContexts, onlyContext } from './contexts.js';
+import { accessBlockedIn, findContext, mobileContexts, onlyContext } from './contexts.js';
 import type { Grant } from './session.repository.js';
 
 const grant = (
@@ -12,6 +12,7 @@ const grant = (
   institutionId,
   ownersBlocked: false,
   staffBlocked: false,
+  accessBlocked: false,
 });
 
 const choice = (roleCode: number, societyId: string | null) => ({
@@ -73,6 +74,19 @@ describe('mobileContexts', () => {
     expect(mobileContexts([owner, admin]).map((c) => c.isBlocked)).toEqual([false, false]);
   });
 
+  it('flags the Institution Admin and Teacher / Staff contexts of a Society whose staff record is blocked, and no other', () => {
+    const teacher = { ...grant(4, 'soc-1', 'ins-1'), accessBlocked: true };
+    const admin = { ...grant(3, 'soc-1', 'ins-1'), accessBlocked: true };
+    const elsewhere = grant(4, 'soc-2', 'ins-2');
+    const owner = { ...grant(2, 'soc-1'), accessBlocked: true };
+    expect(mobileContexts([teacher, admin, elsewhere, owner]).map((c) => c.isBlocked)).toEqual([
+      true,
+      true,
+      false,
+      false,
+    ]);
+  });
+
   it('keeps a Society Owner and an Institution Admin of the same Society apart', () => {
     expect(mobileContexts([grant(2, 'soc-1'), grant(3, 'soc-1', 'ins-1')])).toHaveLength(2);
   });
@@ -92,5 +106,19 @@ describe('onlyContext and findContext', () => {
     expect(findContext(contexts, 2, 'soc-2')).toBeUndefined();
     expect(findContext(contexts, 3, 'soc-1')).toBeUndefined();
     expect(findContext(contexts, 5, null)).toBeUndefined();
+  });
+});
+
+describe('accessBlockedIn', () => {
+  it('is true for the role and Society whose staff record is blocked, and false for any other', () => {
+    const grants = [
+      { ...grant(4, 'soc-1', 'ins-1'), accessBlocked: true },
+      grant(4, 'soc-2', 'ins-2'),
+      grant(3, 'soc-3', 'ins-3'),
+    ];
+    expect(accessBlockedIn(grants, 4, 'soc-1')).toBe(true);
+    expect(accessBlockedIn(grants, 4, 'soc-2')).toBe(false);
+    expect(accessBlockedIn(grants, 3, 'soc-1')).toBe(false);
+    expect(accessBlockedIn(grants, 3, 'soc-3')).toBe(false);
   });
 });

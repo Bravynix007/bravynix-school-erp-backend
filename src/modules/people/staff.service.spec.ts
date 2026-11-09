@@ -10,8 +10,9 @@ import type {
   StaffEmailChange,
 } from '../../platform/identity/index.js';
 import type { MasterReferences } from '../../platform/masters/index.js';
+import type { SubjectDirectory } from '../academic-setup/index.js';
 import type { InstitutionDirectory, ScopeService } from '../../platform/tenancy/index.js';
-import type { CreateStaffDto, ListStaffQueryDto } from './staff.dto.js';
+import type { CreateStaffDto, ListStaffQueryDto, UpdateStaffDto } from './staff.dto.js';
 import type { StaffRepository, StaffRow } from './staff.repository.js';
 import { StaffService } from './staff.service.js';
 
@@ -36,6 +37,8 @@ const staff = (overrides: Partial<StaffRow> = {}): StaffRow =>
     society_id: 'society-1',
     home_institution_id: 'institution-1',
     user_id: 'user-1',
+    access_blocked_at: null,
+    access_blocked_by: null,
     employee_code: 'EMP-1',
     first_name: 'Meera',
     last_name: null,
@@ -94,6 +97,22 @@ function build(current: StaffRow | null = staff()) {
   const replaceEmergencyContacts = vi
     .fn<StaffRepository['replaceEmergencyContacts']>()
     .mockResolvedValue();
+  const requireShown = vi.fn<MasterReferences['requireShown']>().mockResolvedValue(undefined);
+  const requirePlace = vi.fn<MasterReferences['requirePlace']>().mockResolvedValue(undefined);
+  const requireReady = vi.fn<FileDirectory['requireReady']>().mockResolvedValue(undefined);
+  const subjectIds = vi.fn<StaffRepository['subjectIds']>().mockResolvedValue([]);
+  const institutionIds = vi.fn<StaffRepository['institutionIds']>().mockResolvedValue([]);
+  const replaceSubjects = vi.fn<StaffRepository['replaceSubjects']>().mockResolvedValue();
+  const replaceInstitutions = vi.fn<StaffRepository['replaceInstitutions']>().mockResolvedValue();
+  const endStaffAccessSessions = vi
+    .fn<AccountDirectory['endStaffAccessSessions']>()
+    .mockResolvedValue(3);
+  const requireActive = vi.fn<SubjectDirectory['requireActive']>().mockResolvedValue();
+  const findInstitution = vi
+    .fn<InstitutionDirectory['find']>()
+    .mockImplementation((_tx, id) =>
+      Promise.resolve({ id, societyId: 'society-1', name: 'Other School', active: true }),
+    );
   const educations = vi.fn<StaffRepository['educations']>().mockResolvedValue([]);
   const emergencyContacts = vi.fn<StaffRepository['emergencyContacts']>().mockResolvedValue([]);
   const requireInstitution = vi.fn<ScopeService['requireInstitution']>().mockResolvedValue({
@@ -141,6 +160,10 @@ function build(current: StaffRow | null = staff()) {
       page,
       replaceEducations,
       replaceEmergencyContacts,
+      replaceSubjects,
+      replaceInstitutions,
+      subjectIds,
+      institutionIds,
       educations,
       emergencyContacts,
     } as unknown as StaffRepository,
@@ -149,6 +172,7 @@ function build(current: StaffRow | null = staff()) {
       linkStaff,
       welcomeAs,
       endRoleSessions,
+      endStaffAccessSessions,
       changeStaffEmail,
       announceStaffEmail,
     } as unknown as AccountDirectory,
@@ -158,13 +182,8 @@ function build(current: StaffRow | null = staff()) {
         .fn<PersonDirectory['emails']>()
         .mockResolvedValue(new Map([['user-1', 'meera@example.com']])),
     } as unknown as PersonDirectory,
-    {
-      requireShown: vi.fn<MasterReferences['requireShown']>().mockResolvedValue(undefined),
-      requirePlace: vi.fn<MasterReferences['requirePlace']>().mockResolvedValue(undefined),
-    } as unknown as MasterReferences,
-    {
-      requireReady: vi.fn<FileDirectory['requireReady']>().mockResolvedValue(undefined),
-    } as unknown as FileDirectory,
+    { requireShown, requirePlace } as unknown as MasterReferences,
+    { requireReady } as unknown as FileDirectory,
     {
       names: vi.fn<InstitutionDirectory['names']>().mockResolvedValue(
         new Map([
@@ -179,7 +198,9 @@ function build(current: StaffRow | null = staff()) {
           ],
         ]),
       ),
+      find: findInstitution,
     } as unknown as InstitutionDirectory,
+    { requireActive } as unknown as SubjectDirectory,
     { record } as unknown as AuditService,
     new FixedClock('2026-11-08T04:30:00.000Z'),
   );
@@ -190,10 +211,21 @@ function build(current: StaffRow | null = staff()) {
     insert,
     update,
     replaceEducations,
+    replaceEmergencyContacts,
+    requireShown,
+    requirePlace,
+    requireReady,
     requireInstitution,
     linkStaff,
     welcomeAs,
     endRoleSessions,
+    endStaffAccessSessions,
+    replaceSubjects,
+    replaceInstitutions,
+    subjectIds,
+    institutionIds,
+    requireActive,
+    findInstitution,
     changeStaffEmail,
     announceStaffEmail,
     hasActiveRecord,
@@ -393,6 +425,39 @@ describe('StaffService', () => {
       });
     });
 
+    it('checks the master rows, the place and the photo that are sent, in the home Institution', async () => {
+      const t = build();
+      await t.service.update(owner, 'staff-1', {
+        version: 1,
+        classCategoryId: 'category-2',
+        designationId: 'designation-1',
+        photoFileId: 'file-1',
+        address: { countryId: 'country-1' },
+      } as UpdateStaffDto);
+      expect(t.requireShown.mock.calls.map((call) => call[1])).toEqual([
+        'class_categories',
+        'designations',
+      ]);
+      expect(t.requirePlace).toHaveBeenCalledTimes(1);
+      expect(t.requireReady.mock.calls[0]![1]).toBe('file-1');
+      expect(t.requireReady.mock.calls[0]![2]).toMatchObject({ institutionId: 'institution-1' });
+    });
+
+    it('replaces the emergency contacts that differ and leaves the ones that match', async () => {
+      const t = build();
+      await t.service.update(owner, 'staff-1', {
+        version: 1,
+        emergencyContacts: [
+          {
+            contactName: 'Ravi',
+            phone: { countryCode: '91', number: '9000000001' },
+            isPrimary: true,
+          },
+        ],
+      } as UpdateStaffDto);
+      expect(t.replaceEmergencyContacts).toHaveBeenCalledTimes(1);
+    });
+
     it('replaces a list that differs', async () => {
       const t = build();
       await t.service.update(owner, 'staff-1', { version: 1, educations: [{ degree: 'B.Ed' }] });
@@ -551,6 +616,186 @@ describe('StaffService', () => {
         status: 409,
         code: 'EMAIL_IN_USE',
       });
+    });
+  });
+  describe('block and unblock (STF-06, STF-07)', () => {
+    it('blocks the staff role, ends the staff sessions of that Society, and audits it', async () => {
+      const t = build();
+      const result = await t.service.block(owner, 'staff-1');
+      expect(t.update.mock.calls[0]![2]).toMatchObject({
+        access_blocked_at: new Date('2026-11-08T04:30:00.000Z'),
+        access_blocked_by: 'owner-1',
+        updated_by: 'owner-1',
+      });
+      expect(t.endStaffAccessSessions).toHaveBeenCalledWith(
+        expect.anything(),
+        'user-1',
+        'society-1',
+        new Date('2026-11-08T04:30:00.000Z'),
+      );
+      expect(t.record.mock.calls[0]![1]).toMatchObject({
+        action: 'staff.blocked',
+        before: { isBlocked: false },
+        after: { isBlocked: true, sessionsEnded: 3 },
+      });
+      expect(result).toMatchObject({ isBlocked: true });
+    });
+
+    it('lifts the block without ending any session', async () => {
+      const t = build(staff({ access_blocked_at: new Date(), access_blocked_by: 'owner-1' }));
+      const result = await t.service.unblock(owner, 'staff-1');
+      expect(t.update.mock.calls[0]![2]).toMatchObject({
+        access_blocked_at: null,
+        access_blocked_by: null,
+      });
+      expect(t.endStaffAccessSessions).not.toHaveBeenCalled();
+      expect(t.record.mock.calls[0]![1]).toMatchObject({
+        action: 'staff.unblocked',
+        before: { isBlocked: true },
+        after: { isBlocked: false },
+      });
+      expect(result).toMatchObject({ isBlocked: false });
+    });
+
+    it('refuses to block a blocked record and to unblock one that is not, writing nothing', async () => {
+      const blocked = build(staff({ access_blocked_at: new Date(), access_blocked_by: 'owner-1' }));
+      expect(await fail(blocked.service.block(owner, 'staff-1'))).toEqual({
+        status: 409,
+        code: 'INVALID_STATE',
+      });
+      const open = build();
+      expect(await fail(open.service.unblock(owner, 'staff-1'))).toEqual({
+        status: 409,
+        code: 'INVALID_STATE',
+      });
+      expect(blocked.update).not.toHaveBeenCalled();
+      expect(open.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses the caller’s own record and a deactivated one', async () => {
+      expect(
+        await fail(build(staff({ user_id: 'owner-1' })).service.block(owner, 'staff-1')),
+      ).toEqual({ status: 409, code: 'CANNOT_ACT_ON_SELF' });
+      expect(await fail(build(staff({ status: 0 })).service.block(owner, 'staff-1'))).toEqual({
+        status: 404,
+        code: 'NOT_FOUND',
+      });
+    });
+  });
+
+  describe('setSubjects (STF-08)', () => {
+    it('replaces the list, checking only the subjects that are new to the person, and audits before and after', async () => {
+      const t = build();
+      t.subjectIds.mockResolvedValue(['subject-1', 'subject-2']);
+      await t.service.setSubjects(owner, 'staff-1', { subjectIds: ['subject-3', 'subject-1'] });
+      expect(t.requireActive).toHaveBeenCalledWith(expect.anything(), ['subject-3'], 'subjectIds');
+      expect(t.replaceSubjects.mock.calls[0]![2]).toEqual([
+        {
+          society_id: 'society-1',
+          staff_member_id: 'staff-1',
+          subject_id: 'subject-3',
+          created_by: 'owner-1',
+        },
+        {
+          society_id: 'society-1',
+          staff_member_id: 'staff-1',
+          subject_id: 'subject-1',
+          created_by: 'owner-1',
+        },
+      ]);
+      expect(t.record.mock.calls[0]![1]).toMatchObject({
+        action: 'staff.subjects_changed',
+        before: { subjectIds: ['subject-1', 'subject-2'] },
+        after: { subjectIds: ['subject-1', 'subject-3'] },
+      });
+    });
+
+    it('writes nothing for the same list in any order, and clears with an empty one', async () => {
+      const t = build();
+      t.subjectIds.mockResolvedValue(['subject-1', 'subject-2']);
+      await t.service.setSubjects(owner, 'staff-1', { subjectIds: ['subject-2', 'subject-1'] });
+      expect(t.replaceSubjects).not.toHaveBeenCalled();
+      expect(t.record).not.toHaveBeenCalled();
+      await t.service.setSubjects(owner, 'staff-1', { subjectIds: [] });
+      expect(t.replaceSubjects.mock.calls[0]![2]).toEqual([]);
+    });
+
+    it('passes on the refusal of a subject that is not there or not active, and writes nothing', async () => {
+      const t = build();
+      t.requireActive.mockRejectedValue(AppException.notFound());
+      expect(await fail(t.service.setSubjects(owner, 'staff-1', { subjectIds: ['x'] }))).toEqual({
+        status: 404,
+        code: 'NOT_FOUND',
+      });
+      expect(t.replaceSubjects).not.toHaveBeenCalled();
+    });
+
+    it('is 404 for a deactivated staff member', async () => {
+      const t = build(staff({ status: 0 }));
+      expect(await fail(t.service.setSubjects(owner, 'staff-1', { subjectIds: [] }))).toEqual({
+        status: 404,
+        code: 'NOT_FOUND',
+      });
+    });
+  });
+
+  describe('setInstitutions (STF-10)', () => {
+    it('replaces the list after checking each new Institution, and audits before and after', async () => {
+      const t = build();
+      t.institutionIds.mockResolvedValue(['institution-2']);
+      await t.service.setInstitutions(owner, 'staff-1', {
+        institutionIds: ['institution-3', 'institution-2'],
+      });
+      expect(t.findInstitution).toHaveBeenCalledTimes(1);
+      expect(t.findInstitution).toHaveBeenCalledWith(expect.anything(), 'institution-3');
+      expect(t.replaceInstitutions.mock.calls[0]![2]).toMatchObject([
+        { staff_member_id: 'staff-1', institution_id: 'institution-3' },
+        { staff_member_id: 'staff-1', institution_id: 'institution-2' },
+      ]);
+      expect(t.record.mock.calls[0]![1]).toMatchObject({
+        action: 'staff.institutions_changed',
+        before: { institutionIds: ['institution-2'] },
+        after: { institutionIds: ['institution-2', 'institution-3'] },
+      });
+    });
+
+    it('writes nothing for the same list', async () => {
+      const t = build();
+      t.institutionIds.mockResolvedValue(['institution-2']);
+      await t.service.setInstitutions(owner, 'staff-1', { institutionIds: ['institution-2'] });
+      expect(t.replaceInstitutions).not.toHaveBeenCalled();
+    });
+
+    it('refuses the home Institution, naming its place in the list', async () => {
+      const t = build();
+      await expect(
+        t.service.setInstitutions(owner, 'staff-1', {
+          institutionIds: ['institution-2', 'institution-1'],
+        }),
+      ).rejects.toMatchObject({
+        status: 400,
+        options: { errors: [{ field: 'institutionIds[1]', code: 'INVALID_VALUE' }] },
+      });
+      expect(t.replaceInstitutions).not.toHaveBeenCalled();
+    });
+
+    it('is 404 for an Institution the Owner cannot see and 422 for one that is not active', async () => {
+      const missing = build();
+      missing.findInstitution.mockResolvedValue(undefined);
+      expect(
+        await fail(missing.service.setInstitutions(owner, 'staff-1', { institutionIds: ['x'] })),
+      ).toEqual({ status: 404, code: 'NOT_FOUND' });
+      const hidden = build();
+      hidden.findInstitution.mockResolvedValue({
+        id: 'x',
+        societyId: 'society-1',
+        name: 'Closed',
+        active: false,
+      });
+      expect(
+        await fail(hidden.service.setInstitutions(owner, 'staff-1', { institutionIds: ['x'] })),
+      ).toEqual({ status: 422, code: 'REFERENCE_INACTIVE' });
+      expect(hidden.replaceInstitutions).not.toHaveBeenCalled();
     });
   });
 });

@@ -231,6 +231,19 @@ describe('AccountDirectory.revoke', () => {
   });
 });
 
+describe('AccountDirectory.endStaffAccessSessions', () => {
+  it('ends the sessions acting as Institution Admin and as Teacher / Staff in the Society, reading blocked', async () => {
+    const t = build();
+    t.endRoleSessions.mockResolvedValueOnce(2).mockResolvedValueOnce(1);
+    await expect(t.directory.endStaffAccessSessions(tx, 'user-1', 'society-1', now)).resolves.toBe(
+      3,
+    );
+    expect(t.endRoleSessions).toHaveBeenCalledTimes(2);
+    expect(t.endRoleSessions).toHaveBeenCalledWith(tx, 'user-1', 3, 'society-1', 3, now);
+    expect(t.endRoleSessions).toHaveBeenCalledWith(tx, 'user-1', 4, 'society-1', 3, now);
+  });
+});
+
 describe('AccountDirectory.welcome', () => {
   it('sends the welcome mail naming the role and the Society', () => {
     const t = build();

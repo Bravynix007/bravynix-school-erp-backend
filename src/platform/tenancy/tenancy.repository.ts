@@ -31,6 +31,19 @@ export class TenancyRepository {
   }
 
   /**
+   * Is the person's active staff record in the Society blocked from their profile (STF-06)? Read through a definer
+   * function, as the section blocks are, so the caller's own tenant cannot hide it.
+   */
+  async staffBlocked(societyId: string, personId: string): Promise<boolean> {
+    const { rows } = await sql<{
+      blocked: boolean;
+    }>`select app_staff_blocked(${societyId}::uuid, ${personId}::uuid) as blocked`.execute(
+      this.database.db,
+    );
+    return rows[0]?.blocked === true;
+  }
+
+  /**
    * The IDs of the active Institutions of a Society, optionally only among `ids`.
    * Deactivated Institutions are left out: their records answer 404 (API design 6.5).
    */
