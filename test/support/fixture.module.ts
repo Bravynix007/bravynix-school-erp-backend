@@ -178,7 +178,7 @@ class TenantFixtureController {
   ) {}
 
   @Policy({
-    roles: [RoleCode.SocietyOwner, RoleCode.InstitutionAdmin],
+    roles: [RoleCode.SocietyOwner, RoleCode.InstitutionAdmin, RoleCode.TeacherStaff],
     scope: 'institution',
     operationId: 'FIX-02',
   })
@@ -220,7 +220,7 @@ class TenantFixtureController {
   }
 
   @Policy({
-    roles: [RoleCode.SocietyOwner, RoleCode.InstitutionAdmin],
+    roles: [RoleCode.SocietyOwner, RoleCode.InstitutionAdmin, RoleCode.TeacherStaff],
     scope: 'society',
     operationId: 'FIX-04',
   })

@@ -1,5 +1,7 @@
 import { Kysely, PostgresDialect, sql } from 'kysely';
+import request from 'supertest';
 import { newId } from '../../src/common/ids/ids.js';
+import { DatabaseService } from '../../src/platform/database/index.js';
 import { createPool } from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
@@ -19,13 +21,6 @@ const superAdmin = personaByKey('SA1');
 const TEACHER = 4;
 const OWNER = 2;
 
-const staffRolesOf = async (db: Kysely<unknown>, person: string) =>
-  (
-    await sql<{ society_id: string; home_institution_id: string; staff_blocked: boolean }>`
-      select * from app_staff_roles(${person})
-    `.execute(db)
-  ).rows;
-
 /** DDD 7.2 M1, DDD 15.3: a person with an active staff record signs in as a Teacher / Staff. */
 describe('the teacher signs in from the staff record', () => {
   let ownerDb: Kysely<unknown>;
@@ -42,6 +37,9 @@ describe('the teacher signs in from the staff record', () => {
   let first: string;
   let second: string;
   let categoryId: string;
+
+  const refresh = (refreshToken: string) =>
+    request(t.app.getHttpServer()).post('/v1/auth/refresh').send({ refreshToken });
 
   const makeSociety = async () => {
     const res = await api('post', '/v1/platform/societies', admin, {
@@ -182,6 +180,25 @@ describe('the teacher signs in from the staff record', () => {
     expect(stopped.body.code).toBe('SECTION_BLOCKED');
     await blocks.setBlock(ownerDb, societyA, first, 2, false);
     expect((await api('get', `/v1/institutions/${first}`, login.accessToken)).status).toBe(200);
+    // A lifted block no longer marks the context.
+    const lifted = await signInMobile(t, staff.person.email);
+    expect(lifted.contexts).toEqual([
+      expect.objectContaining({ roleCode: TEACHER, isBlocked: false }),
+    ]);
+  });
+
+  it('is not stopped by a block of the Society’s Owners, of its own Institution’s students, or of another Institution’s staff', async () => {
+    const staff = await addTeacher();
+    await blocks.setBlock(ownerDb, societyA, null, 1, true);
+    await blocks.setBlock(ownerDb, societyA, second, 2, true);
+    // A block of the Institution's students is not a block of its staff.
+    await blocks.setBlock(ownerDb, societyA, first, 3, true);
+    const login = await signInMobile(t, staff.person.email);
+    expect(login.contexts).toEqual([
+      expect.objectContaining({ roleCode: TEACHER, isBlocked: false }),
+    ]);
+    expect((await api('get', `/v1/staff/${staff.id}`, login.accessToken)).status).toBe(200);
+    expect((await api('get', `/v1/institutions/${first}`, login.accessToken)).status).toBe(200);
   });
 
   it('ends the teacher’s session on the next call once the staff record is deactivated, and lists no context after', async () => {
@@ -218,6 +235,74 @@ describe('the teacher signs in from the staff record', () => {
     expect((await signInMobile(t, other.person.email)).contexts).toEqual([]);
   });
 
+  it('ends a session already open when its home Institution or Society is deactivated, on the next call and on refresh', async () => {
+    const inInstitution = await addTeacher({ homeInstitutionId: second });
+    const inSociety = await addTeacher({ homeInstitutionId: first });
+    const one = await signInMobile(t, inInstitution.person.email);
+    const two = await signInMobile(t, inSociety.person.email);
+    expect((await api('get', `/v1/staff/${inInstitution.id}`, one.accessToken)).status).toBe(200);
+    expect((await api('get', `/v1/staff/${inSociety.id}`, two.accessToken)).status).toBe(200);
+
+    expect((await api('delete', `/v1/institutions/${second}`, owner.token)).status).toBe(200);
+    expect((await api('get', `/v1/staff/${inInstitution.id}`, one.accessToken)).status).toBe(401);
+    expect((await refresh(one.refreshToken)).status).toBe(401);
+
+    expect((await api('delete', `/v1/platform/societies/${societyA}`, admin)).status).toBe(200);
+    expect((await api('get', `/v1/staff/${inSociety.id}`, two.accessToken)).status).toBe(401);
+    expect((await refresh(two.refreshToken)).status).toBe(401);
+  });
+
+  /** A teacher with a record in Society A and one in a Society B, acting in A: their token, both records, B's Owner. */
+  const teacherInTwoSocieties = async () => {
+    const societyB = await makeSociety();
+    const ownerB = await fixtures.owner(societyB);
+    const institutionB = await makeInstitution(ownerB.token);
+    const inA = await addTeacher();
+    const inBResponse = await api('post', '/v1/staff', ownerB.token, {
+      homeInstitutionId: institutionB,
+      email: inA.person.email,
+      firstName: 'Meera',
+      classCategoryId: categoryId,
+      mobile: { countryCode: '91', number: '9876500001' },
+    });
+    expect(inBResponse.status).toBe(201);
+    const inB = inBResponse.body.data as { id: string };
+
+    const login = await signInMobile(t, inA.person.email);
+    expect(login.contexts.map((c) => [c.roleCode, c.societyId]).toSorted()).toEqual(
+      [
+        [TEACHER, societyA],
+        [TEACHER, societyB],
+      ].toSorted(),
+    );
+    const chosen = await api('post', '/v1/auth/context', login.accessToken, {
+      roleCode: TEACHER,
+      societyId: societyA,
+    });
+    expect(chosen.status).toBe(200);
+    const asTeacherInA = chosen.body.data.accessToken as string;
+    expect((await api('get', `/v1/staff/${inA.id}`, asTeacherInA)).status).toBe(200);
+    // The own record of the other Society is as if it did not exist.
+    expect((await api('get', `/v1/staff/${inB.id}`, asTeacherInA)).status).toBe(404);
+    return { inA, inB, ownerB, asTeacherInA };
+  };
+
+  it('keeps a teacher’s session in one Society when their record in the other Society ends', async () => {
+    const { inA, inB, ownerB, asTeacherInA } = await teacherInTwoSocieties();
+    expect((await api('delete', `/v1/staff/${inB.id}`, ownerB.token)).status).toBe(200);
+    expect((await api('get', `/v1/staff/${inA.id}`, asTeacherInA)).status).toBe(200);
+  });
+
+  it('ends a teacher’s session in a Society when their record there ends, though they still have one in another', async () => {
+    const { inA, asTeacherInA } = await teacherInTwoSocieties();
+    // Written behind the API's back, so only the per-request check can notice.
+    await ownerDb.transaction().execute(async (trx) => {
+      await sql`select set_config('app.society_id', ${societyA}, true)`.execute(trx);
+      await sql`update staff_members set status = 0 where id = ${inA.id}`.execute(trx);
+    });
+    expect((await api('get', `/v1/staff/${inA.id}`, asTeacherInA)).status).toBe(401);
+  });
+
   it('gives a person who is Owner and staff both contexts, and keeps the Owner when the staff record ends', async () => {
     const staff = await addTeacher({ email: owner.email });
     expect(staff.person.id).toBe(owner.person);
@@ -242,13 +327,76 @@ describe('the teacher signs in from the staff record', () => {
     expect((await api('get', `/v1/institutions/${first}`, later.accessToken)).status).toBe(200);
   });
 
-  it('answers the staff lookup only for the person asked about, from any caller’s transaction', async () => {
-    const staff = await addTeacher();
-    const other = await addTeacher();
-    expect(await staffRolesOf(ownerDb, staff.person.id)).toEqual([
-      expect.objectContaining({ society_id: societyA, home_institution_id: first }),
-    ]);
-    expect(await staffRolesOf(ownerDb, newId())).toEqual([]);
-    expect((await staffRolesOf(ownerDb, other.person.id)).length).toBe(1);
+  it('answers the staff lookup only for the person asked about, from a tenant transaction of any Society, and puts the settings back', async () => {
+    const mine = await addTeacher();
+    const colleague = await addTeacher();
+    const societyB = await makeSociety();
+    const ownerB = await fixtures.owner(societyB);
+    const institutionB = await makeInstitution(ownerB.token);
+    const theirs = await api('post', '/v1/staff', ownerB.token, {
+      homeInstitutionId: institutionB,
+      email: `${newId()}@staff.test`,
+      firstName: 'Kiran',
+      classCategoryId: categoryId,
+      mobile: { countryCode: '91', number: '9876500002' },
+    });
+    expect(theirs.status).toBe(201);
+    const other = theirs.body.data.person as { id: string };
+    staffUsers.push(other.id);
+
+    const database = t.app.get(DatabaseService);
+    const asked = (tenant: Parameters<DatabaseService['transaction']>[0], person: string) =>
+      database.transaction(tenant, async (tx) => {
+        const found = await sql<{
+          society_id: string;
+          home_institution_id: string;
+        }>`select * from app_staff_roles(${person}::uuid)`.execute(tx);
+        const settings = await sql<{ role: string; society: string; person: string }>`
+          select current_setting('app.role_code') as role, current_setting('app.society_id') as society,
+            current_setting('app.person_id') as person`.execute(tx);
+        return {
+          roles: found.rows.map((row) => [row.society_id, row.home_institution_id]),
+          settings: settings.rows[0],
+        };
+      });
+    const inA = {
+      societyId: societyA,
+      roleCode: OWNER,
+      personId: owner.person,
+      institutionIds: [first],
+    };
+    const inB = {
+      societyId: societyB,
+      roleCode: OWNER,
+      personId: ownerB.person,
+      institutionIds: [institutionB],
+    };
+
+    // From the teacher's own Society, with a colleague there: the one person's row, and the settings as they were.
+    expect(await asked(inA, mine.person.id)).toEqual({
+      roles: [[societyA, first]],
+      settings: { role: '2', society: societyA, person: owner.person },
+    });
+    expect((await asked(inA, colleague.person.id)).roles).toEqual([[societyA, first]]);
+    // From another Society: still only that person's own row, and the other Society's teacher is not mixed in.
+    expect(await asked(inB, mine.person.id)).toEqual({
+      roles: [[societyA, first]],
+      settings: { role: '2', society: societyB, person: ownerB.person },
+    });
+    expect((await asked(inA, other.id)).roles).toEqual([[societyB, institutionB]]);
+    // A stranger has none, and a person with no Society set in the transaction is answered the same way.
+    expect((await asked(inA, newId())).roles).toEqual([]);
+    expect(await asked({ roleCode: OWNER }, mine.person.id)).toEqual({
+      roles: [[societyA, first]],
+      settings: { role: '2', society: '', person: '' },
+    });
+  });
+
+  it('keeps the function from the public, and open to the app role only', async () => {
+    const { rows } = await sql<{ owner_only: boolean; app_can: boolean }>`
+      select proacl::text !~ '(^|[{,])=' as owner_only,
+        has_function_privilege('erp_app', 'app_staff_roles(uuid)', 'execute') as app_can
+      from pg_proc where proname = 'app_staff_roles'`.execute(ownerDb);
+    expect(rows).toEqual([{ owner_only: true, app_can: true }]);
   });
 });

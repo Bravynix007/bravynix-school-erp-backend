@@ -6,7 +6,7 @@ import { createPool } from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
 import { writeAcademicSeed } from '../../src/seeds/academic-seed.js';
 import { writeFilesSeed } from '../../src/seeds/files-seed.js';
-import { writeStaffSeed } from '../../src/seeds/people-seed.js';
+import { seededStaffId, writeStaffSeed } from '../../src/seeds/people-seed.js';
 import { seededRateId, writeBillingSeed } from '../../src/seeds/billing-seed.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { institutions, personaByKey, societies } from '../../src/seeds/two-worlds.js';
@@ -38,6 +38,9 @@ const callers = {
   adminA1: { persona: 'IA-A1', role: 3, society: socA, grants: [a1.id] },
   adminA12: { persona: 'IA-A12', role: 3, society: socA, grants: [a1.id, a2.id] },
   adminB1: { persona: 'IA-B1', role: 3, society: socB, grants: [b1.id] },
+  // Teachers hold no grant: their role comes from the staff record the seed writes (DDD 7.2, M1).
+  teacherA1: { persona: 'T-A1-assigned', role: 4, society: socA, grants: [] as string[] },
+  teacherB1: { persona: 'T-B1', role: 4, society: socB, grants: [] as string[] },
 } as const;
 type CallerKey = keyof typeof callers;
 
@@ -355,6 +358,12 @@ describe('tenant isolation', () => {
       ['adminA12', b1, 404],
       ['adminB1', a1, 404],
       ['adminB1', b1, 200],
+      ['teacherA1', a1, 200],
+      ['teacherA1', a2, 404],
+      ['teacherA1', b1, 404],
+      ['teacherB1', a1, 404],
+      ['teacherB1', a2, 404],
+      ['teacherB1', b1, 200],
     ] as const)('%s reading Institution %#: %s', async (key, institution, expected) => {
       const res = await get(`/v1/fixtures/tenant/institutions/${institution.id}`, key);
       expect(res.status).toBe(expected);
@@ -368,8 +377,40 @@ describe('tenant isolation', () => {
       ['adminA1', socA, 200],
       ['adminA1', socB, 404],
       ['adminB1', socA, 404],
+      ['teacherA1', socA, 200],
+      ['teacherA1', socB, 404],
+      ['teacherB1', socA, 404],
+      ['teacherB1', socB, 200],
     ] as const)('%s reading Society %#: %s', async (key, society, expected) => {
       expect((await get(`/v1/fixtures/tenant/societies/${society.id}`, key)).status).toBe(expected);
+    });
+
+    it.each([
+      ['teacherA1', 'T-A1-assigned', 200],
+      ['teacherA1', 'T-A1-other', 404],
+      ['teacherA1', 'T-B1', 404],
+      ['teacherB1', 'T-B1', 200],
+      ['teacherB1', 'T-A1-assigned', 404],
+      ['ownerA', 'T-A1-assigned', 200],
+      ['ownerA', 'T-B1', 404],
+      ['ownerB', 'T-B1', 200],
+      ['ownerB', 'T-A1-assigned', 404],
+      ['adminA1', 'T-A1-other', 200],
+      ['adminA1', 'T-B1', 404],
+      ['adminB1', 'T-A1-other', 404],
+    ] as const)('%s reading the staff record of %s: %s', async (key, persona, expected) => {
+      const res = await get(`/v1/staff/${seededStaffId(persona)}`, key);
+      expect(res.status).toBe(expected);
+      if (expected === 200) expect(res.body.data).toMatchObject({ id: seededStaffId(persona) });
+    });
+
+    it('answers a teacher asking for a record of the other world, or a colleague’s, exactly as for one that does not exist', async () => {
+      const absent = strip(await get(`/v1/staff/${missing}`, 'teacherA1'));
+      for (const persona of ['T-B1', 'T-A1-other']) {
+        const res = await get(`/v1/staff/${seededStaffId(persona)}`, 'teacherA1');
+        expect(res.status).toBe(404);
+        expect(strip(res)).toEqual(absent);
+      }
     });
 
     it('answers a foreign Institution exactly as it answers one that does not exist', async () => {
