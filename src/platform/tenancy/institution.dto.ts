@@ -24,6 +24,7 @@ import {
 import { RequiredAddressDto } from '../../common/validation/address.dto.js';
 import { LowerCaseUuid } from '../../common/validation/lower-case-uuid.js';
 import { PhoneDto } from '../../common/validation/phone.dto.js';
+import { PlaceDto } from '../../common/validation/place.dto.js';
 import { VersionDto } from '../../common/validation/version.dto.js';
 import { WhenPresent } from '../../common/validation/when-present.js';
 import { TenantRootListQueryDto } from './tenant-root-list.query.js';
@@ -51,25 +52,7 @@ export class LocationDto {
  * An Institution's address: the lines of any address, and the place from the platform masters (API design
  * 10.4c). The place is optional, but a state needs its country and a city its state.
  */
-export class InstitutionAddressDto extends RequiredAddressDto {
-  @ApiPropertyOptional({ format: 'uuid', nullable: true })
-  @IsOptional()
-  @LowerCaseUuid()
-  @IsUUID()
-  countryId?: string | null;
-
-  @ApiPropertyOptional({ format: 'uuid', nullable: true, description: 'A state of the country' })
-  @IsOptional()
-  @LowerCaseUuid()
-  @IsUUID()
-  stateId?: string | null;
-
-  @ApiPropertyOptional({ format: 'uuid', nullable: true, description: 'A city of the state' })
-  @IsOptional()
-  @LowerCaseUuid()
-  @IsUUID()
-  cityId?: string | null;
-}
+export class InstitutionAddressDto extends IntersectionType(RequiredAddressDto, PlaceDto) {}
 
 /** The optional profile fields, on create and on change. A body is JSON: no `@Type` on primitives. */
 class InstitutionProfileDto {

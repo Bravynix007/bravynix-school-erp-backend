@@ -30,6 +30,9 @@ export async function removeScratchSocieties(
     await sql`alter table sections no force row level security`.execute(tx);
     await sql`alter table institution_class_categories no force row level security`.execute(tx);
     await sql`alter table files no force row level security`.execute(tx);
+    await sql`alter table staff_members no force row level security`.execute(tx);
+    await sql`alter table staff_educations no force row level security`.execute(tx);
+    await sql`alter table staff_emergency_contacts no force row level security`.execute(tx);
     await sql`
       delete from refresh_tokens where session_id in
         (select id from auth_sessions where active_society_id in (${sql.join(ids)}))`.execute(tx);
@@ -44,6 +47,11 @@ export async function removeScratchSocieties(
     await sql`delete from subjects where society_id in (${sql.join(ids)})`.execute(tx);
     await sql`delete from sections where society_id in (${sql.join(ids)})`.execute(tx);
     await sql`delete from classes where society_id in (${sql.join(ids)})`.execute(tx);
+    await sql`delete from staff_emergency_contacts where society_id in (${sql.join(ids)})`.execute(
+      tx,
+    );
+    await sql`delete from staff_educations where society_id in (${sql.join(ids)})`.execute(tx);
+    await sql`delete from staff_members where society_id in (${sql.join(ids)})`.execute(tx);
     await sql`delete from files where society_id in (${sql.join(ids)})`.execute(tx);
     await sql`delete from institution_class_categories where society_id in (${sql.join(ids)})`.execute(
       tx,
@@ -51,6 +59,9 @@ export async function removeScratchSocieties(
     await sql`delete from institutions where society_id in (${sql.join(ids)})`.execute(tx);
     await sql`delete from societies where id in (${sql.join(ids)})`.execute(tx);
     await sql`alter table files force row level security`.execute(tx);
+    await sql`alter table staff_members force row level security`.execute(tx);
+    await sql`alter table staff_educations force row level security`.execute(tx);
+    await sql`alter table staff_emergency_contacts force row level security`.execute(tx);
     await sql`alter table access_blocks force row level security`.execute(tx);
     await sql`alter table academic_years force row level security`.execute(tx);
     await sql`alter table subjects force row level security`.execute(tx);

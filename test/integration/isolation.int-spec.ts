@@ -6,6 +6,7 @@ import { createPool } from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
 import { writeAcademicSeed } from '../../src/seeds/academic-seed.js';
 import { writeFilesSeed } from '../../src/seeds/files-seed.js';
+import { writeStaffSeed } from '../../src/seeds/people-seed.js';
 import { seededRateId, writeBillingSeed } from '../../src/seeds/billing-seed.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { institutions, personaByKey, societies } from '../../src/seeds/two-worlds.js';
@@ -123,6 +124,7 @@ describe('tenant isolation', () => {
     await writeBillingSeed(ownerDb);
     await writeAcademicSeed(ownerDb);
     await writeFilesSeed(ownerDb);
+    await writeStaffSeed(ownerDb);
     await clearLoginState(ownerDb);
     // Role 3 grants need a staff record, which arrives with the People module.
     for (const caller of Object.values(callers)) {
@@ -187,6 +189,9 @@ describe('tenant isolation', () => {
         'institutions',
         'sections',
         'societies',
+        'staff_educations',
+        'staff_emergency_contacts',
+        'staff_members',
         'subjects',
       ]);
     });

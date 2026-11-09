@@ -5,7 +5,7 @@ import { ErrorCode } from '../../common/http/error-codes.js';
 import { duplicateOn, type Tx } from '../database/index.js';
 import { welcomeEmail } from './account-email.js';
 import type { NewPersonDto } from './account.dto.js';
-import { AccountRepository } from './account.repository.js';
+import { AccountRepository, type AccountRow } from './account.repository.js';
 import { emailInUse, nextSeat, requireCanHoldRole } from './account-rules.js';
 import { SessionEndReason } from './auth-codes.js';
 import { BackgroundMailer } from './background-mailer.js';
@@ -15,6 +15,15 @@ import { personName } from './person-name.js';
 export interface SeatKind {
   roleCode: 1 | 2;
   societyId: string | null;
+}
+
+/** A person found or made for a staff record: no seat, because roles 4 and 5 are derived from their records. */
+export interface LinkedPerson {
+  id: string;
+  email: string;
+  displayName: string;
+  /** False when the email already belonged to a person, who is now also staff here. */
+  created: boolean;
 }
 
 export interface GrantedPerson {
@@ -53,15 +62,52 @@ export class AccountDirectory {
     by: string,
     now: Date,
   ): Promise<GrantedPerson> {
-    const email = person.email.toLowerCase();
     await this.accounts.lockSeats(tx, kind.roleCode, kind.societyId);
-    const existing = await this.accounts.findByEmail(tx, email);
-    if (existing) {
-      requireCanHoldRole(existing);
+    const holder = await this.findOrMake(tx, person, by, async (existing) => {
       if (await this.accounts.activeGrant(tx, existing.id, kind.roleCode, kind.societyId)) {
         throw duplicateOn('email');
       }
       await this.requireSeparateRoles(tx, existing.id, kind.roleCode);
+    });
+    const seatNo = nextSeat(await this.accounts.takenSeats(tx, kind.roleCode, kind.societyId));
+    await this.accounts.insertGrant(tx, {
+      userId: holder.id,
+      roleCode: kind.roleCode,
+      societyId: kind.societyId,
+      seatNo,
+      by,
+      now,
+    });
+    return { ...holder, seatNo };
+  }
+
+  /**
+   * The person for a staff record, by email (PRD 5.2, one email is one person): a new email makes a Pending
+   * account, an email that already belongs to a person is that person. A blocked or inactive person cannot be
+   * given a record; a Super Admin is never staff (409 `ROLE_CONFLICT`). Runs in the caller's transaction; the
+   * welcome mail is the caller's, after the commit.
+   */
+  async linkStaff(tx: Tx, person: NewPersonDto, by: string): Promise<LinkedPerson> {
+    return this.findOrMake(tx, person, by, (existing) =>
+      this.requireSeparateRoles(tx, existing.id, RoleCode.TeacherStaff),
+    );
+  }
+
+  /**
+   * The person an email names (one email is one person): the existing account when there is one, once it may hold a
+   * role and `vet` has passed it, otherwise a new Pending account.
+   */
+  private async findOrMake(
+    tx: Tx,
+    person: NewPersonDto,
+    by: string,
+    vet: (existing: AccountRow) => Promise<void>,
+  ): Promise<LinkedPerson> {
+    const email = person.email.toLowerCase();
+    const existing = await this.accounts.findByEmail(tx, email);
+    if (existing) {
+      requireCanHoldRole(existing);
+      await vet(existing);
     }
     const holder =
       existing ??
@@ -74,30 +120,37 @@ export class AccountDirectory {
         .catch((error: unknown) => {
           throw emailInUse(error);
         }));
-    const seatNo = nextSeat(await this.accounts.takenSeats(tx, kind.roleCode, kind.societyId));
-    await this.accounts.insertGrant(tx, {
-      userId: holder.id,
-      roleCode: kind.roleCode,
-      societyId: kind.societyId,
-      seatNo,
-      by,
-      now,
-    });
     return {
       id: holder.id,
       email: holder.email,
       displayName: personName(holder.first_name, holder.last_name) ?? holder.email,
-      seatNo,
       created: existing === undefined,
     };
   }
 
-  /** Under the separation lock, so a concurrent grant of the other role sees this one or is seen by it. */
-  private async requireSeparateRoles(
+  /**
+   * Ends the person's sessions that act in this role in this Society, so they lose access on the next call (a
+   * staff record deactivated or blocked). Returns how many ended.
+   */
+  endRoleSessions(
     tx: Tx,
     userId: string,
-    roleCode: SeatKind['roleCode'],
-  ): Promise<void> {
+    roleCode: RoleCode,
+    societyId: string,
+    now: Date,
+  ): Promise<number> {
+    return this.accounts.endRoleSessions(
+      tx,
+      userId,
+      roleCode,
+      societyId,
+      SessionEndReason.AccessRevoked,
+      now,
+    );
+  }
+
+  /** Under the separation lock, so a concurrent grant of the other role sees this one or is seen by it. */
+  private async requireSeparateRoles(tx: Tx, userId: string, roleCode: RoleCode): Promise<void> {
     await this.accounts.lockRoleSeparation(tx);
     const other = roleCode === RoleCode.SuperAdmin ? RoleCode.SocietyOwner : RoleCode.SuperAdmin;
     if (await this.accounts.holdsActiveGrant(tx, userId, [other])) {
@@ -143,6 +196,11 @@ export class AccountDirectory {
 
   /** The welcome mail, after the commit; a failed send never undoes the grant. */
   welcome(person: GrantedPerson, kind: SeatKind, societyName: string | null): void {
-    this.mailer.send(welcomeEmail(person.email, RoleName[kind.roleCode], societyName));
+    this.welcomeAs(person, kind.roleCode, societyName);
+  }
+
+  /** The same mail for a role that has no seat, such as a teacher. */
+  welcomeAs(person: { email: string }, roleCode: RoleCode, societyName: string | null): void {
+    this.mailer.send(welcomeEmail(person.email, RoleName[roleCode], societyName));
   }
 }

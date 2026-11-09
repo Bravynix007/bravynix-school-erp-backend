@@ -1,6 +1,7 @@
 import { Module, RequestMethod, type MiddlewareConsumer, type NestModule } from '@nestjs/common';
 import { Clock } from '../../common/time/clock.js';
 import { AppConfig } from '../../config/app-config.js';
+import { FileDirectory } from './file-directory.js';
 import { FilesController } from './files.controller.js';
 import { FilesRepository } from './files.repository.js';
 import { FilesService } from './files.service.js';
@@ -17,6 +18,7 @@ import { ObjectStorage } from './object-storage.js';
   providers: [
     FilesRepository,
     FilesService,
+    FileDirectory,
     {
       provide: LocalObjectStorage,
       inject: [AppConfig, Clock],
@@ -25,7 +27,7 @@ import { ObjectStorage } from './object-storage.js';
     { provide: ObjectStorage, useExisting: LocalObjectStorage },
   ],
   controllers: [FilesController],
-  exports: [FilesService],
+  exports: [FilesService, FileDirectory],
 })
 export class FilesModule implements NestModule {
   constructor(private readonly storage: LocalObjectStorage) {}

@@ -71,6 +71,7 @@ const en: Catalogue = {
   ROLE_CONFLICT:
     'A Super Admin cannot also be a Society Owner, and a Society Owner cannot also be a Super Admin',
   EMAIL_IN_USE: 'This email already belongs to another person',
+  EMPLOYEE_ID_TAKEN: 'Another active staff member of this Institution has this Employee ID',
   CANNOT_ACT_ON_SELF: 'You cannot do this to your own account',
   NOT_LOCKED: 'This account is not locked',
   AUTHENTICATOR_LOCKED: 'The authenticator is locked; lift the lock first',

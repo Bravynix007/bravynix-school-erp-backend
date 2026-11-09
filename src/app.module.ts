@@ -8,6 +8,7 @@ import { requestLogProps, serializeRequest } from './common/logging/request-log.
 import { AppConfig, AppConfigModule } from './config/app-config.js';
 import { HealthModule } from './health/health.module.js';
 import { AcademicSetupModule } from './modules/academic-setup/index.js';
+import { PeopleModule } from './modules/people/index.js';
 import { PlatformBillingModule } from './modules/platform-billing/index.js';
 import { PlatformDashboardModule } from './modules/platform-dashboard/index.js';
 import { AuditModule } from './platform/audit/audit.module.js';
@@ -79,6 +80,7 @@ import { TenancyModule } from './platform/tenancy/tenancy.module.js';
     // Platform modules (Notifications, Jobs) are registered here as they are built.
     // Business modules are registered here as they are built.
     AcademicSetupModule,
+    PeopleModule,
     PlatformBillingModule,
     PlatformDashboardModule,
   ],
