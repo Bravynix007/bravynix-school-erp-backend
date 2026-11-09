@@ -58,8 +58,8 @@ describe('a teacher reads only their own classes, sections, years and subjects',
   let chitra: SchoolStaff;
   let dev: SchoolStaff;
 
-  const added = (firstName: string, homeInstitutionId = first) =>
-    kit.staff(owner.token, homeInstitutionId, categoryId, { firstName });
+  const added = (firstName: string, homeInstitutionId = first, lastName?: string) =>
+    kit.staff(owner.token, homeInstitutionId, categoryId, { firstName, lastName });
   const subjectsOf = (staff: SchoolStaff, subjectIds: string[]) =>
     api('put', `/v1/staff/${staff.id}/subjects`, owner.token, { subjectIds });
   const lead = (staff: SchoolStaff, sectionId: string | null, academicYearId = year) =>
@@ -136,7 +136,7 @@ describe('a teacher reads only their own classes, sections, years and subjects',
     math = await kit.subject(owner.token, 'Mathematics');
     art = await kit.subject(owner.token, 'Art');
     await kit.subject(owner.token, 'Music');
-    meera = await added('Meera');
+    meera = await added('Meera', first, 'Rao');
     anil = await added('Anil');
     chitra = await added('Chitra');
     dev = await added('Dev');
@@ -257,7 +257,7 @@ describe('a teacher reads only their own classes, sections, years and subjects',
         expect(all[0]!.classTeacher).toEqual({
           staffMemberId: meera.id,
           firstName: 'Meera',
-          lastName: null,
+          lastName: 'Rao',
         });
         expect(all[1]!.classTeacher).toBeNull();
       }
@@ -323,6 +323,14 @@ describe('a teacher reads only their own classes, sections, years and subjects',
       ).toEqual([null, 'Anil']);
     });
 
+    it('drops a class teacher who steps down from their own listing but keeps the sections they teach', async () => {
+      const token = await asTeacher(meera);
+      expect((await lead(meera, null)).status).toBe(200);
+      // Meera still teaches maths in 9B, so 9th stays with that one section and 9A is no longer hers.
+      expect((await classes(token)).map((c) => [c.id, c.sectionCount])).toEqual([[class9, 1]]);
+      expect((await sectionsOf(token, class9)).map((s) => s.id)).toEqual([nineB]);
+    });
+
     it('shows the class teacher on the section SEC-03 returns', async () => {
       const saved = await api('patch', `/v1/sections/${nineA}`, owner.token, {
         version: 1,
@@ -332,7 +340,7 @@ describe('a teacher reads only their own classes, sections, years and subjects',
       expect(saved.body.data.classTeacher).toEqual({
         staffMemberId: meera.id,
         firstName: 'Meera',
-        lastName: null,
+        lastName: 'Rao',
       });
     });
 
@@ -361,6 +369,32 @@ describe('a teacher reads only their own classes, sections, years and subjects',
       expect((await subjectsOf(dev, [art])).status).toBe(200);
       expect((await teach(dev, tenA, art, next)).status).toBe(201);
       expect(await years(await asTeacher(dev))).toEqual([next]);
+    });
+
+    it('drops the year of a teacher whose only assignment has ended', async () => {
+      const token = await asTeacher(anil);
+      expect(await years(token)).toEqual([year]);
+      const listed = await api(
+        'get',
+        `/v1/teaching-assignments?institutionId=${first}`,
+        owner.token,
+      );
+      const mine = (listed.body.data as unknown as { id: string; staffMember: { id: string } }[])
+        .filter((row) => row.staffMember.id === anil.id)
+        .map((row) => row.id);
+      expect(mine).toHaveLength(1);
+      expect((await api('delete', `/v1/teaching-assignments/${mine[0]}`, owner.token)).status).toBe(
+        200,
+      );
+      expect(await years(token)).toEqual([]);
+    });
+
+    it('drops the year of a class teacher who steps down and teaches nothing', async () => {
+      const token = await asTeacher(dev);
+      expect((await lead(dev, tenA)).status).toBe(200);
+      expect(await years(token)).toEqual([year]);
+      expect((await lead(dev, null)).status).toBe(200);
+      expect(await years(token)).toEqual([]);
     });
 
     it('shows a teacher no year at an extra Institution', async () => {
