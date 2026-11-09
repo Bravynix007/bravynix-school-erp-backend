@@ -33,6 +33,17 @@ export class SubjectRepository {
     return new Map(rows.map((row) => [row.id, row.status]));
   }
 
+  /** The name of each of these subjects that the caller can see, by ID. */
+  async namesOf(tx: Tx, ids: readonly string[]): Promise<Map<string, string>> {
+    if (ids.length === 0) return new Map();
+    const rows = await tx
+      .selectFrom('subjects')
+      .select(['id', 'name'])
+      .where('id', 'in', ids)
+      .execute();
+    return new Map(rows.map((row) => [row.id, row.name]));
+  }
+
   async find(tx: Tx, id: string, lock = false): Promise<SubjectRow | undefined> {
     const query = tx.selectFrom('subjects').selectAll().where('id', '=', id);
     return (lock ? query.forUpdate() : query).executeTakeFirst();

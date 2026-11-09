@@ -13,6 +13,8 @@ import type { MasterReferences } from '../../platform/masters/index.js';
 import type { SubjectDirectory } from '../academic-setup/index.js';
 import type { InstitutionDirectory, ScopeService } from '../../platform/tenancy/index.js';
 import type { CreateStaffDto, ListStaffQueryDto, UpdateStaffDto } from './staff.dto.js';
+import type { AssignmentRepository, ClassTeacherRow } from './assignment.repository.js';
+import { StaffContext } from './staff-context.js';
 import type { StaffRepository, StaffRow } from './staff.repository.js';
 import { StaffService } from './staff.service.js';
 
@@ -157,24 +159,34 @@ function build(current: StaffRow | null = staff()) {
     .fn<StaffRepository['page']>()
     .mockResolvedValue({ rows: [current ?? staff()], total: 41 });
   const record = vi.fn<AuditService['record']>().mockResolvedValue('audit-1');
+  const database = { transaction } as unknown as DatabaseService;
+  const repository = {
+    find,
+    insert,
+    update,
+    hasActiveRecord,
+    page,
+    replaceEducations,
+    replaceEmergencyContacts,
+    replaceSubjects,
+    replaceInstitutions,
+    subjectIds,
+    institutionIds,
+    educations,
+    emergencyContacts,
+  } as unknown as StaffRepository;
+  const scopeService = { requireInstitution, forPrincipal } as unknown as ScopeService;
+  const classTeacherOf = vi.fn<AssignmentRepository['classTeacherOf']>().mockResolvedValue([]);
+  const activeSubjectsOf = vi.fn<AssignmentRepository['activeSubjectsOf']>().mockResolvedValue([]);
+  const endAllOfStaff = vi
+    .fn<AssignmentRepository['endAllOfStaff']>()
+    .mockResolvedValue({ classTeacher: 0, teaching: 0 });
   const service = new StaffService(
-    { transaction } as unknown as DatabaseService,
-    {
-      find,
-      insert,
-      update,
-      hasActiveRecord,
-      page,
-      replaceEducations,
-      replaceEmergencyContacts,
-      replaceSubjects,
-      replaceInstitutions,
-      subjectIds,
-      institutionIds,
-      educations,
-      emergencyContacts,
-    } as unknown as StaffRepository,
-    { requireInstitution, forPrincipal } as unknown as ScopeService,
+    database,
+    repository,
+    scopeService,
+    new StaffContext(database, repository, scopeService),
+    { classTeacherOf, endAllOfStaff, activeSubjectsOf } as unknown as AssignmentRepository,
     {
       linkStaff,
       welcomeAs,
@@ -233,6 +245,9 @@ function build(current: StaffRow | null = staff()) {
     revokeAdminAccessOfStaff,
     adminAccessOfStaff,
     releaseDormantAdminAccess,
+    classTeacherOf,
+    endAllOfStaff,
+    activeSubjectsOf,
     replaceSubjects,
     replaceInstitutions,
     subjectIds,
@@ -379,6 +394,16 @@ describe('StaffService', () => {
         person: { id: 'user-1', email: 'meera@example.com' },
       });
       expect(t.requireInstitution).toHaveBeenCalledWith(owner, 'institution-1');
+    });
+
+    it('shows the section the staff member leads in each year', async () => {
+      const t = build();
+      t.classTeacherOf.mockResolvedValue([
+        { academic_year_id: 'year-1', section_id: 'section-1' } as ClassTeacherRow,
+      ]);
+      const profile = await t.service.get(owner, 'staff-1');
+      expect(t.classTeacherOf).toHaveBeenCalledWith(expect.anything(), 'staff-1');
+      expect(profile.classTeachers).toEqual([{ academicYearId: 'year-1', sectionId: 'section-1' }]);
     });
   });
 
@@ -528,6 +553,19 @@ describe('StaffService', () => {
           adminRevoked: ['institution-1', 'institution-2'],
         },
       });
+    });
+
+    it('ends the record’s teaching and class-teacher assignments with it and counts them', async () => {
+      const t = build();
+      t.endAllOfStaff.mockResolvedValue({ classTeacher: 1, teaching: 3 });
+      await t.service.deactivate(owner, 'staff-1');
+      expect(t.endAllOfStaff).toHaveBeenCalledWith(
+        expect.anything(),
+        'staff-1',
+        'owner-1',
+        new Date('2026-11-08T04:30:00.000Z'),
+      );
+      expect(t.record.mock.calls[0]![1]).toMatchObject({ after: { assignmentsEnded: 4 } });
     });
 
     it('refuses the caller’s own record and a record already deactivated', async () => {
@@ -811,6 +849,31 @@ describe('StaffService', () => {
         before: { subjectIds: ['subject-1', 'subject-2'] },
         after: { subjectIds: ['subject-1', 'subject-3'] },
       });
+    });
+
+    it('is 409 SUBJECT_ASSIGNED for a subject they are still assigned to teach, writing nothing', async () => {
+      const t = build();
+      t.subjectIds.mockResolvedValue(['subject-1', 'subject-2']);
+      t.activeSubjectsOf.mockResolvedValue(['subject-2']);
+      expect(
+        await fail(t.service.setSubjects(owner, 'staff-1', { subjectIds: ['subject-1'] })),
+      ).toEqual({ status: 409, code: 'SUBJECT_ASSIGNED' });
+      expect(t.activeSubjectsOf).toHaveBeenCalledWith(expect.anything(), 'staff-1');
+      expect(t.replaceSubjects).not.toHaveBeenCalled();
+      expect(t.record).not.toHaveBeenCalled();
+    });
+
+    it('drops a subject that is assigned nowhere, and does not look at assignments when nothing is dropped', async () => {
+      const t = build();
+      t.subjectIds.mockResolvedValue(['subject-1', 'subject-2']);
+      t.activeSubjectsOf.mockResolvedValue(['subject-1']);
+      await t.service.setSubjects(owner, 'staff-1', { subjectIds: ['subject-1'] });
+      expect(t.replaceSubjects).toHaveBeenCalledTimes(1);
+      t.activeSubjectsOf.mockClear();
+      await t.service.setSubjects(owner, 'staff-1', {
+        subjectIds: ['subject-1', 'subject-2', 'subject-3'],
+      });
+      expect(t.activeSubjectsOf).not.toHaveBeenCalled();
     });
 
     it('writes nothing for the same list in any order, and clears with an empty one', async () => {

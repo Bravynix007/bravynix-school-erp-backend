@@ -40,9 +40,10 @@ export interface StaffFilter {
   subjectId?: string;
 }
 
-const NAME = sql`lower(concat_ws(' ', staff_members.first_name, staff_members.last_name))`;
+/** The staff member's name as lists order it: first and last name, ignoring letter case. */
+export const STAFF_NAME = sql`lower(concat_ws(' ', staff_members.first_name, staff_members.last_name))`;
 const SORT_COLUMN = {
-  name: NAME,
+  name: STAFF_NAME,
   employeeCode: sql`lower(staff_members.employee_code)`,
   joiningDate: sql`staff_members.joining_date`,
   createdAt: sql`staff_members.created_at`,
@@ -134,6 +135,16 @@ export class StaffRepository {
       .where('status', '=', 1)
       .executeTakeFirst();
     return row !== undefined;
+  }
+
+  /** The active staff record of this person in the caller's Society: a person holds at most one. */
+  activeOfUser(tx: Tx, userId: string): Promise<StaffRow | undefined> {
+    return tx
+      .selectFrom('staff_members')
+      .selectAll()
+      .where('user_id', '=', userId)
+      .where('status', '=', 1)
+      .executeTakeFirst();
   }
 
   insert(tx: Tx, values: NewStaff): Promise<StaffRow> {

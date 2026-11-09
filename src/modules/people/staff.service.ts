@@ -40,6 +40,9 @@ import {
   type SetStaffSubjectsDto,
   type UpdateStaffDto,
 } from './staff.dto.js';
+import { AssignmentRepository } from './assignment.repository.js';
+import { classTeacherResource } from './assignment.resource.js';
+import { StaffContext } from './staff-context.js';
 import {
   StaffRepository,
   type EducationRow,
@@ -159,6 +162,8 @@ export class StaffService {
     private readonly database: DatabaseService,
     private readonly staff: StaffRepository,
     private readonly scope: ScopeService,
+    private readonly context: StaffContext,
+    private readonly assignments: AssignmentRepository,
     private readonly accounts: AccountDirectory,
     private readonly people: PersonDirectory,
     private readonly masters: MasterReferences,
@@ -260,6 +265,7 @@ export class StaffService {
     return this.resource(created.row, created.educations, created.contacts, created.email, {
       subjectIds: [],
       institutionIds: [],
+      classTeachers: [],
     });
   }
 
@@ -300,7 +306,7 @@ export class StaffService {
 
   /** STF-03: the profile; 404 for a person who is not at an Institution the caller reaches. */
   async get(principal: Principal, id: string): Promise<StaffResource> {
-    const context = await this.contextOf(principal, id);
+    const context = await this.context.of(principal, id);
     return this.database.transaction(context.tenant, async (tx) => {
       const row = await this.staff.find(tx, id);
       if (!row) throw AppException.notFound();
@@ -314,11 +320,11 @@ export class StaffService {
    * replace the stored ones whole. A deactivated staff member is 404.
    */
   async update(principal: Principal, id: string, body: UpdateStaffDto): Promise<StaffResource> {
-    const context = await this.contextOf(principal, id);
+    const context = await this.context.of(principal, id);
     const today = this.clock.todayIst();
     const updated = await this.database
       .transaction(context.tenant, async (tx) => {
-        const current = await this.lockedActive(tx, id);
+        const current = await this.context.lockedActive(tx, id);
         requireVersion(current, body.version);
         const [educationsBefore, contactsBefore] = await this.lists(tx, id);
 
@@ -414,13 +420,13 @@ export class StaffService {
   /**
    * STF-05: deactivates a staff member; nothing is deleted, and the Employee ID is free again. Their sessions as
    * staff end at once, and so do their Institution Admin grants and the Admin sessions (INS-10). Teaching assignments
-   * end here too once those exist. 404 when already deactivated; 409 `CANNOT_ACT_ON_SELF` for the caller's own
+   * and the class-teacher row end with it. 404 when already deactivated; 409 `CANNOT_ACT_ON_SELF` for the caller's own
    * record.
    */
   async deactivate(principal: Principal, id: string): Promise<{ id: string; status: 0 }> {
-    const context = await this.contextOf(principal, id);
+    const context = await this.context.of(principal, id);
     await this.database.transaction(context.tenant, async (tx) => {
-      const current = await this.lockedActive(tx, id);
+      const current = await this.context.lockedActive(tx, id);
       requireNotSelf(principal.personId, current.user_id);
       const row = await this.staff.update(tx, id, {
         status: 0,
@@ -435,6 +441,7 @@ export class StaffService {
         STAFF_DEACTIVATED,
         now,
       );
+      const assignments = await this.assignments.endAllOfStaff(tx, id, principal.personId, now);
       const ended =
         admin.sessionsEnded +
         (await this.accounts.endRoleSessions(
@@ -450,7 +457,12 @@ export class StaffService {
         entityType: 'staff_member',
         entityId: id,
         before: { status: current.status },
-        after: { status: 0, sessionsEnded: ended, adminRevoked: admin.institutionIds },
+        after: {
+          status: 0,
+          sessionsEnded: ended,
+          adminRevoked: admin.institutionIds,
+          assignmentsEnded: assignments.classTeacher + assignments.teaching,
+        },
       });
     });
     return { id, status: 0 };
@@ -477,10 +489,10 @@ export class StaffService {
     id: string,
     blocked: boolean,
   ): Promise<StaffResource> {
-    const context = await this.contextOf(principal, id);
+    const context = await this.context.of(principal, id);
     const now = this.clock.now();
     return this.database.transaction(context.tenant, async (tx) => {
-      const current = await this.lockedActive(tx, id);
+      const current = await this.context.lockedActive(tx, id);
       requireNotSelf(principal.personId, current.user_id);
       await this.requireOwnerForAdmin(tx, principal, id);
       if ((current.access_blocked_at !== null) === blocked) {
@@ -528,11 +540,19 @@ export class StaffService {
     id: string,
     body: SetStaffSubjectsDto,
   ): Promise<StaffResource> {
-    const context = await this.contextOf(principal, id);
+    const context = await this.context.of(principal, id);
     return this.database.transaction(context.tenant, async (tx) => {
-      const current = await this.lockedActive(tx, id);
+      const current = await this.context.lockedActive(tx, id);
       const before = await this.staff.subjectIds(tx, id);
       if (sameIds(before, body.subjectIds)) return this.resourceOf(tx, current);
+      // A subject they are assigned to teach stays on their list until the assignment ends (ASG-03).
+      const dropped = before.filter((subject) => !body.subjectIds.includes(subject));
+      if (dropped.length > 0) {
+        const assigned = await this.assignments.activeSubjectsOf(tx, id);
+        if (dropped.some((subject) => assigned.includes(subject))) {
+          throw AppException.conflict(ErrorCode.SUBJECT_ASSIGNED);
+        }
+      }
       await this.subjects.requireActive(
         tx,
         body.subjectIds.filter((subject) => !before.includes(subject)),
@@ -571,9 +591,9 @@ export class StaffService {
     id: string,
     body: SetStaffInstitutionsDto,
   ): Promise<StaffResource> {
-    const context = await this.contextOf(principal, id);
+    const context = await this.context.of(principal, id);
     return this.database.transaction(context.tenant, async (tx) => {
-      const current = await this.lockedActive(tx, id);
+      const current = await this.context.lockedActive(tx, id);
       const before = await this.staff.institutionIds(tx, id);
       if (sameIds(before, body.institutionIds)) return this.resourceOf(tx, current);
       // An Admin of an Institution must keep it as an extra Institution: revoke the access first.
@@ -638,11 +658,11 @@ export class StaffService {
     id: string,
     body: ChangeEmailDto,
   ): Promise<StaffResource> {
-    const context = await this.contextOf(principal, id);
+    const context = await this.context.of(principal, id);
     const now = this.clock.now();
     const done = await this.database
       .transaction(context.tenant, async (tx) => {
-        const current = await this.lockedActive(tx, id);
+        const current = await this.context.lockedActive(tx, id);
         requireVersion(current, body.version);
         requireNotSelf(principal.personId, current.user_id);
         const change = await this.accounts.changeStaffEmail(tx, {
@@ -699,32 +719,6 @@ export class StaffService {
     });
   }
 
-  /**
-   * The Institution context of a staff member's home, once the caller is known to reach it: 404 for a person who is
-   * not there, who is at an Institution the caller does not reach, or, for a teacher, is not the teacher; 423 for an Admin whose Institution has its
-   * staff blocked.
-   */
-  private async contextOf(principal: Principal, id: string) {
-    const scope = await this.scope.forPrincipal(principal);
-    const home = await this.database.transaction(scope.tenant, async (tx) => {
-      const found = await this.staff.find(tx, id);
-      // A teacher reaches their own record and nobody else's, as if the others did not exist.
-      if (principal.roleCode === RoleCode.TeacherStaff && found?.user_id !== principal.personId) {
-        return undefined;
-      }
-      return found?.home_institution_id;
-    });
-    if (!home) throw AppException.notFound();
-    return this.scope.requireInstitution(principal, home);
-  }
-
-  /** The record, locked for the change; 404 when gone or deactivated. */
-  private async lockedActive(tx: Tx, id: string): Promise<StaffRow> {
-    const row = await this.staff.find(tx, id, true);
-    if (!row || row.status === 0) throw AppException.notFound();
-    return row;
-  }
-
   private async lists(tx: Tx, id: string): Promise<[EducationRow[], EmergencyContactRow[]]> {
     return [await this.staff.educations(tx, id), await this.staff.emergencyContacts(tx, id)];
   }
@@ -779,6 +773,7 @@ export class StaffService {
     return this.resource(row, educations, contacts, email, {
       subjectIds: await this.staff.subjectIds(tx, row.id),
       institutionIds: await this.staff.institutionIds(tx, row.id),
+      classTeachers: (await this.assignments.classTeacherOf(tx, row.id)).map(classTeacherResource),
     });
   }
 

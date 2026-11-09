@@ -1,11 +1,13 @@
 import { Module } from '@nestjs/common';
 import { MastersModule } from '../../platform/masters/index.js';
+import { AcademicYearDirectory } from './academic-year-directory.js';
 import { AcademicYearController } from './academic-year.controller.js';
 import { AcademicYearRepository } from './academic-year.repository.js';
 import { AcademicYearService } from './academic-year.service.js';
 import { ClassController, SectionController } from './class.controller.js';
 import { ClassRepository } from './class.repository.js';
 import { ClassService } from './class.service.js';
+import { SectionDirectory } from './section-directory.js';
 import { SectionRepository } from './section.repository.js';
 import { SectionService } from './section.service.js';
 import { SubjectDirectory } from './subject-directory.js';
@@ -27,7 +29,9 @@ import { SubjectService } from './subject.service.js';
     ClassService,
     SectionRepository,
     SectionService,
+    AcademicYearDirectory,
+    SectionDirectory,
   ],
-  exports: [SubjectDirectory],
+  exports: [SubjectDirectory, AcademicYearDirectory, SectionDirectory],
 })
 export class AcademicSetupModule {}

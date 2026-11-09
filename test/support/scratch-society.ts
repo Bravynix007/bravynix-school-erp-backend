@@ -35,6 +35,8 @@ export async function removeScratchSocieties(
     await sql`alter table staff_emergency_contacts no force row level security`.execute(tx);
     await sql`alter table staff_institutions no force row level security`.execute(tx);
     await sql`alter table staff_subjects no force row level security`.execute(tx);
+    await sql`alter table teaching_assignments no force row level security`.execute(tx);
+    await sql`alter table class_teacher_assignments no force row level security`.execute(tx);
     await sql`
       delete from refresh_tokens where session_id in
         (select id from auth_sessions where active_society_id in (${sql.join(ids)}))`.execute(tx);
@@ -43,6 +45,10 @@ export async function removeScratchSocieties(
     await sql`delete from access_blocks where society_id in (${sql.join(ids)})`.execute(tx);
     await sql`delete from platform_dues where society_id in (${sql.join(ids)})`.execute(tx);
     await sql`delete from institution_price_rates where society_id in (${sql.join(ids)})`.execute(
+      tx,
+    );
+    await sql`delete from teaching_assignments where society_id in (${sql.join(ids)})`.execute(tx);
+    await sql`delete from class_teacher_assignments where society_id in (${sql.join(ids)})`.execute(
       tx,
     );
     await sql`delete from staff_subjects where society_id in (${sql.join(ids)})`.execute(tx);
@@ -68,6 +74,8 @@ export async function removeScratchSocieties(
     await sql`alter table staff_emergency_contacts force row level security`.execute(tx);
     await sql`alter table staff_institutions force row level security`.execute(tx);
     await sql`alter table staff_subjects force row level security`.execute(tx);
+    await sql`alter table teaching_assignments force row level security`.execute(tx);
+    await sql`alter table class_teacher_assignments force row level security`.execute(tx);
     await sql`alter table access_blocks force row level security`.execute(tx);
     await sql`alter table academic_years force row level security`.execute(tx);
     await sql`alter table subjects force row level security`.execute(tx);

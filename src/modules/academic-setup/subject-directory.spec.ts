@@ -43,3 +43,14 @@ describe('SubjectDirectory.requireActive', () => {
     });
   });
 });
+
+describe('SubjectDirectory.names', () => {
+  it('gives the names through the repository', async () => {
+    const namesOf = vi
+      .fn<SubjectRepository['namesOf']>()
+      .mockResolvedValue(new Map([['a', 'Maths']]));
+    const directory = new SubjectDirectory({ namesOf } as unknown as SubjectRepository);
+    expect((await directory.names(tx, ['a'])).get('a')).toBe('Maths');
+    expect(namesOf).toHaveBeenCalledWith(tx, ['a']);
+  });
+});
