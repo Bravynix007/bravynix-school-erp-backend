@@ -21,7 +21,7 @@ import type {
   TeachingView,
 } from './assignment.repository.js';
 import { AssignmentService } from './assignment.service.js';
-import type { StaffContext } from './staff-context.js';
+import { StaffContext } from './staff-context.js';
 import type { StaffRepository, StaffRow } from './staff.repository.js';
 
 const now = new Date('2026-11-08T04:30:00.000Z');
@@ -85,7 +85,6 @@ function build(current: StaffRow | null = staff()) {
     societyId: 'society-1',
     tenant: { societyId: 'society-1', institutionIds: ['institution-1'] },
   };
-  const of = vi.fn<StaffContext['of']>().mockResolvedValue(context);
   const requireInstitution = vi.fn<ScopeService['requireInstitution']>().mockResolvedValue(context);
   const forPrincipal = vi
     .fn<ScopeService['forPrincipal']>()
@@ -118,11 +117,17 @@ function build(current: StaffRow | null = staff()) {
     .fn<SubjectDirectory['names']>()
     .mockResolvedValue(new Map([['subject-1', 'Maths']]));
   const record = vi.fn<AuditService['record']>().mockResolvedValue('audit-1');
+  const database = { transaction } as unknown as DatabaseService;
+  const staffRepository = { find, subjectIds, activeOfUser } as unknown as StaffRepository;
+  const scope = { requireInstitution, forPrincipal } as unknown as ScopeService;
+  // The real context, but it reaches the context of the staff member without the database.
+  const staffContext = new StaffContext(database, staffRepository, scope);
+  const of = vi.spyOn(staffContext, 'of').mockResolvedValue(context);
   const service = new AssignmentService(
-    { transaction } as unknown as DatabaseService,
-    { find, subjectIds, activeOfUser } as unknown as StaffRepository,
-    { of } as unknown as StaffContext,
-    { requireInstitution, forPrincipal } as unknown as ScopeService,
+    database,
+    staffRepository,
+    staffContext,
+    scope,
     {
       classTeacherOf,
       insertClassTeacher,
@@ -216,8 +221,9 @@ describe('AssignmentService', () => {
         institutionId: 'institution-1',
         entityType: 'staff_member',
         entityId: 'staff-1',
-        before: { academicYearId: 'year-1', sectionId: null },
-        after: { academicYearId: 'year-1', sectionId: 'section-2' },
+        // The pair is kept whole: the audit log keeps only what changed, and the year must stay in the entry.
+        before: { classTeacher: null },
+        after: { classTeacher: { academicYearId: 'year-1', sectionId: 'section-2' } },
       });
       expect(result).toEqual({ academicYearId: 'year-1', sectionId: 'section-2' });
     });
@@ -230,8 +236,8 @@ describe('AssignmentService', () => {
       expect(t.insertClassTeacher).toHaveBeenCalledTimes(1);
       expect(t.record).toHaveBeenCalledTimes(1);
       expect(t.record.mock.calls[0]![1]).toMatchObject({
-        before: { sectionId: 'section-1' },
-        after: { sectionId: 'section-2' },
+        before: { classTeacher: { academicYearId: 'year-1', sectionId: 'section-1' } },
+        after: { classTeacher: { academicYearId: 'year-1', sectionId: 'section-2' } },
       });
     });
 
@@ -261,8 +267,8 @@ describe('AssignmentService', () => {
       expect(t.endClassTeacher).toHaveBeenCalledWith(expect.anything(), 'lead-1', 'admin-1', now);
       expect(t.requireSection).not.toHaveBeenCalled();
       expect(t.record.mock.calls[0]![1]).toMatchObject({
-        before: { academicYearId: 'year-1', sectionId: 'section-1' },
-        after: { academicYearId: 'year-1', sectionId: null },
+        before: { classTeacher: { academicYearId: 'year-1', sectionId: 'section-1' } },
+        after: { classTeacher: null },
       });
       const none = build();
       expect(await none.service.setClassTeacher(admin, 'staff-1', set(null))).toBeNull();

@@ -75,6 +75,8 @@ const en: Catalogue = {
   CANNOT_ACT_ON_SELF: 'You cannot do this to your own account',
   ALREADY_ADMIN: 'This person is already an Admin of this Institution',
   ADMIN_ACCESS_HELD: 'This person is an Admin of this Institution; revoke that access first',
+  SUBJECT_ASSIGNED:
+    'This staff member still teaches this subject in a section; end that assignment first',
   CLASS_TEACHER_TAKEN: 'This section already has a class teacher for the year; end that first',
   STAFF_BLOCKED: 'This staff member is blocked; lift the block first',
   STAFF_NOT_AT_INSTITUTION:

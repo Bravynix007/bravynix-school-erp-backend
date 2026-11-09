@@ -324,7 +324,7 @@ export class StaffService {
     const today = this.clock.todayIst();
     const updated = await this.database
       .transaction(context.tenant, async (tx) => {
-        const current = await this.lockedActive(tx, id);
+        const current = await this.context.lockedActive(tx, id);
         requireVersion(current, body.version);
         const [educationsBefore, contactsBefore] = await this.lists(tx, id);
 
@@ -426,7 +426,7 @@ export class StaffService {
   async deactivate(principal: Principal, id: string): Promise<{ id: string; status: 0 }> {
     const context = await this.context.of(principal, id);
     await this.database.transaction(context.tenant, async (tx) => {
-      const current = await this.lockedActive(tx, id);
+      const current = await this.context.lockedActive(tx, id);
       requireNotSelf(principal.personId, current.user_id);
       const row = await this.staff.update(tx, id, {
         status: 0,
@@ -492,7 +492,7 @@ export class StaffService {
     const context = await this.context.of(principal, id);
     const now = this.clock.now();
     return this.database.transaction(context.tenant, async (tx) => {
-      const current = await this.lockedActive(tx, id);
+      const current = await this.context.lockedActive(tx, id);
       requireNotSelf(principal.personId, current.user_id);
       await this.requireOwnerForAdmin(tx, principal, id);
       if ((current.access_blocked_at !== null) === blocked) {
@@ -542,9 +542,17 @@ export class StaffService {
   ): Promise<StaffResource> {
     const context = await this.context.of(principal, id);
     return this.database.transaction(context.tenant, async (tx) => {
-      const current = await this.lockedActive(tx, id);
+      const current = await this.context.lockedActive(tx, id);
       const before = await this.staff.subjectIds(tx, id);
       if (sameIds(before, body.subjectIds)) return this.resourceOf(tx, current);
+      // A subject they are assigned to teach stays on their list until the assignment ends (ASG-03).
+      const dropped = before.filter((subject) => !body.subjectIds.includes(subject));
+      if (dropped.length > 0) {
+        const assigned = await this.assignments.activeSubjectsOf(tx, id);
+        if (dropped.some((subject) => assigned.includes(subject))) {
+          throw AppException.conflict(ErrorCode.SUBJECT_ASSIGNED);
+        }
+      }
       await this.subjects.requireActive(
         tx,
         body.subjectIds.filter((subject) => !before.includes(subject)),
@@ -585,7 +593,7 @@ export class StaffService {
   ): Promise<StaffResource> {
     const context = await this.context.of(principal, id);
     return this.database.transaction(context.tenant, async (tx) => {
-      const current = await this.lockedActive(tx, id);
+      const current = await this.context.lockedActive(tx, id);
       const before = await this.staff.institutionIds(tx, id);
       if (sameIds(before, body.institutionIds)) return this.resourceOf(tx, current);
       // An Admin of an Institution must keep it as an extra Institution: revoke the access first.
@@ -654,7 +662,7 @@ export class StaffService {
     const now = this.clock.now();
     const done = await this.database
       .transaction(context.tenant, async (tx) => {
-        const current = await this.lockedActive(tx, id);
+        const current = await this.context.lockedActive(tx, id);
         requireVersion(current, body.version);
         requireNotSelf(principal.personId, current.user_id);
         const change = await this.accounts.changeStaffEmail(tx, {
@@ -709,13 +717,6 @@ export class StaffService {
       const [educations, contacts] = await this.lists(tx, id);
       return this.resourceIn(tx, done.row, educations, contacts);
     });
-  }
-
-  /** The record, locked for the change; 404 when gone or deactivated. */
-  private async lockedActive(tx: Tx, id: string): Promise<StaffRow> {
-    const row = await this.staff.find(tx, id, true);
-    if (!row || row.status === 0) throw AppException.notFound();
-    return row;
   }
 
   private async lists(tx: Tx, id: string): Promise<[EducationRow[], EmergencyContactRow[]]> {

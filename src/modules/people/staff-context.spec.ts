@@ -69,4 +69,24 @@ describe('StaffContext', () => {
     t.requireInstitution.mockRejectedValue(Object.assign(new Error('x'), { status: 423 }));
     await expect(t.context.of(principal(3), 'staff-1')).rejects.toMatchObject({ status: 423 });
   });
+
+  describe('lockedActive', () => {
+    const tx = {} as Tx;
+
+    it('gives the record, read with the lock', async () => {
+      const found = record({ status: 1 });
+      const t = build(found);
+      expect(await t.context.lockedActive(tx, 'staff-1')).toBe(found);
+      expect(t.find).toHaveBeenCalledWith(tx, 'staff-1', true);
+    });
+
+    it('is 404 for a record that is gone or deactivated', async () => {
+      await expect(build().context.lockedActive(tx, 'staff-1')).rejects.toMatchObject({
+        status: 404,
+      });
+      await expect(
+        build(record({ status: 0 })).context.lockedActive(tx, 'staff-1'),
+      ).rejects.toMatchObject({ status: 404 });
+    });
+  });
 });

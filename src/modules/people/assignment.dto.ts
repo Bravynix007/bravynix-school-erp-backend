@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional, PickType } from '@nestjs/swagger';
 import { IsUUID, ValidateIf } from 'class-validator';
 import { PageQueryDto } from '../../common/pagination/pagination.js';
 import { LowerCaseUuid } from '../../common/validation/lower-case-uuid.js';
+import { WhenPresent } from '../../common/validation/when-present.js';
 
 /** STF-09 body: the section the staff member leads in the year, or `null` to end the assignment. */
 export class SetClassTeacherDto {
@@ -52,19 +53,19 @@ export class ListTeachingAssignmentsQueryDto extends PickType(PageQueryDto, ['pa
     description: 'The current year of the Institution when absent',
   })
   @LowerCaseUuid()
-  @ValidateIf((_dto, value: unknown) => value !== undefined)
+  @WhenPresent()
   @IsUUID()
   academicYearId?: string;
 
   @ApiPropertyOptional({ format: 'uuid' })
   @LowerCaseUuid()
-  @ValidateIf((_dto, value: unknown) => value !== undefined)
+  @WhenPresent()
   @IsUUID()
   sectionId?: string;
 
   @ApiPropertyOptional({ format: 'uuid' })
   @LowerCaseUuid()
-  @ValidateIf((_dto, value: unknown) => value !== undefined)
+  @WhenPresent()
   @IsUUID()
   subjectId?: string;
 
@@ -73,7 +74,7 @@ export class ListTeachingAssignmentsQueryDto extends PickType(PageQueryDto, ['pa
     description: 'A teacher reads their own assignments only',
   })
   @LowerCaseUuid()
-  @ValidateIf((_dto, value: unknown) => value !== undefined)
+  @WhenPresent()
   @IsUUID()
   staffMemberId?: string;
 }

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { Insertable, Selectable } from 'kysely';
 import type { Tx } from '../../platform/database/index.js';
+import { STAFF_NAME } from './staff.repository.js';
 import type { ClassTeacherAssignmentsTable, TeachingAssignmentsTable } from './people.tables.js';
 
 export type ClassTeacherRow = Selectable<ClassTeacherAssignmentsTable>;
@@ -103,6 +104,18 @@ export class AssignmentRepository {
       .execute();
   }
 
+  /** The subjects the staff member is assigned to teach now, in any year. */
+  async activeSubjectsOf(tx: Tx, staffMemberId: string): Promise<string[]> {
+    const rows = await tx
+      .selectFrom('teaching_assignments')
+      .select('subject_id')
+      .distinct()
+      .where('staff_member_id', '=', staffMemberId)
+      .where('ended_at', 'is', null)
+      .execute();
+    return rows.map((row) => row.subject_id);
+  }
+
   /** One page of the active assignments, by teacher name, with the total. */
   async pageTeaching(
     tx: Tx,
@@ -111,10 +124,12 @@ export class AssignmentRepository {
     offset: number,
   ): Promise<{ rows: TeachingView[]; total: number }> {
     const rows = await this.filtered(tx, filter)
-      .select(['m.first_name as staff_first_name', 'm.last_name as staff_last_name'])
+      .select([
+        'staff_members.first_name as staff_first_name',
+        'staff_members.last_name as staff_last_name',
+      ])
       .selectAll('a')
-      .orderBy('m.first_name')
-      .orderBy('m.last_name')
+      .orderBy(STAFF_NAME)
       .orderBy('a.created_at')
       .orderBy('a.id')
       .limit(limit)
@@ -129,7 +144,7 @@ export class AssignmentRepository {
   private filtered(tx: Tx, filter: TeachingFilter) {
     let query = tx
       .selectFrom('teaching_assignments as a')
-      .innerJoin('staff_members as m', 'm.id', 'a.staff_member_id')
+      .innerJoin('staff_members', 'staff_members.id', 'a.staff_member_id')
       .where('a.institution_id', '=', filter.institutionId)
       .where('a.academic_year_id', '=', filter.academicYearId)
       .where('a.ended_at', 'is', null);

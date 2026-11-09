@@ -45,6 +45,14 @@ interface Names {
 }
 
 /**
+ * The audit value of a class teacher: the pair, kept whole, because the audit log keeps only the fields that changed
+ * and the year must stay in the entry (`null` when there is no section).
+ */
+const led = (academicYearId: string, sectionId: string | null) => ({
+  classTeacher: sectionId === null ? null : { academicYearId, sectionId },
+});
+
+/**
  * STF-09 and ASG-01 to ASG-03 (API design 10.5a): who leads and who teaches which section in an academic year.
  * Assignments are made only at the staff member's home Institution (extra Institutions are view-only, PRD 4), by
  * Society Owners and Institution Admins who reach it. Ending keeps the row as history. Every change runs in one
@@ -80,7 +88,7 @@ export class AssignmentService {
     const context = await this.staffContext.of(principal, staffMemberId);
     const now = this.clock.now();
     return this.database.transaction(context.tenant, async (tx) => {
-      const record = await this.lockedActive(tx, staffMemberId);
+      const record = await this.staffContext.lockedActive(tx, staffMemberId);
       const leads = (await this.assignments.classTeacherOf(tx, staffMemberId)).find(
         (row) => row.academic_year_id === body.academicYearId,
       );
@@ -111,8 +119,8 @@ export class AssignmentService {
         institutionId: record.home_institution_id,
         entityType: 'staff_member',
         entityId: staffMemberId,
-        before: { academicYearId: body.academicYearId, sectionId: leads?.section_id ?? null },
-        after: { academicYearId: body.academicYearId, sectionId: body.sectionId },
+        before: led(body.academicYearId, leads?.section_id ?? null),
+        after: led(body.academicYearId, body.sectionId),
       });
       return classTeacherResource(added);
     });
@@ -167,7 +175,7 @@ export class AssignmentService {
     const context = await this.staffContext.of(principal, body.staffMemberId);
     const now = this.clock.now();
     return this.database.transaction(context.tenant, async (tx) => {
-      const record = await this.lockedActive(tx, body.staffMemberId);
+      const record = await this.staffContext.lockedActive(tx, body.staffMemberId);
       await this.requireAssignable(tx, record, body.academicYearId, body.sectionId);
       await this.subjects.requireActive(tx, [body.subjectId], 'subjectId');
       if (!(await this.staff.subjectIds(tx, record.id)).includes(body.subjectId)) {
@@ -241,13 +249,6 @@ export class AssignmentService {
     });
   }
 
-  /** The record, locked for the change; 404 when gone or deactivated. */
-  private async lockedActive(tx: Tx, id: string): Promise<StaffRow> {
-    const row = await this.staff.find(tx, id, true);
-    if (!row || row.status === 0) throw AppException.notFound();
-    return row;
-  }
-
   /**
    * Whether the staff member may be given this section for this year: not blocked (422 `STAFF_BLOCKED`), the year an
    * active year of their home Institution, the section an active section of it. The caller's tenant is narrowed to
@@ -282,8 +283,8 @@ export class AssignmentService {
       institutionId: record.home_institution_id,
       entityType: 'staff_member',
       entityId: record.id,
-      before: { academicYearId: row.academic_year_id, sectionId: row.section_id },
-      after: { academicYearId: row.academic_year_id, sectionId: null },
+      before: led(row.academic_year_id, row.section_id),
+      after: led(row.academic_year_id, null),
     });
   }
 

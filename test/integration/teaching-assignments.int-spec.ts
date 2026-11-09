@@ -86,8 +86,8 @@ describe('class teachers and teaching assignments', () => {
     expect(res.status).toBe(201);
     return res.body.data.id as string;
   };
-  const makeYear = async (institutionId: string, fields: object = {}) => {
-    const res = await api('post', '/v1/academic-years', owner.token, {
+  const makeYear = async (institutionId: string, fields: object = {}, token = owner.token) => {
+    const res = await api('post', '/v1/academic-years', token, {
       institutionId,
       name: '2026-2027',
       startDate: '2026-06-01',
@@ -97,13 +97,17 @@ describe('class teachers and teaching assignments', () => {
     expect(res.status).toBe(201);
     return res.body.data.id as string;
   };
-  const makeClass = async (institutionId: string, predefinedClassId: string) => {
-    const res = await api('post', '/v1/classes', owner.token, { institutionId, predefinedClassId });
+  const makeClass = async (
+    institutionId: string,
+    predefinedClassId: string,
+    token = owner.token,
+  ) => {
+    const res = await api('post', '/v1/classes', token, { institutionId, predefinedClassId });
     expect(res.status).toBe(201);
     return res.body.data.id as string;
   };
-  const makeSection = async (cls: string, predefinedSectionId: string) => {
-    const res = await api('post', '/v1/sections', owner.token, {
+  const makeSection = async (cls: string, predefinedSectionId: string, token = owner.token) => {
+    const res = await api('post', '/v1/sections', token, {
       classId: cls,
       predefinedSectionId,
     });
@@ -117,13 +121,13 @@ describe('class teachers and teaching assignments', () => {
     const secondClass = await makeClass(second, classes.find((c) => c.code === 'C09')!.id);
     return makeSection(secondClass, sectionCodes.find((s) => s.code === 'A')!.id);
   };
-  const makeSubject = async (name = `Subject ${newId().slice(-6)}`) => {
-    const res = await api('post', '/v1/subjects', owner.token, { name });
+  const makeSubject = async (name = `Subject ${newId().slice(-6)}`, token = owner.token) => {
+    const res = await api('post', '/v1/subjects', token, { name });
     expect(res.status).toBe(201);
     return res.body.data.id as string;
   };
-  const added = async (fields: object = {}) => {
-    const res = await api('post', '/v1/staff', owner.token, {
+  const added = async (fields: object = {}, token = owner.token) => {
+    const res = await api('post', '/v1/staff', token, {
       homeInstitutionId: first,
       email: `${newId()}@staff.test`,
       firstName: 'Meera',
@@ -175,6 +179,22 @@ describe('class teachers and teaching assignments', () => {
     societyId: societyA,
     institutionIds: [first],
   });
+  const inserts = (row: {
+    society: string;
+    institution: string;
+    year: string;
+    section: string;
+    subject: string;
+    staff: string;
+  }) =>
+    [
+      sql`insert into class_teacher_assignments
+        (created_by, society_id, institution_id, academic_year_id, section_id, staff_member_id)
+        values (${owner.person}, ${row.society}, ${row.institution}, ${row.year}, ${row.section}, ${row.staff})`,
+      sql`insert into teaching_assignments
+        (created_by, society_id, institution_id, academic_year_id, section_id, subject_id, staff_member_id)
+        values (${owner.person}, ${row.society}, ${row.institution}, ${row.year}, ${row.section}, ${row.subject}, ${row.staff})`,
+    ] as const;
   const total = async (query: string, token = owner.token) =>
     (await list(query, token)).body.meta!.totalItems;
   const profile = async (id: string) =>
@@ -266,9 +286,11 @@ describe('class teachers and teaching assignments', () => {
         institution_id: first,
         entity_type: 'staff_member',
       });
-      // Changed fields only (DDD 9.12): the year is the same before and after.
-      expect(entry?.old_values).toEqual({ sectionId: null });
-      expect(entry?.new_values).toEqual({ sectionId: sectionA });
+      // The pair is kept whole, so the year stays in the entry (the audit keeps changed fields only, DDD 9.12).
+      expect(entry?.old_values).toEqual({ classTeacher: null });
+      expect(entry?.new_values).toEqual({
+        classTeacher: { academicYearId: year, sectionId: sectionA },
+      });
     });
 
     it('moves a teacher who leads another section: the old row ends and stays as history', async () => {
@@ -287,8 +309,12 @@ describe('class teachers and teaching assignments', () => {
       const last = (await audit(teacher.id)).findLast(
         (e) => e.action === 'staff.class_teacher_changed',
       );
-      expect(last?.old_values).toEqual({ sectionId: sectionA });
-      expect(last?.new_values).toEqual({ sectionId: sectionB });
+      expect(last?.old_values).toEqual({
+        classTeacher: { academicYearId: year, sectionId: sectionA },
+      });
+      expect(last?.new_values).toEqual({
+        classTeacher: { academicYearId: year, sectionId: sectionB },
+      });
     });
 
     it('writes nothing when the teacher already leads that section', async () => {
@@ -330,8 +356,10 @@ describe('class teachers and teaching assignments', () => {
       const entry = (await audit(teacher.id)).findLast(
         (e) => e.action === 'staff.class_teacher_changed',
       );
-      expect(entry?.old_values).toEqual({ sectionId: sectionA });
-      expect(entry?.new_values).toEqual({ sectionId: null });
+      expect(entry?.old_values).toEqual({
+        classTeacher: { academicYearId: year, sectionId: sectionA },
+      });
+      expect(entry?.new_values).toEqual({ classTeacher: null });
       const before = (await audit(teacher.id)).length;
       expect((await lead(teacher.id, null)).status).toBe(200);
       expect(await audit(teacher.id)).toHaveLength(before);
@@ -530,17 +558,25 @@ describe('class teachers and teaching assignments', () => {
   });
 
   describe('ASG-01 list the assignments', () => {
-    it('lists the current year by teacher name, with a page at a time', async () => {
+    it('lists the current year by teacher name, ignoring letter case as the staff list does, with a page at a time', async () => {
+      const lower = await added({ firstName: 'chitra' });
+      await teachesMath(lower);
       await assigned();
       await assigned({ staffMemberId: other.id, sectionId: sectionB });
+      await assigned({ staffMemberId: lower.id });
       const res = await list('');
       expect(res.status).toBe(200);
-      expect(res.body.meta).toEqual({ page: 1, limit: 20, totalItems: 2, totalPages: 1 });
-      expect(rowsOf(res).map((row) => row.staffMember.firstName)).toEqual(['Anil', 'Meera']);
+      expect(res.body.meta).toEqual({ page: 1, limit: 20, totalItems: 3, totalPages: 1 });
+      // Byte order would put chitra last.
+      expect(rowsOf(res).map((row) => row.staffMember.firstName)).toEqual([
+        'Anil',
+        'chitra',
+        'Meera',
+      ]);
       const paged = await list('&limit=1&page=2');
-      expect(paged.body.meta).toEqual({ page: 2, limit: 1, totalItems: 2, totalPages: 2 });
+      expect(paged.body.meta).toEqual({ page: 2, limit: 1, totalItems: 3, totalPages: 3 });
       expect(paged.body.data).toHaveLength(1);
-      expect(rowsOf(paged)[0]!.staffMember.firstName).toBe('Meera');
+      expect(rowsOf(paged)[0]!.staffMember.firstName).toBe('chitra');
     });
 
     it('filters by section, subject and teacher', async () => {
@@ -664,6 +700,30 @@ describe('class teachers and teaching assignments', () => {
     });
   });
 
+  describe('STF-08 keeps a subject that is still assigned', () => {
+    it('answers 409 SUBJECT_ASSIGNED for dropping a subject with a live assignment, and takes it once ASG-03 has ended it', async () => {
+      const art = await makeSubject('Art');
+      await teachesMath(teacher, [math, art]);
+      const made = await assigned();
+      const drop = (subjectIds: string[]) =>
+        api('put', `/v1/staff/${teacher.id}/subjects`, owner.token, { subjectIds });
+      const refused = await drop([art]);
+      expect(refused.status).toBe(409);
+      expect(refused.body.code).toBe('SUBJECT_ASSIGNED');
+      expect(await total('')).toBe(1);
+      expect((await profile(teacher.id)) as unknown as { subjectIds: string[] }).toMatchObject({
+        subjectIds: expect.arrayContaining([math, art]),
+      });
+      // A subject with no assignment goes freely, and so does the assigned one once it has ended.
+      expect((await drop([math])).status).toBe(200);
+      await teachesMath(teacher, [math, art]);
+      expect((await api('delete', `/v1/teaching-assignments/${made.id}`, owner.token)).status).toBe(
+        200,
+      );
+      expect((await drop([art])).status).toBe(200);
+    });
+  });
+
   describe('STF-05 deactivate ends the assignments', () => {
     it('ends the class teacher row and every teaching assignment of the teacher, and says how many', async () => {
       await lead(teacher.id, sectionA);
@@ -686,6 +746,53 @@ describe('class teachers and teaching assignments', () => {
   });
 
   describe('the tables', () => {
+    it('does not let one Society write rows for another, or one Institution for another', async () => {
+      // Foreign keys skip row-level security, so only the insert policies stop a tenant naming a row of someone else.
+      const classes = await masters('predefined-classes');
+      const sectionCodes = await masters('predefined-sections');
+      const sectionCode = sectionCodes.find((c) => c.code === 'A')!.id;
+      const classCode = classes.find((c) => c.code === 'C09')!.id;
+      const societyB = await makeSociety();
+      const ownerOfB = await fixtures.owner(societyB);
+      const institutionB = await makeInstitution(ownerOfB.token);
+      const inB = {
+        society: societyB,
+        institution: institutionB,
+        year: await makeYear(institutionB, {}, ownerOfB.token),
+        section: await makeSection(
+          await makeClass(institutionB, classCode, ownerOfB.token),
+          sectionCode,
+          ownerOfB.token,
+        ),
+        subject: await makeSubject(undefined, ownerOfB.token),
+        staff: (await added({ homeInstitutionId: institutionB }, ownerOfB.token)).id,
+      };
+      const inSecond = {
+        society: societyA,
+        institution: second,
+        year: await makeYear(second),
+        section: await sectionOfSecond(),
+        subject: math,
+        staff: (await added({ homeInstitutionId: second })).id,
+      };
+      for (const row of [inB, inSecond]) {
+        for (const insert of inserts(row)) {
+          await expect(database.transaction(tenantA(), (tx) => insert.execute(tx))).rejects.toThrow(
+            /row-level security/,
+          );
+        }
+      }
+      // The same rows, from a tenant that reaches them, are accepted: the refusal above is the policy, not a key.
+      const ok = await database.transaction(
+        { ...tenantA(), institutionIds: [second] },
+        async (tx) => {
+          for (const insert of inserts(inSecond)) await insert.execute(tx);
+          return true;
+        },
+      );
+      expect(ok).toBe(true);
+    });
+
     it('is invisible to another Society', async () => {
       await lead(teacher.id, sectionA);
       await assigned();

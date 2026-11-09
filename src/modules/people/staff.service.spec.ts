@@ -177,6 +177,7 @@ function build(current: StaffRow | null = staff()) {
   } as unknown as StaffRepository;
   const scopeService = { requireInstitution, forPrincipal } as unknown as ScopeService;
   const classTeacherOf = vi.fn<AssignmentRepository['classTeacherOf']>().mockResolvedValue([]);
+  const activeSubjectsOf = vi.fn<AssignmentRepository['activeSubjectsOf']>().mockResolvedValue([]);
   const endAllOfStaff = vi
     .fn<AssignmentRepository['endAllOfStaff']>()
     .mockResolvedValue({ classTeacher: 0, teaching: 0 });
@@ -185,7 +186,7 @@ function build(current: StaffRow | null = staff()) {
     repository,
     scopeService,
     new StaffContext(database, repository, scopeService),
-    { classTeacherOf, endAllOfStaff } as unknown as AssignmentRepository,
+    { classTeacherOf, endAllOfStaff, activeSubjectsOf } as unknown as AssignmentRepository,
     {
       linkStaff,
       welcomeAs,
@@ -246,6 +247,7 @@ function build(current: StaffRow | null = staff()) {
     releaseDormantAdminAccess,
     classTeacherOf,
     endAllOfStaff,
+    activeSubjectsOf,
     replaceSubjects,
     replaceInstitutions,
     subjectIds,
@@ -847,6 +849,31 @@ describe('StaffService', () => {
         before: { subjectIds: ['subject-1', 'subject-2'] },
         after: { subjectIds: ['subject-1', 'subject-3'] },
       });
+    });
+
+    it('is 409 SUBJECT_ASSIGNED for a subject they are still assigned to teach, writing nothing', async () => {
+      const t = build();
+      t.subjectIds.mockResolvedValue(['subject-1', 'subject-2']);
+      t.activeSubjectsOf.mockResolvedValue(['subject-2']);
+      expect(
+        await fail(t.service.setSubjects(owner, 'staff-1', { subjectIds: ['subject-1'] })),
+      ).toEqual({ status: 409, code: 'SUBJECT_ASSIGNED' });
+      expect(t.activeSubjectsOf).toHaveBeenCalledWith(expect.anything(), 'staff-1');
+      expect(t.replaceSubjects).not.toHaveBeenCalled();
+      expect(t.record).not.toHaveBeenCalled();
+    });
+
+    it('drops a subject that is assigned nowhere, and does not look at assignments when nothing is dropped', async () => {
+      const t = build();
+      t.subjectIds.mockResolvedValue(['subject-1', 'subject-2']);
+      t.activeSubjectsOf.mockResolvedValue(['subject-1']);
+      await t.service.setSubjects(owner, 'staff-1', { subjectIds: ['subject-1'] });
+      expect(t.replaceSubjects).toHaveBeenCalledTimes(1);
+      t.activeSubjectsOf.mockClear();
+      await t.service.setSubjects(owner, 'staff-1', {
+        subjectIds: ['subject-1', 'subject-2', 'subject-3'],
+      });
+      expect(t.activeSubjectsOf).not.toHaveBeenCalled();
     });
 
     it('writes nothing for the same list in any order, and clears with an empty one', async () => {

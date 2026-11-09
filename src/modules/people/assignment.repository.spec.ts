@@ -64,10 +64,11 @@ describe('AssignmentRepository', () => {
   describe('pageTeaching', () => {
     it('lists the active assignments of the Institution and year by teacher name, a page at a time', async () => {
       const [list] = await sqlOf((tx) => repository.pageTeaching(tx, filter(), 10, 20));
-      expect(list?.sql).toContain('inner join "staff_members" as "m"');
+      expect(list?.sql).toContain('inner join "staff_members" on');
       expect(list?.sql).toContain('"a"."ended_at" is null');
+      // The order of the staff list (STF-01): one spelling of "by name" for both.
       expect(list?.sql).toContain(
-        'order by "m"."first_name", "m"."last_name", "a"."created_at", "a"."id"',
+        `order by lower(concat_ws(' ', staff_members.first_name, staff_members.last_name)), "a"."created_at", "a"."id"`,
       );
       expect(list?.parameters).toEqual(['institution-1', 'year-1', 10, 20]);
     });
