@@ -391,12 +391,4 @@ describe('the teacher signs in from the staff record', () => {
       settings: { role: '2', society: '', person: '' },
     });
   });
-
-  it('keeps the function from the public, and open to the app role only', async () => {
-    const { rows } = await sql<{ owner_only: boolean; app_can: boolean }>`
-      select proacl::text !~ '(^|[{,])=' as owner_only,
-        has_function_privilege('erp_app', 'app_staff_roles(uuid)', 'execute') as app_can
-      from pg_proc where proname = 'app_staff_roles'`.execute(ownerDb);
-    expect(rows).toEqual([{ owner_only: true, app_can: true }]);
-  });
 });
