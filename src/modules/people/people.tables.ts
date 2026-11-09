@@ -11,6 +11,8 @@ declare module '../../platform/database/schema.js' {
     staff_emergency_contacts: StaffEmergencyContactsTable;
     staff_institutions: StaffInstitutionsTable;
     staff_subjects: StaffSubjectsTable;
+    class_teacher_assignments: ClassTeacherAssignmentsTable;
+    teaching_assignments: TeachingAssignmentsTable;
   }
 }
 
@@ -101,5 +103,29 @@ export interface StaffSubjectsTable {
   created_by: string | null;
   society_id: string;
   staff_member_id: string;
+  subject_id: string;
+}
+
+/** The columns the two assignment tables share. A row is only ever ended, never edited or deleted. */
+interface AssignmentColumns {
+  id: Generated<string>;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  created_by: string | null;
+  society_id: string;
+  /** The staff member's home Institution: a teacher is assigned only where they work. */
+  institution_id: string;
+  academic_year_id: string;
+  section_id: string;
+  staff_member_id: string;
+  /** Set with `ended_by` when the assignment ends; empty while it holds. */
+  ended_at: ColumnType<Date | null, Date | null | undefined, Date>;
+  ended_by: ColumnType<string | null, string | null | undefined, string>;
+}
+
+/** The class teacher of a section for one year (STF-09): one section a teacher, one teacher a section. */
+export type ClassTeacherAssignmentsTable = AssignmentColumns;
+
+/** A teacher teaching a subject in a section for one year (ASG-02). */
+export interface TeachingAssignmentsTable extends AssignmentColumns {
   subject_id: string;
 }

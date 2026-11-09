@@ -18,6 +18,9 @@ import { Policy } from '../../common/auth/policy.decorator.js';
 import { RoleCode } from '../../common/auth/roles.js';
 import { ApiResult } from '../../common/http/api-result.js';
 import { UuidParamPipe } from '../../common/http/uuid-param.pipe.js';
+import { SetClassTeacherDto } from './assignment.dto.js';
+import type { ClassTeacherResource } from './assignment.resource.js';
+import { AssignmentService } from './assignment.service.js';
 import { ChangeEmailDto } from '../../platform/identity/index.js';
 import {
   CreateStaffDto,
@@ -33,11 +36,14 @@ const ADMINS = [RoleCode.SocietyOwner, RoleCode.InstitutionAdmin];
 /** A teacher reads their own profile (STF-03, "TS self"). */
 const ADMINS_AND_SELF = [...ADMINS, RoleCode.TeacherStaff];
 
-/** STF-01 to STF-08, STF-10 and STF-13 (API design 9.5): the staff of a Society. */
+/** STF-01 to STF-10 and STF-13 (API design 9.5): the staff of a Society. */
 @ApiTags('Staff')
 @Controller('staff')
 export class StaffController {
-  constructor(private readonly staff: StaffService) {}
+  constructor(
+    private readonly staff: StaffService,
+    private readonly assignments: AssignmentService,
+  ) {}
 
   @Policy({
     roles: ADMINS,
@@ -168,6 +174,21 @@ export class StaffController {
     @Body() body: SetStaffSubjectsDto,
   ): Promise<StaffResource> {
     return this.staff.setSubjects(principal, staffMemberId, body);
+  }
+
+  @Policy({
+    roles: ADMINS,
+    scope: 'institution',
+    operationId: 'STF-09',
+    rule: 'Sets the section an active staff member leads in an academic year of their home Institution, or ends it with null',
+  })
+  @Put(':staffMemberId/class-teacher')
+  setClassTeacher(
+    @CurrentPrincipal() principal: Principal,
+    @Param('staffMemberId', UuidParamPipe) staffMemberId: string,
+    @Body() body: SetClassTeacherDto,
+  ): Promise<ClassTeacherResource | null> {
+    return this.assignments.setClassTeacher(principal, staffMemberId, body);
   }
 
   @Policy({

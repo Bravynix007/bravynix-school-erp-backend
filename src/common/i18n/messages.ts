@@ -75,9 +75,11 @@ const en: Catalogue = {
   CANNOT_ACT_ON_SELF: 'You cannot do this to your own account',
   ALREADY_ADMIN: 'This person is already an Admin of this Institution',
   ADMIN_ACCESS_HELD: 'This person is an Admin of this Institution; revoke that access first',
+  CLASS_TEACHER_TAKEN: 'This section already has a class teacher for the year; end that first',
   STAFF_BLOCKED: 'This staff member is blocked; lift the block first',
   STAFF_NOT_AT_INSTITUTION:
     'This person works at another Institution; make this one their home or an extra Institution first',
+  SUBJECT_NOT_TAUGHT: 'This staff member cannot teach this subject; add it to their subjects first',
   NOT_LOCKED: 'This account is not locked',
   AUTHENTICATOR_LOCKED: 'The authenticator is locked; lift the lock first',
   // Platform dues (API design 10.22)

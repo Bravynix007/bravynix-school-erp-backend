@@ -136,6 +136,16 @@ export class StaffRepository {
     return row !== undefined;
   }
 
+  /** The active staff record of this person in the caller's Society: a person holds at most one. */
+  activeOfUser(tx: Tx, userId: string): Promise<StaffRow | undefined> {
+    return tx
+      .selectFrom('staff_members')
+      .selectAll()
+      .where('user_id', '=', userId)
+      .where('status', '=', 1)
+      .executeTakeFirst();
+  }
+
   insert(tx: Tx, values: NewStaff): Promise<StaffRow> {
     return tx.insertInto('staff_members').values(values).returningAll().executeTakeFirstOrThrow();
   }

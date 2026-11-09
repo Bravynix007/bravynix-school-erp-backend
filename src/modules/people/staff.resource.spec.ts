@@ -70,7 +70,11 @@ describe('staffResource', () => {
         educations,
         contacts,
         'meera@example.com',
-        { subjectIds: ['subject-1'], institutionIds: ['institution-2'] },
+        {
+          subjectIds: ['subject-1'],
+          institutionIds: ['institution-2'],
+          classTeachers: [{ academicYearId: 'year-1', sectionId: 'section-1' }],
+        },
         people,
       ),
     ).toEqual({
@@ -122,6 +126,7 @@ describe('staffResource', () => {
       blockedAt: null,
       subjectIds: ['subject-1'],
       institutionIds: ['institution-2'],
+      classTeachers: [{ academicYearId: 'year-1', sectionId: 'section-1' }],
       status: 1,
       version: 3,
       createdBy: { id: 'owner-1', displayName: 'Asha Rao', roleName: 'Society Owner' },

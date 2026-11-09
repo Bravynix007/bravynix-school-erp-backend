@@ -24,4 +24,9 @@ export class SubjectDirectory {
       if (status === 0) throw AppException.referenceInactive(field);
     }
   }
+
+  /** The name of each of these subjects, by ID. */
+  names(tx: Tx, ids: readonly string[]): Promise<Map<string, string>> {
+    return this.subjects.namesOf(tx, ids);
+  }
 }

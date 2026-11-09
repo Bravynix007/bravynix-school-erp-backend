@@ -1,5 +1,5 @@
 import { sql, type Kysely } from 'kysely';
-import { clearScope, scopeTo } from './academic-seed.js';
+import { classes, clearScope, scopeTo, seededYearId } from './academic-seed.js';
 import { institutions, personas } from './two-worlds.js';
 
 const seedId = (n: number): string => `00000000-0000-7000-8000-${n.toString().padStart(12, '0')}`;
@@ -12,7 +12,13 @@ export const seededStaff = personas
     const home = institutions.find((institution) => institution.key === grant.institutions?.[0]);
     if (!home) throw new Error(`Seeded teacher ${persona.key} names no home Institution`);
     return { persona, grant, home, id: seedId(3401 + index), index };
-  });
+  })
+  // The place of each at their home Institution, counted from the first: 0 for the first staff member there.
+  .map((staff, _index, all) => ({
+    ...staff,
+    place: all.filter((other) => other.home.id === staff.home.id && other.index < staff.index)
+      .length,
+  }));
 
 /** The seeded staff member of a persona, so a test can find its record. */
 export const seededStaffId = (personaKey: string): string => {
@@ -24,7 +30,9 @@ export const seededStaffId = (personaKey: string): string => {
 /**
  * A staff record for each two-worlds persona that holds the Teacher and Staff role, at the first Institution of the
  * grant, each with one education, one emergency contact and one subject, so a test can show one Society's people are
- * hidden from another. The Institutions of a grant after the first are the member's extra Institutions. The pending,
+ * hidden from another. Each also teaches that subject in a section of the home Institution for its current year, and
+ * the first ones there lead a section each (the teacher at place `n` takes the `n`-th section, the class teacher
+ * only while there are sections left). The Institutions of a grant after the first are the member's extra Institutions. The pending,
  * blocked and inactive accounts have records too: the account state is the login's, not the record's. Safe to run
  * twice: rows are keyed by their fixed IDs. The numbers are made up (the 900000 range).
  */
@@ -39,7 +47,7 @@ async function writeIn(tx: Kysely<unknown>): Promise<void> {
   }>`select id from class_categories order by display_order limit 1`.execute(tx);
   const categoryId = rows[0]?.id;
   if (!categoryId) throw new Error('Seeded staff need a class category: run the migrations first');
-  for (const { persona, grant, home, id, index } of seededStaff) {
+  for (const { persona, grant, home, id, index, place } of seededStaff) {
     const societyId = await scopeTo(tx, home.id, 'staff member');
     const [firstName, ...rest] = persona.displayName.split(' ');
     await sql`
@@ -68,6 +76,30 @@ async function writeIn(tx: Kysely<unknown>): Promise<void> {
         insert into staff_institutions (staff_member_id, institution_id, society_id)
         values (${id}, ${extra.id}, ${societyId})
         on conflict do nothing
+      `.execute(tx);
+    }
+    const sections = classes
+      .filter((entry) => entry.institutionId === home.id)
+      .flatMap((entry) => entry.sections);
+    const section = sections[place % sections.length];
+    if (section) {
+      const yearId = seededYearId(home.key);
+      await sql`
+        insert into teaching_assignments
+          (id, society_id, institution_id, academic_year_id, section_id, subject_id, staff_member_id)
+        select ${seedId(3701 + index)}, ${societyId}, ${home.id}, ${yearId}, ${section.id}, id, ${id}
+        from subjects where society_id = ${societyId} and code = 'MATH'
+        on conflict (id) do nothing
+      `.execute(tx);
+    }
+    const leads = sections[place];
+    if (leads) {
+      await sql`
+        insert into class_teacher_assignments
+          (id, society_id, institution_id, academic_year_id, section_id, staff_member_id)
+        values (${seedId(3801 + index)}, ${societyId}, ${home.id}, ${seededYearId(home.key)},
+          ${leads.id}, ${id})
+        on conflict (id) do nothing
       `.execute(tx);
     }
     await sql`

@@ -39,6 +39,26 @@ export class SectionRepository {
     return this.view(tx).where('s.id', '=', id).executeTakeFirstOrThrow();
   }
 
+  /** The name of each of these sections and of its class, by section ID. */
+  async namesOf(
+    tx: Tx,
+    ids: readonly string[],
+  ): Promise<Map<string, { displayName: string; classId: string; className: string }>> {
+    if (ids.length === 0) return new Map();
+    const rows = await tx
+      .selectFrom('sections as s')
+      .innerJoin('classes as c', 'c.id', 's.class_id')
+      .select(['s.id', 's.display_name', 's.class_id', 'c.display_name as class_name'])
+      .where('s.id', 'in', ids)
+      .execute();
+    return new Map(
+      rows.map((row) => [
+        row.id,
+        { displayName: row.display_name, classId: row.class_id, className: row.class_name },
+      ]),
+    );
+  }
+
   async find(tx: Tx, id: string, lock = false): Promise<SectionRow | undefined> {
     const query = tx.selectFrom('sections').selectAll().where('id', '=', id);
     return (lock ? query.forUpdate() : query).executeTakeFirst();

@@ -1,36 +1,5 @@
-import {
-  DummyDriver,
-  Kysely,
-  PostgresAdapter,
-  PostgresIntrospector,
-  PostgresQueryCompiler,
-} from 'kysely';
-import type { Database, Tx } from '../../platform/database/index.js';
 import { DueRepository, type NewDue } from './due.repository.js';
-
-interface Logged {
-  sql: string;
-  parameters: readonly unknown[];
-}
-
-/** A Kysely that runs nothing and records the SQL it was asked to run. */
-function recorder() {
-  const queries: Logged[] = [];
-  const db = new Kysely<Database>({
-    dialect: {
-      createAdapter: () => new PostgresAdapter(),
-      createDriver: () => new DummyDriver(),
-      createIntrospector: (kysely) => new PostgresIntrospector(kysely),
-      createQueryCompiler: () => new PostgresQueryCompiler(),
-    },
-    log: (event) => {
-      if (event.level === 'query') {
-        queries.push({ sql: event.query.sql, parameters: event.query.parameters });
-      }
-    },
-  });
-  return { tx: db as unknown as Tx, queries };
-}
+import { sqlRecorder as recorder } from '../../../test/support/sql-recorder.js';
 
 /** The dummy driver returns no rows, so a call that needs one ends in an error after its SQL was recorded. */
 const ignoringNoRows = (work: Promise<unknown>) => work.catch(() => undefined);

@@ -3,6 +3,7 @@ import {
   type AuthorRef,
   type AuthorStamps,
 } from '../../common/http/author-stamps.js';
+import type { ClassTeacherResource } from './assignment.resource.js';
 import type { EducationRow, EmergencyContactRow, StaffRow } from './staff.repository.js';
 
 export interface EducationResource {
@@ -21,12 +22,14 @@ export interface EmergencyContactResource {
   isPrimary: boolean;
 }
 
-/** What a staff member may do in the Society besides their record (STF-06, STF-08, STF-10). */
+/** What a staff member may do in the Society besides their record (STF-06, STF-08, STF-09, STF-10). */
 export interface StaffAccess {
   /** The subjects they can teach. */
   subjectIds: string[];
   /** The extra Institutions they may see, besides the home one. */
   institutionIds: string[];
+  /** The section they lead in each academic year, one at most for each year (STF-09). */
+  classTeachers: ClassTeacherResource[];
 }
 
 /** One staff member as an admin sees them (API design 9.5). Identity numbers and documents arrive with their own endpoints. */
@@ -65,6 +68,7 @@ export interface StaffResource extends AuthorStamps {
   blockedAt: string | null;
   subjectIds: string[];
   institutionIds: string[];
+  classTeachers: ClassTeacherResource[];
   status: number;
   version: number;
 }
@@ -160,6 +164,7 @@ export function staffResource(
     blockedAt: row.access_blocked_at?.toISOString() ?? null,
     subjectIds: access.subjectIds,
     institutionIds: access.institutionIds,
+    classTeachers: access.classTeachers,
     status: row.status,
     version: row.version,
     ...authorStamps(row, people),
