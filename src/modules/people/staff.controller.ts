@@ -1,4 +1,16 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Put,
+  Query,
+} from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { CurrentPrincipal } from '../../common/auth/current-principal.decorator.js';
@@ -7,7 +19,13 @@ import { RoleCode } from '../../common/auth/roles.js';
 import { ApiResult } from '../../common/http/api-result.js';
 import { UuidParamPipe } from '../../common/http/uuid-param.pipe.js';
 import { ChangeEmailDto } from '../../platform/identity/index.js';
-import { CreateStaffDto, ListStaffQueryDto, UpdateStaffDto } from './staff.dto.js';
+import {
+  CreateStaffDto,
+  ListStaffQueryDto,
+  SetStaffInstitutionsDto,
+  SetStaffSubjectsDto,
+  UpdateStaffDto,
+} from './staff.dto.js';
 import type { StaffResource, StaffSummary } from './staff.resource.js';
 import { StaffService } from './staff.service.js';
 
@@ -15,7 +33,7 @@ const ADMINS = [RoleCode.SocietyOwner, RoleCode.InstitutionAdmin];
 /** A teacher reads their own profile (STF-03, "TS self"). */
 const ADMINS_AND_SELF = [...ADMINS, RoleCode.TeacherStaff];
 
-/** STF-01 to STF-05 and STF-13 (API design 9.5): the staff of a Society. */
+/** STF-01 to STF-08, STF-10 and STF-13 (API design 9.5): the staff of a Society. */
 @ApiTags('Staff')
 @Controller('staff')
 export class StaffController {
@@ -105,5 +123,65 @@ export class StaffController {
     @Body() body: ChangeEmailDto,
   ): Promise<StaffResource> {
     return this.staff.changeEmail(principal, staffMemberId, body);
+  }
+
+  @Policy({
+    roles: ADMINS,
+    scope: 'institution',
+    operationId: 'STF-06',
+    rule: 'Blocks the staff role of an active staff member in this Society and ends their sessions in it; not the caller’s own record',
+  })
+  @HttpCode(HttpStatus.OK)
+  @Post(':staffMemberId/block')
+  block(
+    @CurrentPrincipal() principal: Principal,
+    @Param('staffMemberId', UuidParamPipe) staffMemberId: string,
+  ): Promise<StaffResource> {
+    return this.staff.block(principal, staffMemberId);
+  }
+
+  @Policy({
+    roles: ADMINS,
+    scope: 'institution',
+    operationId: 'STF-07',
+    rule: 'Lifts the block on the staff role of an active staff member; not the caller’s own record',
+  })
+  @HttpCode(HttpStatus.OK)
+  @Post(':staffMemberId/unblock')
+  unblock(
+    @CurrentPrincipal() principal: Principal,
+    @Param('staffMemberId', UuidParamPipe) staffMemberId: string,
+  ): Promise<StaffResource> {
+    return this.staff.unblock(principal, staffMemberId);
+  }
+
+  @Policy({
+    roles: ADMINS,
+    scope: 'institution',
+    operationId: 'STF-08',
+    rule: 'Replaces the subjects an active staff member can teach with the list sent; each new subject must be an active subject of the Society',
+  })
+  @Put(':staffMemberId/subjects')
+  setSubjects(
+    @CurrentPrincipal() principal: Principal,
+    @Param('staffMemberId', UuidParamPipe) staffMemberId: string,
+    @Body() body: SetStaffSubjectsDto,
+  ): Promise<StaffResource> {
+    return this.staff.setSubjects(principal, staffMemberId, body);
+  }
+
+  @Policy({
+    roles: [RoleCode.SocietyOwner],
+    scope: 'institution',
+    operationId: 'STF-10',
+    rule: 'Replaces the extra Institutions an active staff member may see with the list sent; only a Society Owner, and not the home Institution',
+  })
+  @Put(':staffMemberId/institutions')
+  setInstitutions(
+    @CurrentPrincipal() principal: Principal,
+    @Param('staffMemberId', UuidParamPipe) staffMemberId: string,
+    @Body() body: SetStaffInstitutionsDto,
+  ): Promise<StaffResource> {
+    return this.staff.setInstitutions(principal, staffMemberId, body);
   }
 }

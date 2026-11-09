@@ -109,11 +109,11 @@ export class SocietyRepository {
   async refs(
     tx: Tx,
     ids: readonly string[],
-  ): Promise<Map<string, { id: string; code: string; name: string }>> {
+  ): Promise<Map<string, { id: string; code: string; name: string; status: number }>> {
     if (ids.length === 0) return new Map();
     const rows = await tx
       .selectFrom('societies')
-      .select(['id', 'code', 'name'])
+      .select(['id', 'code', 'name', 'status'])
       .where('id', 'in', ids)
       .execute();
     return new Map(rows.map((row) => [row.id, row]));

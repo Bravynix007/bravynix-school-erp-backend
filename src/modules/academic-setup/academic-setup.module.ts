@@ -8,6 +8,7 @@ import { ClassRepository } from './class.repository.js';
 import { ClassService } from './class.service.js';
 import { SectionRepository } from './section.repository.js';
 import { SectionService } from './section.service.js';
+import { SubjectDirectory } from './subject-directory.js';
 import { SubjectController } from './subject.controller.js';
 import { SubjectRepository } from './subject.repository.js';
 import { SubjectService } from './subject.service.js';
@@ -21,10 +22,12 @@ import { SubjectService } from './subject.service.js';
     AcademicYearService,
     SubjectRepository,
     SubjectService,
+    SubjectDirectory,
     ClassRepository,
     ClassService,
     SectionRepository,
     SectionService,
   ],
+  exports: [SubjectDirectory],
 })
 export class AcademicSetupModule {}

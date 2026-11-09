@@ -194,7 +194,9 @@ describe('tenant isolation', () => {
         'societies',
         'staff_educations',
         'staff_emergency_contacts',
+        'staff_institutions',
         'staff_members',
+        'staff_subjects',
         'subjects',
       ]);
     });
@@ -209,17 +211,28 @@ describe('tenant isolation', () => {
       async (_who, society, institutionIds) => {
         for (const table of await tenantTables()) {
           const rows = await visible(table.name, { societyId: society.id, institutionIds });
-          expect(
-            rows.length,
-            `${table.name} has no rows in this world: write its seed rows so the check is not vacuous`,
-          ).toBeGreaterThan(0);
+          // Only a member with a second Institution has extra Institutions, and Society B has one Institution.
+          const mayBeEmpty = table.name === 'staff_institutions' && society.id === socB.id;
+          if (!mayBeEmpty) {
+            expect(
+              rows.length,
+              `${table.name} has no rows in this world: write its seed rows so the check is not vacuous`,
+            ).toBeGreaterThan(0);
+          }
           for (const row of rows) {
             const owner = table.name === 'societies' ? row.id : row.society_id;
             expect({ table: table.name, society: owner }).toEqual({
               table: table.name,
               society: society.id,
             });
-            if (table.hasInstitution && institutionIds.length > 0 && row.institution_id) {
+            // Extra Institutions are read by Society, so an Admin of one Institution sees another's too.
+            const bySociety = table.name === 'staff_institutions';
+            if (
+              table.hasInstitution &&
+              !bySociety &&
+              institutionIds.length > 0 &&
+              row.institution_id
+            ) {
               expect(institutionIds).toContain(row.institution_id);
             }
           }

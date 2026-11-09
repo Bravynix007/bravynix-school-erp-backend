@@ -22,6 +22,17 @@ export class SubjectRepository {
       .execute();
   }
 
+  /** The status of each of these subjects that the caller can see, by ID. */
+  async statusesOf(tx: Tx, ids: readonly string[]): Promise<Map<string, number>> {
+    if (ids.length === 0) return new Map();
+    const rows = await tx
+      .selectFrom('subjects')
+      .select(['id', 'status'])
+      .where('id', 'in', ids)
+      .execute();
+    return new Map(rows.map((row) => [row.id, row.status]));
+  }
+
   async find(tx: Tx, id: string, lock = false): Promise<SubjectRow | undefined> {
     const query = tx.selectFrom('subjects').selectAll().where('id', '=', id);
     return (lock ? query.forUpdate() : query).executeTakeFirst();

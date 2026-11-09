@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { ApiResult } from '../../common/http/api-result.js';
 import { pageMeta, pageOffset, parseSort } from '../../common/pagination/pagination.js';
+import { requireNotSelf } from '../../common/auth/require-not-self.js';
 import { RoleCode } from '../../common/auth/roles.js';
 import { AppException } from '../../common/http/app-exception.js';
 import { authorIdsOf } from '../../common/http/author-stamps.js';
@@ -27,6 +28,7 @@ import {
   type ChangeEmailDto,
 } from '../../platform/identity/index.js';
 import { MasterReferences } from '../../platform/masters/index.js';
+import { SubjectDirectory } from '../academic-setup/index.js';
 import { InstitutionDirectory, ScopeService } from '../../platform/tenancy/index.js';
 import {
   STAFF_SORT_FIELDS,
@@ -34,6 +36,8 @@ import {
   type EducationDto,
   type EmergencyContactDto,
   type ListStaffQueryDto,
+  type SetStaffInstitutionsDto,
+  type SetStaffSubjectsDto,
   type UpdateStaffDto,
 } from './staff.dto.js';
 import {
@@ -48,6 +52,7 @@ import {
 import {
   staffResource,
   staffSummary,
+  type StaffAccess,
   type StaffResource,
   type StaffSummary,
 } from './staff.resource.js';
@@ -137,10 +142,10 @@ const contactKey = (
   );
 
 /**
- * STF-01 to STF-05 and STF-13 (API design 9.5): the staff of a Society, each with a home Institution. Society Owners reach
- * every active Institution of their Society and Institution Admins their own; a record whose home Institution the
- * caller does not reach is 404, never 403 (SDD 12.4). The teacher's own view, the list, the email change, access
- * controls and identity numbers arrive in the slices after this one.
+ * STF-01 to STF-08, STF-10 and STF-13 (API design 9.5): the staff of a Society, each with a home Institution. Society
+ * Owners reach every active Institution of their Society and Institution Admins their own; a record whose home
+ * Institution the caller does not reach is 404, never 403 (SDD 12.4). The class teacher, Admin access and identity
+ * numbers arrive in the slices after this one.
  */
 @Injectable()
 export class StaffService {
@@ -153,6 +158,7 @@ export class StaffService {
     private readonly masters: MasterReferences,
     private readonly files: FileDirectory,
     private readonly institutions: InstitutionDirectory,
+    private readonly subjects: SubjectDirectory,
     private readonly audit: AuditService,
     private readonly clock: Clock,
   ) {}
@@ -244,7 +250,11 @@ export class StaffService {
         throw translate(error);
       });
     this.accounts.welcomeAs({ email: created.email }, RoleCode.TeacherStaff, created.societyName);
-    return this.resource(created.row, created.educations, created.contacts, created.email);
+    // A record that has just been made has no subjects and no extra Institutions yet.
+    return this.resource(created.row, created.educations, created.contacts, created.email, {
+      subjectIds: [],
+      institutionIds: [],
+    });
   }
 
   /**
@@ -267,6 +277,8 @@ export class StaffService {
           statuses: query.status ?? [1],
           designationId: query.designationId,
           classCategoryId: query.classCategoryId,
+          blocked: query.blocked,
+          subjectId: query.subjectId,
         },
         sort,
         query.limit,
@@ -402,9 +414,7 @@ export class StaffService {
     const context = await this.contextOf(principal, id);
     await this.database.transaction(context.tenant, async (tx) => {
       const current = await this.lockedActive(tx, id);
-      if (current.user_id === principal.personId) {
-        throw AppException.conflict(ErrorCode.CANNOT_ACT_ON_SELF);
-      }
+      requireNotSelf(principal.personId, current.user_id);
       const row = await this.staff.update(tx, id, {
         status: 0,
         ...updateStamp(principal.personId),
@@ -429,6 +439,144 @@ export class StaffService {
   }
 
   /**
+   * STF-06: blocks the staff role of an active staff member in this Society (DDD D-02). Their sessions as Institution
+   * Admin or Teacher / Staff here end at once (`SESSION_ENDED`, reason `blocked`) and the role answers 403
+   * `ACCESS_BLOCKED` until STF-07; their account, their other Societies and their Owner role are untouched. 404 when
+   * deactivated; 409 `INVALID_STATE` when already blocked; 409 `CANNOT_ACT_ON_SELF` for the caller's own record.
+   */
+  async block(principal: Principal, id: string): Promise<StaffResource> {
+    return this.setBlock(principal, id, true);
+  }
+
+  /** STF-07: lifts the block. 409 `INVALID_STATE` when the record is not blocked; otherwise as STF-06. */
+  async unblock(principal: Principal, id: string): Promise<StaffResource> {
+    return this.setBlock(principal, id, false);
+  }
+
+  private async setBlock(
+    principal: Principal,
+    id: string,
+    blocked: boolean,
+  ): Promise<StaffResource> {
+    const context = await this.contextOf(principal, id);
+    const now = this.clock.now();
+    return this.database.transaction(context.tenant, async (tx) => {
+      const current = await this.lockedActive(tx, id);
+      requireNotSelf(principal.personId, current.user_id);
+      if ((current.access_blocked_at !== null) === blocked) {
+        throw AppException.conflict(ErrorCode.INVALID_STATE);
+      }
+      const row = await this.staff.update(tx, id, {
+        access_blocked_at: blocked ? now : null,
+        access_blocked_by: blocked ? principal.personId : null,
+        ...updateStamp(principal.personId),
+      });
+      const sessionsEnded = blocked
+        ? await this.accounts.endStaffAccessSessions(tx, current.user_id, current.society_id, now)
+        : 0;
+      await this.audit.record(tx, {
+        action: blocked ? 'staff.blocked' : 'staff.unblocked',
+        institutionId: row.home_institution_id,
+        entityType: 'staff_member',
+        entityId: id,
+        before: { isBlocked: !blocked },
+        after: { isBlocked: blocked, ...(blocked ? { sessionsEnded } : {}) },
+      });
+      return this.resourceOf(tx, row);
+    });
+  }
+
+  /**
+   * STF-08: replaces the subjects the person can teach with this list (an empty one clears it). Each subject that is
+   * new to the person must exist in the Society (404) and be active (422 `REFERENCE_INACTIVE`); one already on the
+   * list stays even if it has been deactivated since. A list that changes nothing writes nothing. 404 when the
+   * staff member is deactivated.
+   */
+  async setSubjects(
+    principal: Principal,
+    id: string,
+    body: SetStaffSubjectsDto,
+  ): Promise<StaffResource> {
+    const context = await this.contextOf(principal, id);
+    return this.database.transaction(context.tenant, async (tx) => {
+      const current = await this.lockedActive(tx, id);
+      const before = await this.staff.subjectIds(tx, id);
+      if (sameIds(before, body.subjectIds)) return this.resourceOf(tx, current);
+      await this.subjects.requireActive(
+        tx,
+        body.subjectIds.filter((subject) => !before.includes(subject)),
+        'subjectIds',
+      );
+      await this.staff.replaceSubjects(
+        tx,
+        id,
+        body.subjectIds.map((subjectId) => ({
+          society_id: current.society_id,
+          staff_member_id: id,
+          subject_id: subjectId,
+          created_by: principal.personId,
+        })),
+      );
+      await this.audit.record(tx, {
+        action: 'staff.subjects_changed',
+        institutionId: current.home_institution_id,
+        entityType: 'staff_member',
+        entityId: id,
+        before: { subjectIds: before },
+        after: { subjectIds: body.subjectIds.toSorted() },
+      });
+      return this.resourceOf(tx, current);
+    });
+  }
+
+  /**
+   * STF-10: replaces the extra Institutions the person may see (PRD 4; an empty list clears it). Each Institution
+   * that is new to the person must exist in the Society (404), be active (422 `REFERENCE_INACTIVE`) and differ from
+   * their home Institution (400 `INVALID_VALUE`). From the person's next call their scope reaches them. A list that
+   * changes nothing writes nothing. Society Owners only.
+   */
+  async setInstitutions(
+    principal: Principal,
+    id: string,
+    body: SetStaffInstitutionsDto,
+  ): Promise<StaffResource> {
+    const context = await this.contextOf(principal, id);
+    return this.database.transaction(context.tenant, async (tx) => {
+      const current = await this.lockedActive(tx, id);
+      const before = await this.staff.institutionIds(tx, id);
+      if (sameIds(before, body.institutionIds)) return this.resourceOf(tx, current);
+      const added = body.institutionIds.flatMap((institutionId, index) =>
+        before.includes(institutionId)
+          ? []
+          : [{ id: institutionId, field: `institutionIds[${String(index)}]` }],
+      );
+      const home = added.find((item) => item.id === current.home_institution_id);
+      if (home)
+        throw AppException.validation([fieldError(home.field, FieldErrorCode.INVALID_VALUE)]);
+      await this.institutions.requireActive(tx, added);
+      await this.staff.replaceInstitutions(
+        tx,
+        id,
+        body.institutionIds.map((institutionId) => ({
+          society_id: current.society_id,
+          staff_member_id: id,
+          institution_id: institutionId,
+          created_by: principal.personId,
+        })),
+      );
+      await this.audit.record(tx, {
+        action: 'staff.institutions_changed',
+        institutionId: current.home_institution_id,
+        entityType: 'staff_member',
+        entityId: id,
+        before: { institutionIds: before },
+        after: { institutionIds: body.institutionIds.toSorted() },
+      });
+      return this.resourceOf(tx, current);
+    });
+  }
+
+  /**
    * STF-13 (API design 6.6): changes the login email of an active staff member, at once. The person's own email
    * changes when this record is all they hold, else the record moves to the person the email belongs to or to a new
    * one; either way the sessions of the old login end and the addresses are told. The same email writes nothing and
@@ -446,9 +594,7 @@ export class StaffService {
       .transaction(context.tenant, async (tx) => {
         const current = await this.lockedActive(tx, id);
         requireVersion(current, body.version);
-        if (current.user_id === principal.personId) {
-          throw AppException.conflict(ErrorCode.CANNOT_ACT_ON_SELF);
-        }
+        requireNotSelf(principal.personId, current.user_id);
         const change = await this.accounts.changeStaffEmail(tx, {
           userId: current.user_id,
           societyId: current.society_id,
@@ -578,7 +724,10 @@ export class StaffService {
     contacts: readonly EmergencyContactRow[],
   ): Promise<StaffResource> {
     const email = (await this.people.emails([row.user_id])).get(row.user_id) ?? '';
-    return this.resource(row, educations, contacts, email);
+    return this.resource(row, educations, contacts, email, {
+      subjectIds: await this.staff.subjectIds(tx, row.id),
+      institutionIds: await this.staff.institutionIds(tx, row.id),
+    });
   }
 
   private async resource(
@@ -586,15 +735,28 @@ export class StaffService {
     educations: readonly EducationRow[],
     contacts: readonly EmergencyContactRow[],
     email: string,
+    access: StaffAccess,
   ): Promise<StaffResource> {
     return staffResource(
       row,
       educations,
       contacts,
       email,
+      access,
       await this.people.describe(authorIdsOf([row])),
     );
   }
+
+  /** The record, with everything an access change returns, read in the caller's transaction. */
+  private async resourceOf(tx: Tx, row: StaffRow): Promise<StaffResource> {
+    const [educations, contacts] = await this.lists(tx, row.id);
+    return this.resourceIn(tx, row, educations, contacts);
+  }
+}
+
+/** Do two lists hold the same IDs, whatever their order? */
+function sameIds(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((id) => b.includes(id));
 }
 
 type Place = { countryId?: string | null; stateId?: string | null; cityId?: string | null };

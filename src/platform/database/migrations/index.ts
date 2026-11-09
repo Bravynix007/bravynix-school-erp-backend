@@ -25,6 +25,7 @@ import * as m0023 from './2026_11_08_0023_audit_own_reveals.js';
 import * as m0024 from './2026_11_08_0024_people_staff_core.js';
 import * as m0025 from './2026_11_08_0025_people_staff_sign_in.js';
 import * as m0026 from './2026_11_09_0026_people_staff_elsewhere.js';
+import * as m0027 from './2026_11_10_0027_people_staff_access.js';
 
 /**
  * Every migration, in order. Listed explicitly (not read from disk) so the
@@ -61,6 +62,7 @@ const migrations: Record<string, Migration> = {
   '2026_11_08_0024_people_staff_core': m0024,
   '2026_11_08_0025_people_staff_sign_in': m0025,
   '2026_11_09_0026_people_staff_elsewhere': m0026,
+  '2026_11_10_0027_people_staff_access': m0027,
 };
 
 export const migrationProvider: MigrationProvider = {

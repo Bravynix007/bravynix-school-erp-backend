@@ -84,6 +84,8 @@ const row: StaffRow = {
   society_id: 'society-1',
   home_institution_id: 'institution-1',
   user_id: 'user-1',
+  access_blocked_at: null,
+  access_blocked_by: null,
   employee_code: 'EMP-1',
   first_name: 'Meera',
   last_name: 'Iyer',

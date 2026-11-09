@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { AppException } from '../../common/http/app-exception.js';
 import type { Tx } from '../database/index.js';
 import { InstitutionRepository } from './institution.repository.js';
 import { SocietyRepository } from './society.repository.js';
@@ -43,6 +44,27 @@ export class InstitutionDirectory {
       name: institution.name,
       active: institution.status === 1 && society?.status === 1,
     };
+  }
+
+  /**
+   * Each Institution must exist for the caller (404) and, with its Society, be active (422 `REFERENCE_INACTIVE` on
+   * the item's `field`): the first problem found, in the order given. One read for all of them.
+   */
+  async requireActive(tx: Tx, items: readonly { id: string; field: string }[]): Promise<void> {
+    const institutions = await this.institutions.refs(
+      tx,
+      items.map((item) => item.id),
+    );
+    const societies = await this.societies.refs(tx, [
+      ...new Set([...institutions.values()].map((row) => row.society_id)),
+    ]);
+    for (const { id, field } of items) {
+      const found = institutions.get(id);
+      if (!found) throw AppException.notFound();
+      if (found.status !== 1 || societies.get(found.society_id)?.status !== 1) {
+        throw AppException.referenceInactive(field);
+      }
+    }
   }
 
   /** How many Societies, and how many Institutions in them, are active: the dashboard's figures. */

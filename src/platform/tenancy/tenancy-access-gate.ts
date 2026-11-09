@@ -4,6 +4,7 @@ import type { BlockSection } from '../../common/auth/block-section.js';
 import { TenantAccessGate } from '../../common/auth/tenant-access-gate.js';
 import { isStaffRole, stoppingSection } from './access-block.rules.js';
 import { ScopeService } from './scope.service.js';
+import { TenancyRepository } from './tenancy.repository.js';
 
 /**
  * Reads the blocks of the Society of the caller's active context, once per
@@ -16,7 +17,10 @@ import { ScopeService } from './scope.service.js';
  */
 @Injectable()
 export class TenancyAccessGate extends TenantAccessGate {
-  constructor(private readonly scope: ScopeService) {
+  constructor(
+    private readonly scope: ScopeService,
+    private readonly repository: TenancyRepository,
+  ) {
     super();
   }
 
@@ -30,5 +34,11 @@ export class TenancyAccessGate extends TenantAccessGate {
       blocks,
       institutions.map((institution) => institution.id),
     );
+  }
+
+  /** Staff roles only: the person's own staff record in the Society, read through a function the tenant cannot narrow. */
+  async staffAccessBlocked(principal: Principal): Promise<boolean> {
+    if (principal.societyId === null || !isStaffRole(principal.roleCode)) return false;
+    return this.repository.staffBlocked(principal.societyId, principal.personId);
   }
 }

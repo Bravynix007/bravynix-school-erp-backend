@@ -1,14 +1,10 @@
 import { HttpStatus } from '@nestjs/common';
 import { BlockSectionName, type BlockSection } from '../auth/block-section.js';
+import { fieldError } from '../validation/field-error.js';
 import { ErrorCode } from './error-codes.js';
+import type { FieldError } from './field-error.type.js';
 
-export interface FieldError {
-  /** JSON path into the request, e.g. `marks[3].obtainedMarks`. */
-  field: string;
-  code: string;
-  message: string;
-  params?: Record<string, unknown>;
-}
+export type { FieldError };
 
 export interface AppExceptionOptions {
   /** Overrides the catalogue message for this code. Must be safe to show a user. */
@@ -38,6 +34,16 @@ export class AppException extends Error {
 
   static validation(errors: FieldError[]): AppException {
     return new AppException(HttpStatus.BAD_REQUEST, ErrorCode.VALIDATION_FAILED, { errors });
+  }
+
+  /**
+   * A request points at a record that exists but is hidden or deactivated: 422 `REFERENCE_INACTIVE` on that field
+   * (API design 12.2).
+   */
+  static referenceInactive(field: string): AppException {
+    return new AppException(HttpStatus.UNPROCESSABLE_ENTITY, ErrorCode.REFERENCE_INACTIVE, {
+      errors: [fieldError(field, ErrorCode.REFERENCE_INACTIVE)],
+    });
   }
 
   static notFound(): AppException {

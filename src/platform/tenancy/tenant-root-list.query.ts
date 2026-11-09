@@ -1,7 +1,8 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsArray, IsBoolean, IsIn, IsOptional } from 'class-validator';
+import { IsArray, IsIn, IsOptional } from 'class-validator';
 import { PageQueryDto } from '../../common/pagination/pagination.js';
+import { BooleanQuery } from '../../common/validation/boolean-query.js';
 
 /**
  * The filters the Society and Institution lists share (API design 10.4b,
@@ -21,8 +22,6 @@ export class TenantRootListQueryDto extends PageQueryDto {
   status?: number[];
 
   @ApiPropertyOptional({ description: 'Only with a blocked section, or only with none' })
-  @IsOptional()
-  @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
-  @IsBoolean()
+  @BooleanQuery()
   blocked?: boolean;
 }

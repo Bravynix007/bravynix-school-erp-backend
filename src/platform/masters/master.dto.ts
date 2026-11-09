@@ -1,7 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
-  IsBoolean,
   IsIn,
   IsInt,
   IsOptional,
@@ -13,6 +12,7 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
+import { BooleanQuery } from '../../common/validation/boolean-query.js';
 import { LowerCaseUuid } from '../../common/validation/lower-case-uuid.js';
 import { VersionDto } from '../../common/validation/version.dto.js';
 import { WhenPresent } from '../../common/validation/when-present.js';
@@ -314,9 +314,7 @@ export class MasterQueryDto {
   @ApiPropertyOptional({
     description: 'Super Admin only: also list the entries hidden from pickers',
   })
-  @IsOptional()
-  @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
-  @IsBoolean()
+  @BooleanQuery()
   includeHidden?: boolean;
 
   @ApiPropertyOptional({ format: 'uuid', description: 'States of this country' })

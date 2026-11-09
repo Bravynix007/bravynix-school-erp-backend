@@ -9,6 +9,8 @@ declare module '../../platform/database/schema.js' {
     staff_members: StaffMembersTable;
     staff_educations: StaffEducationsTable;
     staff_emergency_contacts: StaffEmergencyContactsTable;
+    staff_institutions: StaffInstitutionsTable;
+    staff_subjects: StaffSubjectsTable;
   }
 }
 
@@ -50,6 +52,9 @@ export interface StaffMembersTable {
   resignation_date: string | null;
   /** 1 Full time, 2 Part time, 3 Visiting, 4 Contract. */
   employment_type: number | null;
+  /** Set with `access_blocked_by` when the staff role is blocked in this Society (STF-06); both empty otherwise. */
+  access_blocked_at: Date | null;
+  access_blocked_by: string | null;
 }
 
 /** One line of a staff member's education; the list is replaced whole in an edit. */
@@ -79,4 +84,22 @@ export interface StaffEmergencyContactsTable {
   phone_number: string;
   alternate_phone: string | null;
   is_primary: Generated<boolean>;
+}
+
+/** An extra Institution a staff member may see (STF-10); the home Institution is on the record itself. */
+export interface StaffInstitutionsTable {
+  created_at: ColumnType<Date, Date | undefined, never>;
+  created_by: string | null;
+  society_id: string;
+  staff_member_id: string;
+  institution_id: string;
+}
+
+/** A subject a staff member can teach (STF-08); the list is replaced whole. */
+export interface StaffSubjectsTable {
+  created_at: ColumnType<Date, Date | undefined, never>;
+  created_by: string | null;
+  society_id: string;
+  staff_member_id: string;
+  subject_id: string;
 }

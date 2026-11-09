@@ -13,6 +13,11 @@ export interface Grant {
   ownersBlocked: boolean;
   /** The grant's Institution has its staff blocked (section `staff`). */
   staffBlocked: boolean;
+  /**
+   * The person's staff record in this Society is blocked from their profile (STF-06): it stops the Institution Admin
+   * and the Teacher / Staff role there, and nothing else.
+   */
+  accessBlocked: boolean;
 }
 
 export interface NewSession {
@@ -112,7 +117,9 @@ export class SessionRepository {
       home_institution_id: string;
       society_name: string | null;
       staff_blocked: boolean;
-    }>`select * from app_staff_roles(${userId})`.execute(db);
+      access_blocked: boolean;
+    }>`select r.*, app_staff_blocked(r.society_id, ${userId}::uuid) as access_blocked
+      from app_staff_roles(${userId}) r`.execute(db);
     return rows.map((row) => ({
       roleCode: RoleCode.TeacherStaff,
       societyId: row.society_id,
@@ -120,6 +127,7 @@ export class SessionRepository {
       institutionId: row.home_institution_id,
       ownersBlocked: false,
       staffBlocked: row.staff_blocked,
+      accessBlocked: row.access_blocked,
     }));
   }
 
@@ -158,6 +166,10 @@ export class SessionRepository {
           select 1 from app_active_blocks(role_assignments.society_id, role_assignments.user_id) b
           where b.section = 2 and b.institution_id = role_assignments.institution_id
         )`.as('staff_blocked'),
+        sql<boolean>`case when role_assignments.role_code = 3
+          then app_staff_blocked(role_assignments.society_id, role_assignments.user_id) else false end`.as(
+          'access_blocked',
+        ),
       ])
       .where('user_id', '=', userId)
       .where('revoked_at', 'is', null)
@@ -171,6 +183,7 @@ export class SessionRepository {
       institutionId: row.institution_id,
       ownersBlocked: row.owners_blocked,
       staffBlocked: row.staff_blocked,
+      accessBlocked: row.access_blocked,
     }));
   }
 

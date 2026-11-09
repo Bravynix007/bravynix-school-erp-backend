@@ -1,8 +1,10 @@
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { BlockSection } from '../../common/auth/block-section.js';
+import { RoleCode } from '../../common/auth/roles.js';
 import type { ActiveBlock } from './access-block.rules.js';
 import type { RequestScope, ScopeService } from './scope.service.js';
 import { TenancyAccessGate } from './tenancy-access-gate.js';
+import type { TenancyRepository } from './tenancy.repository.js';
 
 const principal = (overrides: Partial<Principal> = {}): Principal => ({
   personId: 'person-1',
@@ -29,8 +31,12 @@ function build(blocks: ActiveBlock[] = [], reached: string[] = []) {
   const forPrincipal = vi.fn<ScopeService['forPrincipal']>().mockResolvedValue({
     institutions: reached.map((id) => ({ id, staffBlocked: false })),
   } as unknown as RequestScope);
-  const gate = new TenancyAccessGate({ activeBlocks, forPrincipal } as unknown as ScopeService);
-  return { gate, activeBlocks, forPrincipal };
+  const staffBlocked = vi.fn<TenancyRepository['staffBlocked']>().mockResolvedValue(false);
+  const gate = new TenancyAccessGate(
+    { activeBlocks, forPrincipal } as unknown as ScopeService,
+    { staffBlocked } as unknown as TenancyRepository,
+  );
+  return { gate, activeBlocks, forPrincipal, staffBlocked };
 }
 
 describe('TenancyAccessGate', () => {
@@ -83,7 +89,37 @@ describe('TenancyAccessGate', () => {
 
   it('leaves a parent to the per-child check, where a request names a child', async () => {
     expect(
-      await build([studentsOf('i1')]).gate.blockedSection(principal({ roleCode: 5 })),
+      await build([studentsOf('i1')]).gate.blockedSection(
+        principal({ roleCode: RoleCode.StudentParent }),
+      ),
     ).toBeNull();
+  });
+
+  describe('staffAccessBlocked (STF-06)', () => {
+    it('asks about the caller’s own staff record in their Society, for the Institution Admin and Teacher / Staff roles', async () => {
+      for (const roleCode of [RoleCode.InstitutionAdmin, RoleCode.TeacherStaff]) {
+        const t = build();
+        t.staffBlocked.mockResolvedValue(true);
+        expect(await t.gate.staffAccessBlocked(principal({ roleCode }))).toBe(true);
+        expect(t.staffBlocked).toHaveBeenCalledWith('society-1', 'person-1');
+      }
+    });
+
+    it('never asks for an Owner, a parent, or a caller with no Society', async () => {
+      const t = build();
+      t.staffBlocked.mockResolvedValue(true);
+      expect(await t.gate.staffAccessBlocked(principal({ roleCode: RoleCode.SocietyOwner }))).toBe(
+        false,
+      );
+      expect(await t.gate.staffAccessBlocked(principal({ roleCode: RoleCode.StudentParent }))).toBe(
+        false,
+      );
+      expect(
+        await t.gate.staffAccessBlocked(
+          principal({ societyId: null, roleCode: RoleCode.TeacherStaff }),
+        ),
+      ).toBe(false);
+      expect(t.staffBlocked).not.toHaveBeenCalled();
+    });
   });
 });

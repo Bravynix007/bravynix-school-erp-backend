@@ -11,7 +11,7 @@ export const seededStaff = personas
     const grant = persona.grants.find((candidate) => candidate.role === 4)!;
     const home = institutions.find((institution) => institution.key === grant.institutions?.[0]);
     if (!home) throw new Error(`Seeded teacher ${persona.key} names no home Institution`);
-    return { persona, home, id: seedId(3401 + index), index };
+    return { persona, grant, home, id: seedId(3401 + index), index };
   });
 
 /** The seeded staff member of a persona, so a test can find its record. */
@@ -23,9 +23,10 @@ export const seededStaffId = (personaKey: string): string => {
 
 /**
  * A staff record for each two-worlds persona that holds the Teacher and Staff role, at the first Institution of the
- * grant, each with one education and one emergency contact, so a test can show one Society's people are hidden from
- * another. The pending, blocked and inactive accounts have records too: the account state is the login's, not the
- * record's. Safe to run twice: rows are keyed by their fixed IDs. The numbers are made up (the 900000 range).
+ * grant, each with one education, one emergency contact and one subject, so a test can show one Society's people are
+ * hidden from another. The Institutions of a grant after the first are the member's extra Institutions. The pending,
+ * blocked and inactive accounts have records too: the account state is the login's, not the record's. Safe to run
+ * twice: rows are keyed by their fixed IDs. The numbers are made up (the 900000 range).
  */
 export async function writeStaffSeed(db: Kysely<unknown>): Promise<void> {
   if (db.isTransaction) return writeIn(db);
@@ -38,7 +39,7 @@ async function writeIn(tx: Kysely<unknown>): Promise<void> {
   }>`select id from class_categories order by display_order limit 1`.execute(tx);
   const categoryId = rows[0]?.id;
   if (!categoryId) throw new Error('Seeded staff need a class category: run the migrations first');
-  for (const { persona, home, id, index } of seededStaff) {
+  for (const { persona, grant, home, id, index } of seededStaff) {
     const societyId = await scopeTo(tx, home.id, 'staff member');
     const [firstName, ...rest] = persona.displayName.split(' ');
     await sql`
@@ -54,6 +55,21 @@ async function writeIn(tx: Kysely<unknown>): Promise<void> {
       values (${seedId(3501 + index)}, ${societyId}, ${id}, 'B.Ed', 'Mathematics', 'Seeded Training College', 2015)
       on conflict (id) do nothing
     `.execute(tx);
+    await sql`
+      insert into staff_subjects (staff_member_id, subject_id, society_id)
+      select ${id}, id, society_id from subjects
+      where society_id = ${societyId} and code = 'MATH'
+      on conflict do nothing
+    `.execute(tx);
+    for (const key of grant.institutions?.slice(1) ?? []) {
+      const extra = institutions.find((institution) => institution.key === key);
+      if (!extra) throw new Error(`Seeded teacher ${persona.key} names an unknown Institution`);
+      await sql`
+        insert into staff_institutions (staff_member_id, institution_id, society_id)
+        values (${id}, ${extra.id}, ${societyId})
+        on conflict do nothing
+      `.execute(tx);
+    }
     await sql`
       insert into staff_emergency_contacts
         (id, society_id, staff_member_id, contact_name, relation, country_code, phone_number, is_primary)

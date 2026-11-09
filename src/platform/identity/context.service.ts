@@ -7,7 +7,13 @@ import { Clock } from '../../common/time/clock.js';
 import { AuditService } from '../audit/index.js';
 import { DatabaseService } from '../database/index.js';
 import { AuthCode, endReasonName, reportedStatus, userTypeFor } from './auth-codes.js';
-import { CONSOLE_CONTEXT, findContext, mobileContexts, type ContextChoice } from './contexts.js';
+import {
+  accessBlockedIn,
+  CONSOLE_CONTEXT,
+  findContext,
+  mobileContexts,
+  type ContextChoice,
+} from './contexts.js';
 import { IdentityRepository } from './identity.repository.js';
 import { SessionRepository } from './session.repository.js';
 import type { SwitchContextDto } from './switch-context.dto.js';
@@ -86,6 +92,10 @@ export class ContextService {
     const grants = await this.sessions.activeGrants(db, principal.personId);
     const chosen = findContext(mobileContexts(grants), request.roleCode, societyId);
     if (!chosen) throw AppException.forbidden(AuthCode.CONTEXT_NOT_AVAILABLE);
+    // A staff record blocked from its profile (STF-06) refuses the role here; a section block does not (API design 10.4).
+    if (accessBlockedIn(grants, request.roleCode, societyId)) {
+      throw AppException.forbidden(ErrorCode.ACCESS_BLOCKED);
+    }
 
     const now = this.clock.now();
     await this.database.transaction({}, async (tx) => {

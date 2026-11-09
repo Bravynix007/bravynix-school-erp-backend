@@ -10,7 +10,8 @@ import { AuditService, type AuditValues } from '../audit/index.js';
 import { DatabaseService, platformTenant, type Tx } from '../database/index.js';
 import { accountBlockedEmail, authenticatorResetEmail } from './account-email.js';
 import { AccountDirectory, type SeatKind } from './account-directory.js';
-import { maskEmail, requireNotSelf } from './account-rules.js';
+import { requireNotSelf } from '../../common/auth/require-not-self.js';
+import { maskEmail } from './account-rules.js';
 import type { NewPersonDto, ChangeEmailDto } from './account.dto.js';
 import { AccountRepository, type AccountRow } from './account.repository.js';
 import {
