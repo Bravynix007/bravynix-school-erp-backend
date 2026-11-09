@@ -127,17 +127,25 @@ describe('Institution Admins: promoted from the staff', () => {
       .execute(ownerDb)
       .then((result) => Number(result.rows[0]!.n));
 
-  /** The record is an extra of `second` and administers it; then `second` is deactivated (INS-05). */
-  const dormant = async () => {
-    const staff = await added();
-    await api('put', `/v1/staff/${staff.id}/institutions`, owner.token, {
-      institutionIds: [second],
-    });
-    await grant(second, staff.id);
+  /**
+   * Each record is an extra of `second` and administers it; then `second` is deactivated (INS-05). Returns the first
+   * record and when its grant was revoked, and the others.
+   */
+  const dormant = async (count = 1) => {
+    const records = [];
+    for (let n = 0; n < count; n += 1) {
+      const staff = await added();
+      await api('put', `/v1/staff/${staff.id}/institutions`, owner.token, {
+        institutionIds: [second],
+      });
+      await grant(second, staff.id);
+      records.push(staff);
+    }
     expect((await api('delete', `/v1/institutions/${second}`, owner.token)).status).toBe(200);
+    const [staff, ...others] = records as [StaffData, ...StaffData[]];
     const [row] = await grantRows(staff.id);
     expect(row).toMatchObject({ revoke_reason: 'institution_deactivated' });
-    return { staff, revokedAt: row!.revoked_at };
+    return { staff, others, revokedAt: row!.revoked_at };
   };
 
   beforeAll(async () => {
@@ -526,13 +534,27 @@ describe('Institution Admins: promoted from the staff', () => {
 
     describe('an Admin grant that went dormant with its Institution', () => {
       it('STF-05 takes it from the record, so a reactivation cannot hand it back, and keeps when it was revoked', async () => {
-        const { staff, revokedAt } = await dormant();
+        const { staff, others, revokedAt } = await dormant(2);
         expect((await api('delete', `/v1/staff/${staff.id}`, owner.token)).status).toBe(200);
         expect(await grantRows(staff.id)).toEqual([
           { institution_id: second, revoked_at: revokedAt, revoke_reason: 'staff_deactivated' },
         ]);
+        // Another record's dormant grant at the same Institution is not the first record's to end.
+        expect((await grantRows(others[0]!.id)).map((row) => row.revoke_reason)).toEqual([
+          'institution_deactivated',
+        ]);
         const entry = (await audit(staff.id)).find((row) => row.action === 'staff.deactivated');
         expect(entry?.new_values).toMatchObject({ adminRevoked: [second] });
+      });
+
+      it('counts as Admin access for who may block: an Institution Admin is refused, the Owner is not', async () => {
+        const { staff } = await dormant();
+        const caller = await added();
+        await grant(first, caller.id);
+        const { token } = await actingAs(caller.person.email, ADMIN);
+        const refused = await api('post', `/v1/staff/${staff.id}/block`, token);
+        expect(refused.status).toBe(403);
+        expect((await api('post', `/v1/staff/${staff.id}/block`, owner.token)).status).toBe(200);
       });
 
       it('STF-13 takes it from a record that moves to another person', async () => {

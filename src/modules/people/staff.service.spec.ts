@@ -739,6 +739,18 @@ describe('StaffService', () => {
         },
       );
 
+      it('counts access that went dormant with its Institution: 403, with nothing written', async () => {
+        const t = build();
+        t.adminAccessOfStaff.mockResolvedValue({ active: [], dormant: ['institution-2'] });
+        expect(await fail(t.service.block(admin, 'staff-1'))).toEqual({
+          status: 403,
+          code: 'FORBIDDEN',
+        });
+        expect(t.update).not.toHaveBeenCalled();
+        expect(t.endStaffAccessSessions).not.toHaveBeenCalled();
+        expect(t.record).not.toHaveBeenCalled();
+      });
+
       it('lets the Society Owner block and unblock them, without asking whether they are an Admin', async () => {
         const t = build();
         t.adminAccessOfStaff.mockResolvedValue({ active: ['institution-1'], dormant: [] });
