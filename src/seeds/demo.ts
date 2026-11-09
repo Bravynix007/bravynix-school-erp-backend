@@ -1,10 +1,12 @@
 import { sql, type Kysely } from 'kysely';
 import {
+  clearScope,
   commonSubjects,
   insertAcademicYears,
   insertClasses,
   insertClassesOffered,
   insertSubjects,
+  scopeTo,
   type SeedAcademicYear,
   type SeedClass,
   type SeedClassesOffered,
@@ -22,8 +24,8 @@ import { DueStatus, dueAmounts } from '../modules/platform-billing/due.rules.js'
  * shows what it would have sent. There are no passwords and no keys: login is by email code, and a Super Admin
  * enrols an authenticator on first sign-in. Safe to run twice: rows are keyed by their fixed IDs.
  *
- * Teachers, students and parents wait for the People module, so none are seeded. Institution Admin grants are
- * written directly, as the Super Admin console and the app cannot add staff yet.
+ * Students and parents arrive later in Phase 4, so none are seeded. Institution Admin grants are written directly, as
+ * the Super Admin console and the app cannot add staff yet; each Admin, and one teacher per school, has a staff record.
  */
 
 const id = (n: number): string => `00000000-0000-7000-8000-${n.toString().padStart(12, '0')}`;
@@ -69,6 +71,8 @@ export const asha = person('asha.rao', 9302, 'Asha', 'Rao');
 export const meera = person('meera.iyer', 9303, 'Meera', 'Iyer');
 export const kavita = person('kavita.nair', 9304, 'Kavita', 'Nair');
 export const suresh = person('suresh.babu', 9305, 'Suresh', 'Babu');
+export const ravi = person('ravi.menon', 9306, 'Ravi', 'Menon');
+export const anita = person('anita.das', 9307, 'Anita', 'Das');
 
 export const societies: DemoSociety[] = [
   {
@@ -236,6 +240,47 @@ export const admins: {
 ];
 
 /**
+ * The staff of Sri Vidya: the two Institution Admins (whose staff records the grants above point at) and one
+ * teacher at each school, each at the home Institution named. The numbers are made up (the 900000 range).
+ */
+export const staff: {
+  id: string;
+  person: DemoPerson;
+  institution: DemoInstitution['code'];
+  employeeCode: string;
+  joiningDate: string;
+}[] = [
+  {
+    id: id(9401),
+    person: kavita,
+    institution: 'SVHS',
+    employeeCode: 'SV-001',
+    joiningDate: '2019-06-03',
+  },
+  {
+    id: id(9402),
+    person: suresh,
+    institution: 'SVPS',
+    employeeCode: 'SV-002',
+    joiningDate: '2020-06-01',
+  },
+  {
+    id: id(9403),
+    person: ravi,
+    institution: 'SVHS',
+    employeeCode: 'SV-101',
+    joiningDate: '2022-06-06',
+  },
+  {
+    id: id(9404),
+    person: anita,
+    institution: 'SVPS',
+    employeeCode: 'SV-102',
+    joiningDate: '2023-06-05',
+  },
+];
+
+/**
  * What BravyNix charges each Institution per student. Sri Vidya High School has
  * two, so the pricing screen shows a history; the dates are fixed so the demo
  * reads the same every day.
@@ -387,7 +432,7 @@ export const dues: {
 /** The financial year 2026-27 that the seeded dues are numbered in, and the first number a live due takes. */
 const DEMO_INVOICE_YEAR = { key: 'FY2026-27', prefix: 'BNX/FY2026-27/', next: dues.length + 1 };
 
-export const people: DemoPerson[] = [superAdmin, asha, meera, kavita, suresh];
+export const people: DemoPerson[] = [superAdmin, asha, meera, kavita, suresh, ravi, anita];
 
 const societyOf = (code: string): DemoSociety => {
   const found = societies.find((s) => s.code === code);
@@ -467,6 +512,8 @@ export async function writeDemoSeed(db: Kysely<unknown>): Promise<void> {
     `.execute(db);
   }
 
+  await insertStaff(db);
+
   for (const r of rates) {
     const institution = institutionOf(r.institution);
     await sql`
@@ -515,4 +562,29 @@ export async function writeDemoSeed(db: Kysely<unknown>): Promise<void> {
     values (3, ${DEMO_INVOICE_YEAR.key}, ${DEMO_INVOICE_YEAR.prefix}, ${DEMO_INVOICE_YEAR.next})
     on conflict on constraint uq_number_sequences_scope do nothing
   `.execute(db);
+}
+
+/** The staff records, written once however often the seed runs; each is scoped to its home Institution's Society. */
+async function insertStaff(db: Kysely<unknown>): Promise<void> {
+  const { rows } = await sql<{
+    id: string;
+  }>`select id from class_categories order by display_order limit 1`.execute(db);
+  const categoryId = rows[0]?.id;
+  if (!categoryId) throw new Error('Demo staff need a class category: run the migrations first');
+  for (const [index, member] of staff.entries()) {
+    const institution = institutionOf(member.institution);
+    const societyId = await scopeTo(db, institution.id, 'staff member');
+    await sql`
+      insert into staff_members
+        (id, society_id, home_institution_id, user_id, employee_code, first_name, last_name, class_category_id,
+         country_code, mobile_number, joining_date, created_by, updated_by)
+      values (${member.id}, ${societyId}, ${institution.id}, ${member.person.id}, ${member.employeeCode},
+        ${member.person.firstName}, ${member.person.lastName}, ${categoryId}, '91',
+        ${`9000002${(100 + index).toString()}`}, ${member.joiningDate}, ${superAdmin.id}, ${superAdmin.id})
+      on conflict (id) do nothing
+    `.execute(db);
+  }
+  await clearScope(db);
+  // The writes above ran as Super Admin; later statements of the seed expect the role to stay set.
+  await sql`select set_config('app.role_code', '1', true)`.execute(db);
 }

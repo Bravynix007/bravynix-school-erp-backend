@@ -146,10 +146,10 @@ describe('AUTH-06 switch context and ME-01', () => {
         societyName: societyA.name,
         isBlocked: false,
       };
-      // A staff record the isolation spec seeds earlier in the run adds a Teacher / Staff context; the
-      // two grants still make one Admin context, and it is the one the session opens in.
+      // A staff record the isolation spec seeds earlier in the run adds a Teacher / Staff context: the two
+      // grants still make one Admin context, and the session opens in it only when it is the one context.
       expect(login.contexts.filter((c) => c.roleCode === 3)).toEqual([expected]);
-      expect(login.session.activeContext).toEqual(expected);
+      expect(login.session.activeContext).toEqual(login.contexts.length === 1 ? expected : null);
     });
 
     it('answers /me for a person with no context, and for a Super Admin on the console', async () => {
