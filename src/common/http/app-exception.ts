@@ -36,7 +36,10 @@ export class AppException extends Error {
     return new AppException(HttpStatus.BAD_REQUEST, ErrorCode.VALIDATION_FAILED, { errors });
   }
 
-  /** A request points at a record that exists but is hidden or deactivated: 422 `REFERENCE_INACTIVE` on that field (API design 12.2). */
+  /**
+   * A request points at a record that exists but is hidden or deactivated: 422 `REFERENCE_INACTIVE` on that field
+   * (API design 12.2).
+   */
   static referenceInactive(field: string): AppException {
     return new AppException(HttpStatus.UNPROCESSABLE_ENTITY, ErrorCode.REFERENCE_INACTIVE, {
       errors: [fieldError(field, ErrorCode.REFERENCE_INACTIVE)],

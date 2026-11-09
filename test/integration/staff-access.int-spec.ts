@@ -572,6 +572,25 @@ describe('staff access: block, subjects and extra Institutions', () => {
       expect((await asTeacherReads(token, second)).status).toBe(423);
     });
 
+    it('does not count a deactivated extra Institution as one the teacher still reaches', async () => {
+      const staff = await added();
+      const extra = await makeInstitution(owner.token);
+      await setInstitutions(staff.id, [extra]);
+      await blocks.setBlock(ownerDb, societyA, first, 2, true);
+      const { token } = await actingAs(staff.person.email, TEACHER);
+      const flag = async () => {
+        const me = await api('get', '/v1/me', token);
+        return (me.body.data as unknown as { contexts: { isBlocked: boolean }[] }).contexts[0]!
+          .isBlocked;
+      };
+      // The active extra keeps the context open; once it is deactivated nothing is left but the blocked home.
+      expect(await flag()).toBe(false);
+      expect((await api('delete', `/v1/institutions/${extra}`, owner.token)).status).toBe(200);
+      expect(await flag()).toBe(true);
+      await blocks.setBlock(ownerDb, societyA, first, 2, false);
+      expect(await flag()).toBe(false);
+    });
+
     it('does not make the Admin of the home Institution reach the extra one', async () => {
       const staff = await added();
       await setInstitutions(staff.id, [second]);
