@@ -8,13 +8,9 @@ import { requireVersion } from '../../common/http/require-version.js';
 import { Clock } from '../../common/time/clock.js';
 import { AuditService, type AuditValues } from '../audit/index.js';
 import { DatabaseService, platformTenant, type Tx } from '../database/index.js';
-import {
-  accountBlockedEmail,
-  authenticatorResetEmail,
-  emailChangedEmail,
-} from './account-email.js';
+import { accountBlockedEmail, authenticatorResetEmail } from './account-email.js';
 import { AccountDirectory, type SeatKind } from './account-directory.js';
-import { emailInUse, maskEmail, requireNotSelf } from './account-rules.js';
+import { maskEmail, requireNotSelf } from './account-rules.js';
 import type { NewPersonDto, ChangeEmailDto } from './account.dto.js';
 import { AccountRepository, type AccountRow } from './account.repository.js';
 import {
@@ -203,6 +199,7 @@ export class PlatformAccountService {
     const now = this.clock.now();
     const email = body.email.toLowerCase();
     const result = await this.database.transaction(platformTenant(principal), async (tx) => {
+      await this.directory.lockIdentities(tx);
       const current = await this.lockedAt(tx, userId, body.version);
       if (
         !(await this.accounts.holdsActiveGrant(tx, userId, [
@@ -217,27 +214,21 @@ export class PlatformAccountService {
       if (await this.accounts.findByEmail(tx, email)) {
         throw AppException.conflict(ErrorCode.EMAIL_IN_USE);
       }
-      const updated = await this.accounts
-        .update(tx, userId, { email, updated_by: principal.personId })
-        .catch((error: unknown) => {
-          throw emailInUse(error);
-        });
-      const sessionsEnded = await this.sessions.endUserSessions(
+      const { person, sessionsEnded } = await this.directory.changeOwnEmail(
         tx,
         userId,
-        SessionEndReason.EmailChanged,
+        email,
+        principal.personId,
         now,
       );
-      await this.mfa.spendTokens(tx, userId, now);
       await this.record(tx, 'account.email_change', userId, {
         before: { email: maskEmail(current.email) },
         after: { email: maskEmail(email), sessions_ended: sessionsEnded },
       });
-      return { user: updated, previous: current.email };
+      return { user: person, previous: current.email };
     });
     if (result.previous !== null) {
-      this.mailer.send(emailChangedEmail(result.previous, 'old'));
-      this.mailer.send(emailChangedEmail(result.user.email, 'new'));
+      this.directory.announceEmailChange(result.previous, result.user.email);
     }
     return accountResource(result.user);
   }

@@ -3,7 +3,7 @@ import { AccountDirectory, type SeatKind } from './account-directory.js';
 import type { AccountRow, AccountRepository } from './account.repository.js';
 import type { BackgroundMailer } from './background-mailer.js';
 import type { MfaRepository } from './mfa.repository.js';
-import type { Grant, SessionRepository } from './session.repository.js';
+import type { SessionRepository } from './session.repository.js';
 
 const tx = {} as Tx;
 const now = new Date('2026-10-26T10:00:00.000Z');
@@ -56,6 +56,7 @@ function build(existing?: AccountRow, taken: number[] = []) {
     lockSeats,
     lockRoleSeparation,
     holdsActiveGrant,
+    findByEmail,
     insertPending,
     activeGrant,
     insertGrant,
@@ -136,10 +137,13 @@ describe('AccountDirectory.grant', () => {
     );
   });
 
-  it('takes no separation lock for a new email, who holds nothing yet', async () => {
+  it('takes the separation lock before it looks the email up, even for a new one', async () => {
     const t = build(undefined);
     await t.directory.grant(tx, owner, { email: 'new@example.com' }, 'admin-1', now);
-    expect(t.lockRoleSeparation).not.toHaveBeenCalled();
+    expect(t.lockRoleSeparation).toHaveBeenCalledWith(tx);
+    expect(t.lockRoleSeparation.mock.invocationCallOrder[0]).toBeLessThan(
+      t.findByEmail.mock.invocationCallOrder[0] ?? 0,
+    );
   });
 
   it('refuses a blocked person, a person who already holds the seat kind, and a full set of seats', async () => {
@@ -319,7 +323,9 @@ const request = (overrides: Partial<Parameters<AccountDirectory['changeStaffEmai
   ...overrides,
 });
 
-function change(options: { existing?: AccountRow; grant?: boolean; staffIn?: string[] } = {}) {
+function change(
+  options: { existing?: AccountRow; grant?: boolean; staffElsewhere?: boolean } = {},
+) {
   const findById = vi.fn<AccountRepository['findById']>().mockResolvedValue(user());
   const findByEmail = vi.fn<AccountRepository['findByEmail']>().mockResolvedValue(options.existing);
   const update = vi
@@ -328,17 +334,16 @@ function change(options: { existing?: AccountRow; grant?: boolean; staffIn?: str
   const insertPending = vi
     .fn<AccountRepository['insertPending']>()
     .mockResolvedValue(user({ id: 'new-1', email: 'new@example.com', first_name: 'Asha' }));
-  const holdsActiveGrant = vi
-    .fn<AccountRepository['holdsActiveGrant']>()
+  const holdsActiveGrant = vi.fn<AccountRepository['holdsActiveGrant']>().mockResolvedValue(false);
+  const holdsGrantOrRestorable = vi
+    .fn<AccountRepository['holdsGrantOrRestorable']>()
     .mockResolvedValue(options.grant ?? false);
   const endRoleSessions = vi.fn<AccountRepository['endRoleSessions']>().mockResolvedValue(1);
   const lockRoleSeparation = vi.fn<AccountRepository['lockRoleSeparation']>().mockResolvedValue();
   const endUserSessions = vi.fn<SessionRepository['endUserSessions']>().mockResolvedValue(3);
-  const staffRoles = vi
-    .fn<SessionRepository['staffRoles']>()
-    .mockResolvedValue(
-      (options.staffIn ?? ['society-1']).map((societyId) => ({ societyId }) as Grant),
-    );
+  const hasStaffElsewhere = vi
+    .fn<SessionRepository['hasStaffElsewhere']>()
+    .mockResolvedValue(options.staffElsewhere ?? false);
   const spendTokens = vi.fn<MfaRepository['spendTokens']>().mockResolvedValue();
   const send = vi.fn<BackgroundMailer['send']>();
   const directory = new AccountDirectory(
@@ -348,19 +353,24 @@ function change(options: { existing?: AccountRow; grant?: boolean; staffIn?: str
       update,
       insertPending,
       holdsActiveGrant,
+      holdsGrantOrRestorable,
       endRoleSessions,
       lockRoleSeparation,
     } as unknown as AccountRepository,
-    { endUserSessions, staffRoles } as unknown as SessionRepository,
+    { endUserSessions, hasStaffElsewhere } as unknown as SessionRepository,
     { spendTokens } as unknown as MfaRepository,
     { send } as unknown as BackgroundMailer,
   );
   return {
     directory,
     findById,
+    findByEmail,
     update,
     insertPending,
+    lockRoleSeparation,
     holdsActiveGrant,
+    holdsGrantOrRestorable,
+    hasStaffElsewhere,
     endRoleSessions,
     endUserSessions,
     spendTokens,
@@ -438,7 +448,7 @@ describe('AccountDirectory.changeStaffEmail', () => {
 
   it.each([
     ['holds a grant', { grant: true }],
-    ['is staff in another Society too', { staffIn: ['society-1', 'society-2'] }],
+    ['is staff in another Society too, active or dormant', { staffElsewhere: true }],
   ])(
     'moves the record to a new person when the old one %s, and leaves their account alone',
     async (_name, options) => {
@@ -456,6 +466,56 @@ describe('AccountDirectory.changeStaffEmail', () => {
     },
   );
 
+  it('counts dormant access as held: grants revoked for a reactivation to restore, and records anywhere', async () => {
+    const t = change();
+    await t.directory.changeStaffEmail(tx, request());
+    expect(t.holdsGrantOrRestorable).toHaveBeenCalledWith(
+      tx,
+      'user-1',
+      [1, 2, 3],
+      ['society_deactivated', 'institution_deactivated'],
+    );
+    expect(t.hasStaffElsewhere).toHaveBeenCalledWith(tx, 'user-1', 'society-1');
+  });
+
+  it('takes the identity lock before it reads anyone, so an access cannot land on a person whose email changes at the same time', async () => {
+    const t = change();
+    await t.directory.changeStaffEmail(tx, request());
+    expect(t.lockRoleSeparation).toHaveBeenCalledWith(tx);
+    expect(t.findById).toHaveBeenCalledWith(tx, 'user-1', true);
+    const lockedAt = t.lockRoleSeparation.mock.invocationCallOrder[0] ?? 0;
+    expect(lockedAt).toBeLessThan(t.findById.mock.invocationCallOrder[0] ?? 0);
+    expect(lockedAt).toBeLessThan(t.findByEmail.mock.invocationCallOrder[0] ?? 0);
+  });
+
+  it('refuses to move the record onto the caller', async () => {
+    const t = change({ existing: user({ id: 'admin-1' }) });
+    await expect(t.directory.changeStaffEmail(tx, request())).rejects.toMatchObject({
+      status: 409,
+      code: 'CANNOT_ACT_ON_SELF',
+    });
+    expect(t.endRoleSessions).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['the email update', 'update'],
+    ['the new person', 'insertPending'],
+  ] as const)(
+    'tells the loser of a race on the email that it is taken, at %s',
+    async (_name, step) => {
+      const duplicate = Object.assign(new Error('duplicate'), {
+        code: '23505',
+        constraint: 'uq_users_email',
+      });
+      const t = change({ grant: step === 'insertPending' });
+      t[step].mockRejectedValue(duplicate);
+      await expect(t.directory.changeStaffEmail(tx, request())).rejects.toMatchObject({
+        status: 409,
+        code: 'EMAIL_IN_USE',
+      });
+    },
+  );
+
   it('answers 404 for a person who is gone', async () => {
     const t = change();
     t.findById.mockResolvedValue(undefined);
@@ -469,6 +529,7 @@ describe('AccountDirectory.changeStaffEmail', () => {
     t.directory.announceStaffEmail(
       {
         kind: 'edited',
+        sessionsEnded: 1,
         previousEmail: 'old@example.com',
         person: { id: 'u', email: 'new@example.com', displayName: 'x', created: false },
       },
@@ -485,6 +546,7 @@ describe('AccountDirectory.changeStaffEmail', () => {
     t.directory.announceStaffEmail(
       {
         kind: 'moved',
+        sessionsEnded: 1,
         previousEmail: 'old@example.com',
         person: { id: 'u', email: 'new@example.com', displayName: 'x', created: true },
       },
@@ -493,6 +555,41 @@ describe('AccountDirectory.changeStaffEmail', () => {
     expect(t.send.mock.calls.map(([message]) => [message.to, message.template])).toEqual([
       ['old@example.com', 'staff-access-moved'],
       ['new@example.com', 'welcome'],
+    ]);
+  });
+});
+
+describe('AccountDirectory.changeOwnEmail', () => {
+  it('changes the email, ends every session and open step, and says how many sessions ended', async () => {
+    const t = change();
+    const changed = await t.directory.changeOwnEmail(
+      tx,
+      'user-1',
+      'new@example.com',
+      'admin-1',
+      now,
+    );
+    expect(changed).toMatchObject({ sessionsEnded: 3, person: { email: 'new@example.com' } });
+    expect(t.update).toHaveBeenCalledWith(tx, 'user-1', {
+      email: 'new@example.com',
+      updated_by: 'admin-1',
+    });
+    expect(t.endUserSessions).toHaveBeenCalledWith(tx, 'user-1', 7, now);
+    expect(t.spendTokens).toHaveBeenCalledWith(tx, 'user-1', now);
+  });
+
+  it('tells the old and the new address, naming the changer when there is one', () => {
+    const t = change();
+    t.directory.announceEmailChange('old@example.com', 'new@example.com');
+    t.directory.announceEmailChange('old@example.com', 'new@example.com', 'your school');
+    const texts = t.send.mock.calls.map(([message]) => message.text);
+    expect(texts[0]).toContain('a platform administrator');
+    expect(texts[2]).toContain('your school');
+    expect(t.send.mock.calls.map(([message]) => message.to)).toEqual([
+      'old@example.com',
+      'new@example.com',
+      'old@example.com',
+      'new@example.com',
     ]);
   });
 });

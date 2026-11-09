@@ -62,9 +62,11 @@ export class AccountRepository {
   }
 
   /**
-   * One grant to an existing person at a time, platform-wide, so a Super Admin
-   * grant and an Owner grant for the same person cannot both pass the
-   * separation check (PRD 5.2). Taken after the seat lock and last of all. It is
+   * One identity change at a time, platform-wide: a grant to an existing person, a staff
+   * record linked by email, and an email change. So a Super Admin grant and an Owner grant
+   * for the same person cannot both pass the separation check (PRD 5.2), and an access
+   * given to the person an email names cannot land on a person whose email is being
+   * changed at the same moment (STF-13). Taken after the seat lock and last of all. It is
    * one lock, not one per person: onboarding grants several people in one
    * transaction, and per-person locks taken in the operator's order deadlock
    * when two onboardings name the same people in the opposite order. Grants are
@@ -135,6 +137,29 @@ export class AccountRepository {
       .where('user_id', '=', userId)
       .where('role_code', 'in', roleCodes)
       .where('revoked_at', 'is', null)
+      .limit(1)
+      .executeTakeFirst();
+    return row !== undefined;
+  }
+
+  /**
+   * Does the person hold a grant of these roles that is active, or was revoked for a reason a reactivation restores?
+   * Such a grant is access that can come back, so it counts as held.
+   */
+  async holdsGrantOrRestorable(
+    db: Db,
+    userId: string,
+    roleCodes: readonly number[],
+    restorableReasons: readonly string[],
+  ): Promise<boolean> {
+    const row = await db
+      .selectFrom('role_assignments')
+      .select('id')
+      .where('user_id', '=', userId)
+      .where('role_code', 'in', roleCodes)
+      .where((eb) =>
+        eb.or([eb('revoked_at', 'is', null), eb('revoke_reason', 'in', restorableReasons)]),
+      )
       .limit(1)
       .executeTakeFirst();
     return row !== undefined;

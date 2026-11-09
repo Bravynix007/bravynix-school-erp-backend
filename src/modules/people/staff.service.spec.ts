@@ -117,9 +117,12 @@ function build(current: StaffRow | null = staff()) {
   });
   const endRoleSessions = vi.fn<AccountDirectory['endRoleSessions']>().mockResolvedValue(2);
   const person = { id: 'user-2', email: 'new@example.com', displayName: 'Meera', created: false };
-  const changeStaffEmail = vi
-    .fn<AccountDirectory['changeStaffEmail']>()
-    .mockResolvedValue({ kind: 'edited', person, previousEmail: 'meera@example.com' });
+  const changeStaffEmail = vi.fn<AccountDirectory['changeStaffEmail']>().mockResolvedValue({
+    kind: 'edited',
+    person,
+    previousEmail: 'meera@example.com',
+    sessionsEnded: 2,
+  });
   const announceStaffEmail = vi.fn<AccountDirectory['announceStaffEmail']>(() => {
     order.push('announce');
   });
@@ -458,7 +461,7 @@ describe('StaffService', () => {
         action: 'staff.email_changed',
         institutionId: 'institution-1',
         before: { email: 'm***@example.com', personId: 'user-1' },
-        after: { email: 'n***@example.com', outcome: 'edited' },
+        after: { email: 'n***@example.com', outcome: 'edited', sessionsEnded: 2 },
       });
       expect(JSON.stringify(audit)).not.toContain('meera@example.com');
       expect(t.announceStaffEmail).toHaveBeenCalledWith(
@@ -471,7 +474,12 @@ describe('StaffService', () => {
 
     it('moves the record to the other person when the directory says so', async () => {
       const t = build();
-      const moved: StaffEmailChange = { kind: 'moved', person, previousEmail: 'meera@example.com' };
+      const moved: StaffEmailChange = {
+        kind: 'moved',
+        person,
+        previousEmail: 'meera@example.com',
+        sessionsEnded: 1,
+      };
       t.changeStaffEmail.mockResolvedValue(moved);
       await t.service.changeEmail(owner, 'staff-1', request);
       expect(t.update.mock.calls[0]![2]).toEqual({ user_id: 'user-2', updated_by: 'owner-1' });
@@ -519,7 +527,7 @@ describe('StaffService', () => {
       t.hasActiveRecord.mockResolvedValue(true);
       t.changeStaffEmail.mockImplementation(async (_tx, change) => {
         await change.vet('user-2');
-        return { kind: 'moved', person, previousEmail: 'meera@example.com' };
+        return { kind: 'moved', person, previousEmail: 'meera@example.com', sessionsEnded: 0 };
       });
       expect(await fail(t.service.changeEmail(owner, 'staff-1', request))).toEqual({
         status: 409,
@@ -536,6 +544,7 @@ describe('StaffService', () => {
         kind: 'moved',
         person,
         previousEmail: 'm@example.com',
+        sessionsEnded: 0,
       });
       t.update.mockRejectedValue(unique('uq_staff_members_society_user'));
       expect(await fail(t.service.changeEmail(owner, 'staff-1', request))).toEqual({

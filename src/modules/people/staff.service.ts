@@ -477,6 +477,7 @@ export class StaffService {
             email: maskEmail(change.person.email),
             personId: row.user_id,
             outcome: change.kind,
+            sessionsEnded: change.sessionsEnded,
           },
         });
         const society = await this.institutions.names(tx, [row.home_institution_id]);

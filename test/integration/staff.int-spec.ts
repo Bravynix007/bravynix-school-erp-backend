@@ -123,6 +123,23 @@ describe('STF-02 to STF-05 staff (API design 9.5)', () => {
   const accountOf = async (address: string) =>
     (await sql<{ id: string }>`select id from users where email = ${address}`.execute(ownerDb))
       .rows[0]?.id;
+  const staffOf = (token: string, institution: string, address: string) =>
+    api('post', '/v1/staff', token, {
+      homeInstitutionId: institution,
+      email: address,
+      firstName: 'Meera',
+      classCategoryId: categoryId,
+      mobile: { countryCode: '91', number: '9876500001' },
+    });
+
+  /** Society B with an Owner and one Institution, for a person who is staff or Owner in two Societies. */
+  const secondSociety = async () => {
+    const society = await makeSociety();
+    const ownerOfB = await fixtures.owner(society);
+    const institution = await makeInstitution(ownerOfB.token);
+    return { society, ownerOfB, institution };
+  };
+
   const personOf = (res: { body: { data: unknown } }) => (res.body.data as StaffData).person;
 
   const list = (token: string, query = '') => api('get', `/v1/staff${query}`, token);
@@ -1103,6 +1120,112 @@ describe('STF-02 to STF-05 staff (API design 9.5)', () => {
       staffUsers.push(personOf(res).id);
       expect(personOf(res).id).not.toBe(staff.person.id);
       expect(await emailOf(staff.person.id)).toBe(staff.person.email);
+    });
+
+    it('counts a record in a deactivated Institution of another Society as held: the record moves to a new person', async () => {
+      const staff = await added();
+      const { ownerOfB, institution } = await secondSociety();
+      expect((await staffOf(ownerOfB.token, institution, staff.person.email)).status).toBe(201);
+      expect((await api('delete', `/v1/institutions/${institution}`, ownerOfB.token)).status).toBe(
+        200,
+      );
+
+      const to = email();
+      const res = await change(staff.id, owner.token, { email: to, version: 1 });
+      expect(res.status).toBe(200);
+      staffUsers.push(personOf(res).id);
+      expect(personOf(res).id).not.toBe(staff.person.id);
+      expect(await emailOf(staff.person.id)).toBe(staff.person.email);
+    });
+
+    it('counts an Owner grant revoked by a deactivated Society as held: the record moves to a new person', async () => {
+      const { society, ownerOfB } = await secondSociety();
+      const staff = await added({ email: ownerOfB.email });
+      expect(staff.person.id).toBe(ownerOfB.person);
+      expect((await api('delete', `/v1/platform/societies/${society}`, admin)).status).toBe(200);
+
+      const to = email();
+      const res = await change(staff.id, owner.token, { email: to, version: 1 });
+      expect(res.status).toBe(200);
+      staffUsers.push(personOf(res).id);
+      expect(personOf(res).id).not.toBe(ownerOfB.person);
+      expect(await emailOf(ownerOfB.person)).toBe(ownerOfB.email);
+    });
+
+    it('counts an Institution Admin grant as held: the record moves to a new person and the Admin keeps their login', async () => {
+      const adminOfSecond = await fixtures.institutionAdmin(societyA, [second]);
+      const staff = await added({ email: adminOfSecond.email, homeInstitutionId: first });
+      expect(staff.person.id).toBe(adminOfSecond.person);
+      const to = email();
+      const res = await change(staff.id, institutionAdmin.token, { email: to, version: 1 });
+      expect(res.status).toBe(200);
+      staffUsers.push(personOf(res).id);
+      expect(personOf(res).id).not.toBe(adminOfSecond.person);
+      expect(await emailOf(adminOfSecond.person)).toBe(adminOfSecond.email);
+      expect((await signInMobile(t, adminOfSecond.email)).contexts.map((c) => c.roleCode)).toEqual([
+        3,
+      ]);
+    });
+
+    it('waits for an email change in flight, so a record added at the old address does not land on the person at the new one', async () => {
+      const staff = await added();
+      const { ownerOfB, institution } = await secondSociety();
+      const moved = email();
+      let request: ReturnType<typeof staffOf> | undefined;
+      let settled = false;
+      await ownerDb.transaction().execute(async (trx) => {
+        // What an email change holds first: the platform-wide identity lock.
+        await sql`select pg_advisory_xact_lock(hashtextextended('grants:role-separation', 0))`.execute(
+          trx,
+        );
+        await sql`update users set email = ${moved} where id = ${staff.person.id}`.execute(trx);
+        request = staffOf(ownerOfB.token, institution, staff.person.email);
+        void request.then(() => {
+          settled = true;
+          return true;
+        });
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        // The change is written but not committed: the add has to wait for it.
+        expect(settled).toBe(false);
+      });
+      const res = await request!;
+      expect(res.status).toBe(201);
+      staffUsers.push(personOf(res).id);
+      // Nobody was at the old address any more, so a new person was made there.
+      expect(personOf(res)).toMatchObject({ email: staff.person.email });
+      expect(personOf(res).id).not.toBe(staff.person.id);
+      expect(await emailOf(staff.person.id)).toBe(moved);
+    });
+
+    it('waits for the person’s row when another change holds it, before it looks at what they hold', async () => {
+      const staff = await added();
+      let request: ReturnType<typeof change> | undefined;
+      let settled = false;
+      await ownerDb.transaction().execute(async (trx) => {
+        await sql`select 1 from users where id = ${staff.person.id} for update`.execute(trx);
+        // The same email writes nothing, so only the lock can make this wait.
+        request = change(staff.id, owner.token, { email: staff.person.email, version: 1 });
+        void request.then(() => {
+          settled = true;
+          return true;
+        });
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        expect(settled).toBe(false);
+      });
+      expect((await request!).status).toBe(200);
+    });
+
+    it('refuses to move a record onto the caller', async () => {
+      const staff = await added();
+      const res = await change(staff.id, institutionAdmin.token, {
+        email: institutionAdmin.email,
+        version: 1,
+      });
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe('CANNOT_ACT_ON_SELF');
+      expect(personOf(await api('get', `/v1/staff/${staff.id}`, owner.token)).id).toBe(
+        staff.person.id,
+      );
     });
 
     it('refuses an email whose person already has a record in this Society, and changes nothing', async () => {

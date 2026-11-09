@@ -3,6 +3,7 @@ export { BackgroundMailer } from './background-mailer.js';
 export { OtpService, type OtpRequest, type OtpRequestResult } from './otp.service.js';
 export {
   AccountDirectory,
+  RESTORABLE_REVOKE_REASONS,
   type GrantedPerson,
   type LinkedPerson,
   type StaffEmailChange,
