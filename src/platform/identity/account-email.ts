@@ -36,19 +36,37 @@ export function accountBlockedEmail(to: string): EmailMessage {
 }
 
 /** Sent to the old and the new address when a person's email is changed, so neither is a surprise. */
-export function emailChangedEmail(to: string, kind: 'old' | 'new'): EmailMessage {
+export function emailChangedEmail(
+  to: string,
+  kind: 'old' | 'new',
+  changedBy = 'a platform administrator',
+): EmailMessage {
   return {
     to,
     template: `email-changed-${kind}`,
     subject: 'The email address of your BravyNix School ERP account was changed',
     text: [
       kind === 'old'
-        ? 'The email address of your account was changed by a platform administrator. You can no longer sign in with this address.'
-        : 'This address is now the sign-in email of a BravyNix School ERP account, changed by a platform administrator.',
+        ? `The email address of your account was changed by ${changedBy}. You can no longer sign in with this address.`
+        : `This address is now the sign-in email of a BravyNix School ERP account, changed by ${changedBy}.`,
       '',
       kind === 'old'
         ? 'If you think this is a mistake, contact BravyNix support.'
         : 'Ask for a login code on the sign-in page to sign in. All earlier sessions have been ended.',
+    ].join('\n'),
+  };
+}
+
+/** Tells a person their staff access moved to another email address; their own account stays as it was. */
+export function staffMovedEmail(to: string): EmailMessage {
+  return {
+    to,
+    template: 'staff-access-moved',
+    subject: 'Your staff access in BravyNix School ERP was moved to another email address',
+    text: [
+      'Your school moved your Teacher / Staff access to another email address. You can no longer sign in to the school with this address.',
+      '',
+      'Your other access, if any, is unchanged. If you think this is a mistake, contact your school.',
     ].join('\n'),
   };
 }

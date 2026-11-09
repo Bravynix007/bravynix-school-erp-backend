@@ -5,10 +5,11 @@ export {
   AccountDirectory,
   type GrantedPerson,
   type LinkedPerson,
+  type StaffEmailChange,
   type SeatKind,
 } from './account-directory.js';
 export { maskEmail } from './account-rules.js';
-export { NewPersonDto } from './account.dto.js';
+export { ChangeEmailDto, NewPersonDto } from './account.dto.js';
 export {
   GrantDirectory,
   OWNER_SORT_FIELDS,

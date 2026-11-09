@@ -192,8 +192,8 @@ export class PlatformAccountService {
   /**
    * PLT-17. Takes effect at once: every session and open authenticator step of
    * the person ends, and the old and the new address are told. An email that
-   * belongs to another person is refused (staff and guardian moves arrive with
-   * the People module).
+   * belongs to another person is refused; a staff record moves to another
+   * person through STF-13, not here.
    */
   async changeEmail(
     principal: Principal,

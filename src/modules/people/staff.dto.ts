@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional, IntersectionType } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
@@ -19,6 +19,7 @@ import {
   MinLength,
   ValidateNested,
 } from 'class-validator';
+import { PageQueryDto } from '../../common/pagination/pagination.js';
 import { AddressDto } from '../../common/validation/address.dto.js';
 import { IsCalendarDate } from '../../common/validation/calendar-date.js';
 import { LowerCaseUuid } from '../../common/validation/lower-case-uuid.js';
@@ -295,3 +296,47 @@ export class UpdateStaffDto extends IntersectionType(
   VersionDto,
   IntersectionType(StaffRequiredChangesDto, StaffDetailsDto),
 ) {}
+
+export const STAFF_SORT_FIELDS = ['name', 'employeeCode', 'joiningDate', 'createdAt'] as const;
+export type StaffSortField = (typeof STAFF_SORT_FIELDS)[number];
+
+/**
+ * STF-01 query: search by name or Employee ID (`q`) and the filters the columns allow today. The class, section,
+ * subject, admin and blocked filters arrive with the tables they read (B4). Query values arrive as strings, so
+ * `status` converts them; a value that is not 0 or 1 fails validation as it stands.
+ */
+export class ListStaffQueryDto extends PageQueryDto {
+  @ApiPropertyOptional({ format: 'uuid', description: 'One Institution the caller reaches' })
+  @IsOptional()
+  @LowerCaseUuid()
+  @IsUUID()
+  institutionId?: string;
+
+  @ApiPropertyOptional({
+    enum: [0, 1],
+    isArray: true,
+    default: [1],
+    description: 'Repeat for both; active only when absent',
+  })
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    (Array.isArray(value) ? value : [value]).map((item: unknown) =>
+      item === '' ? item : Number(item),
+    ),
+  )
+  @IsArray()
+  @IsIn([0, 1], { each: true })
+  status?: number[];
+
+  @ApiPropertyOptional({ format: 'uuid' })
+  @IsOptional()
+  @LowerCaseUuid()
+  @IsUUID()
+  designationId?: string;
+
+  @ApiPropertyOptional({ format: 'uuid' })
+  @IsOptional()
+  @LowerCaseUuid()
+  @IsUUID()
+  classCategoryId?: string;
+}

@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
+import { ApiResult } from '../../common/http/api-result.js';
+import { pageMeta, pageOffset, parseSort } from '../../common/pagination/pagination.js';
 import { RoleCode } from '../../common/auth/roles.js';
 import { AppException } from '../../common/http/app-exception.js';
 import { authorIdsOf } from '../../common/http/author-stamps.js';
@@ -18,14 +20,21 @@ import {
   type Tx,
 } from '../../platform/database/index.js';
 import { FileDirectory, FilePurpose } from '../../platform/files/index.js';
-import { AccountDirectory, PersonDirectory } from '../../platform/identity/index.js';
+import {
+  AccountDirectory,
+  maskEmail,
+  PersonDirectory,
+  type ChangeEmailDto,
+} from '../../platform/identity/index.js';
 import { MasterReferences } from '../../platform/masters/index.js';
 import { InstitutionDirectory, ScopeService } from '../../platform/tenancy/index.js';
-import type {
-  CreateStaffDto,
-  EducationDto,
-  EmergencyContactDto,
-  UpdateStaffDto,
+import {
+  STAFF_SORT_FIELDS,
+  type CreateStaffDto,
+  type EducationDto,
+  type EmergencyContactDto,
+  type ListStaffQueryDto,
+  type UpdateStaffDto,
 } from './staff.dto.js';
 import {
   StaffRepository,
@@ -36,7 +45,12 @@ import {
   type StaffChanges,
   type StaffRow,
 } from './staff.repository.js';
-import { staffResource, type StaffResource } from './staff.resource.js';
+import {
+  staffResource,
+  staffSummary,
+  type StaffResource,
+  type StaffSummary,
+} from './staff.resource.js';
 import { requireValidStaff, staffAuditView } from './staff.rules.js';
 
 const EMPLOYEE_CODE = 'uq_staff_members_home_employee_code';
@@ -123,7 +137,7 @@ const contactKey = (
   );
 
 /**
- * STF-02 to STF-05 (API design 9.5): the staff of a Society, each with a home Institution. Society Owners reach
+ * STF-01 to STF-05 and STF-13 (API design 9.5): the staff of a Society, each with a home Institution. Society Owners reach
  * every active Institution of their Society and Institution Admins their own; a record whose home Institution the
  * caller does not reach is 404, never 403 (SDD 12.4). The teacher's own view, the list, the email change, access
  * controls and identity numbers arrive in the slices after this one.
@@ -231,6 +245,39 @@ export class StaffService {
       });
     this.accounts.welcomeAs({ email: created.email }, RoleCode.TeacherStaff, created.societyName);
     return this.resource(created.row, created.educations, created.contacts, created.email);
+  }
+
+  /**
+   * STF-01: the staff whose home Institution the caller reaches, a page at a time; one Institution when
+   * `institutionId` names it (404 when the caller does not reach it, 423 when it has its staff blocked and the
+   * caller is staff). Active staff only unless `status` asks for others.
+   */
+  async list(principal: Principal, query: ListStaffQueryDto): Promise<ApiResult<StaffSummary[]>> {
+    const scope = await this.scope.forPrincipal(principal);
+    const institutionIds = query.institutionId
+      ? [(await this.scope.requireInstitution(principal, query.institutionId)).institutionId]
+      : (scope.tenant.institutionIds ?? []);
+    const sort = parseSort(query.sort, STAFF_SORT_FIELDS, [{ field: 'name', direction: 'asc' }]);
+    const { rows, total } = await this.database.transaction(scope.tenant, (tx) =>
+      this.staff.page(
+        tx,
+        {
+          q: query.q,
+          institutionIds,
+          statuses: query.status ?? [1],
+          designationId: query.designationId,
+          classCategoryId: query.classCategoryId,
+        },
+        sort,
+        query.limit,
+        pageOffset(query.page, query.limit),
+      ),
+    );
+    const emails = await this.people.emails(rows.map((row) => row.user_id));
+    return ApiResult.list(
+      rows.map((row) => staffSummary(row, emails.get(row.user_id) ?? '')),
+      pageMeta(query.page, query.limit, total),
+    );
   }
 
   /** STF-03: the profile; 404 for a person who is not at an Institution the caller reaches. */
@@ -379,6 +426,78 @@ export class StaffService {
       });
     });
     return { id, status: 0 };
+  }
+
+  /**
+   * STF-13 (API design 6.6): changes the login email of an active staff member, at once. The person's own email
+   * changes when this record is all they hold, else the record moves to the person the email belongs to or to a new
+   * one; either way the sessions of the old login end and the addresses are told. The same email writes nothing and
+   * keeps the version. 409 `EMAIL_IN_USE` (another person who has a record in this Society, or a second request that
+   * took the email first), 409 `ROLE_CONFLICT`, 409 `ACCOUNT_BLOCKED`, 409 `CANNOT_ACT_ON_SELF`.
+   */
+  async changeEmail(
+    principal: Principal,
+    id: string,
+    body: ChangeEmailDto,
+  ): Promise<StaffResource> {
+    const context = await this.contextOf(principal, id);
+    const now = this.clock.now();
+    const done = await this.database
+      .transaction(context.tenant, async (tx) => {
+        const current = await this.lockedActive(tx, id);
+        requireVersion(current, body.version);
+        if (current.user_id === principal.personId) {
+          throw AppException.conflict(ErrorCode.CANNOT_ACT_ON_SELF);
+        }
+        const change = await this.accounts.changeStaffEmail(tx, {
+          userId: current.user_id,
+          societyId: current.society_id,
+          email: body.email,
+          names: { firstName: current.first_name, lastName: current.last_name },
+          by: principal.personId,
+          now,
+          vet: async (personId) => {
+            if (await this.staff.hasActiveRecord(tx, personId, current.society_id)) {
+              throw AppException.conflict(ErrorCode.EMAIL_IN_USE);
+            }
+          },
+        });
+        if (change.kind === 'unchanged') return { row: current, change, societyName: null };
+        const row = await this.staff.update(tx, id, {
+          ...(change.kind === 'moved' ? { user_id: change.person.id } : {}),
+          ...updateStamp(principal.personId),
+        });
+        await this.audit.record(tx, {
+          action: 'staff.email_changed',
+          institutionId: row.home_institution_id,
+          entityType: 'staff_member',
+          entityId: id,
+          before: { email: maskEmail(change.previousEmail), personId: current.user_id },
+          after: {
+            email: maskEmail(change.person.email),
+            personId: row.user_id,
+            outcome: change.kind,
+          },
+        });
+        const society = await this.institutions.names(tx, [row.home_institution_id]);
+        return {
+          row,
+          change,
+          societyName: society.get(row.home_institution_id)?.societyName ?? null,
+        };
+      })
+      .catch((error: unknown) => {
+        throw isDuplicateOn(error, ONE_RECORD_PER_PERSON)
+          ? AppException.conflict(ErrorCode.EMAIL_IN_USE)
+          : error;
+      });
+    if (done.change.kind !== 'unchanged') {
+      this.accounts.announceStaffEmail(done.change, done.societyName);
+    }
+    return this.database.transaction(context.tenant, async (tx) => {
+      const [educations, contacts] = await this.lists(tx, id);
+      return this.resourceIn(tx, done.row, educations, contacts);
+    });
   }
 
   /**

@@ -14,11 +14,15 @@ import { FixtureModule } from '../support/fixture.module.js';
 import { clearLoginState } from '../support/login-state.js';
 import { PlatformFixtures, type SignedInPerson } from '../support/platform-fixtures.js';
 import { removeScratchSocieties } from '../support/scratch-society.js';
+import { signInMobile } from '../support/sessions.js';
 import { createTestApp, type TestApp } from '../support/test-app.js';
 
 const migrationUrl = process.env.TEST_DATABASE_MIGRATION_URL!;
 const superAdmin = personaByKey('SA1');
 const missing = '00000000-0000-7000-8000-00000000ffff';
+
+const namesOf = (res: { body: { data: unknown } }) =>
+  (res.body.data as unknown as { firstName: string }[]).map((row) => row.firstName);
 
 const email = () => `${newId()}@staff.test`;
 
@@ -109,6 +113,33 @@ describe('STF-02 to STF-05 staff (API design 9.5)', () => {
     createdBy: { id: string };
     updatedBy: { id: string };
   }
+
+  const change = (id: string, token: string, fields: object) =>
+    api('put', `/v1/staff/${id}/email`, token, fields);
+  const emailOf = (person: string) =>
+    sql<{ email: string }>`select email from users where id = ${person}`
+      .execute(ownerDb)
+      .then((r) => r.rows[0]?.email);
+  const accountOf = async (address: string) =>
+    (await sql<{ id: string }>`select id from users where email = ${address}`.execute(ownerDb))
+      .rows[0]?.id;
+  const personOf = (res: { body: { data: unknown } }) => (res.body.data as StaffData).person;
+
+  const list = (token: string, query = '') => api('get', `/v1/staff${query}`, token);
+  /** Four people in two Institutions: Zara and Asha at the first, Meera and Dev at the second. */
+  const team = async () => {
+    const zara = await added({ firstName: 'Zara', lastName: 'Khan', employeeCode: 'T-300' });
+    const asha = await added({ firstName: 'Asha', lastName: 'Bose', employeeCode: 'T-100' });
+    const meera = await added({
+      homeInstitutionId: second,
+      firstName: 'Meera',
+      lastName: 'Iyer',
+      employeeCode: 'T-200',
+      designationId,
+    });
+    const dev = await added({ homeInstitutionId: second, firstName: 'Dev', lastName: null });
+    return { zara, asha, meera, dev };
+  };
 
   const audit = (id: string) =>
     readAuditRows<{
@@ -815,6 +846,352 @@ describe('STF-02 to STF-05 staff (API design 9.5)', () => {
       const self = await api('delete', `/v1/staff/${mine.id}`, institutionAdmin.token);
       expect(self.status).toBe(409);
       expect(self.body.code).toBe('CANNOT_ACT_ON_SELF');
+    });
+  });
+
+  describe('STF-01 list', () => {
+    it('lists every active staff member of the Society, by name, with the summary fields and the page meta', async () => {
+      const { asha } = await team();
+      const res = await list(owner.token);
+      expect(res.status).toBe(200);
+      expect(namesOf(res)).toEqual(['Asha', 'Dev', 'Meera', 'Zara']);
+      expect(res.body.meta).toEqual({ page: 1, limit: 20, totalItems: 4, totalPages: 1 });
+      expect((res.body.data as unknown as unknown[])[0]).toEqual({
+        id: asha.id,
+        homeInstitutionId: first,
+        person: asha.person,
+        employeeCode: 'T-100',
+        firstName: 'Asha',
+        lastName: 'Bose',
+        photoFileId: null,
+        designationId: null,
+        classCategoryId: categoryId,
+        mobile: { countryCode: '91', number: '9876500001' },
+        joiningDate: null,
+        status: 1,
+        version: 1,
+      });
+      expect(Object.keys((res.body.data as unknown as object[])[0]!)).not.toContain('educations');
+    });
+
+    it('lists active staff unless a status is asked for, and keeps a deactivated one for its history', async () => {
+      const { zara } = await team();
+      expect((await api('delete', `/v1/staff/${zara.id}`, owner.token)).status).toBe(200);
+      expect(namesOf(await list(owner.token))).toEqual(['Asha', 'Dev', 'Meera']);
+      expect(namesOf(await list(owner.token, '?status=0'))).toEqual(['Zara']);
+      expect(namesOf(await list(owner.token, '?status=0&status=1'))).toEqual([
+        'Asha',
+        'Dev',
+        'Meera',
+        'Zara',
+      ]);
+      expect((await list(owner.token, '?status=2')).status).toBe(400);
+    });
+
+    it('searches by name or Employee ID, without regard to case, and takes % and _ literally', async () => {
+      await team();
+      expect(namesOf(await list(owner.token, '?q=zar'))).toEqual(['Zara']);
+      expect(namesOf(await list(owner.token, '?q=IYER'))).toEqual(['Meera']);
+      expect(namesOf(await list(owner.token, '?q=Asha%20Bose'))).toEqual(['Asha']);
+      expect(namesOf(await list(owner.token, '?q=t-2'))).toEqual(['Meera']);
+      expect(namesOf(await list(owner.token, '?q=T-'))).toEqual(['Asha', 'Meera', 'Zara']);
+      expect(namesOf(await list(owner.token, '?q=%25_'))).toEqual([]);
+      const none = await list(owner.token, '?q=nobody');
+      expect(none.body).toMatchObject({ data: [], meta: { totalItems: 0, totalPages: 0 } });
+      expect((await list(owner.token, '?q=a')).status).toBe(400);
+    });
+
+    it('filters by Institution, designation and class category', async () => {
+      await team();
+      expect(namesOf(await list(owner.token, `?institutionId=${second}`))).toEqual([
+        'Dev',
+        'Meera',
+      ]);
+      expect(namesOf(await list(owner.token, `?designationId=${designationId}`))).toEqual([
+        'Meera',
+      ]);
+      expect(namesOf(await list(owner.token, `?classCategoryId=${categoryId}`))).toHaveLength(4);
+      expect(namesOf(await list(owner.token, `?classCategoryId=${missing}`))).toEqual([]);
+      expect((await list(owner.token, '?institutionId=nope')).status).toBe(400);
+    });
+
+    it('sorts by the allowed fields, adds the ID last, and pages without repeating or skipping', async () => {
+      await team();
+      expect(namesOf(await list(owner.token, '?sort=-name'))).toEqual([
+        'Zara',
+        'Meera',
+        'Dev',
+        'Asha',
+      ]);
+      // A member without an Employee ID sorts last in either direction.
+      expect(namesOf(await list(owner.token, '?sort=employeeCode'))).toEqual([
+        'Asha',
+        'Meera',
+        'Zara',
+        'Dev',
+      ]);
+      expect(namesOf(await list(owner.token, '?sort=-employeeCode'))).toEqual([
+        'Zara',
+        'Meera',
+        'Asha',
+        'Dev',
+      ]);
+      const pages = [
+        namesOf(await list(owner.token, '?limit=3&page=1')),
+        namesOf(await list(owner.token, '?limit=3&page=2')),
+      ];
+      expect(pages).toEqual([['Asha', 'Dev', 'Meera'], ['Zara']]);
+      const past = await list(owner.token, '?limit=3&page=9');
+      expect(past.body).toMatchObject({
+        data: [],
+        meta: { page: 9, totalItems: 4, totalPages: 2 },
+      });
+      expect((await list(owner.token, '?sort=salary')).status).toBe(400);
+      expect((await list(owner.token, '?limit=101')).status).toBe(400);
+    });
+
+    it('shows an Institution Admin their own Institution’s staff only, and 404 for another', async () => {
+      await team();
+      expect(namesOf(await list(institutionAdmin.token))).toEqual(['Asha', 'Zara']);
+      expect((await list(institutionAdmin.token, `?institutionId=${second}`)).status).toBe(404);
+      expect(namesOf(await list(institutionAdmin.token, `?institutionId=${first}`))).toEqual([
+        'Asha',
+        'Zara',
+      ]);
+    });
+
+    it('shows nothing of another Society, and 404 for its Institution', async () => {
+      await team();
+      const res = await list(otherOwner.token);
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ data: [], meta: { totalItems: 0 } });
+      expect((await list(otherOwner.token, `?institutionId=${first}`)).status).toBe(404);
+    });
+
+    it('is for admins: a teacher and the Super Admin’s platform token get 403', async () => {
+      const { asha } = await team();
+      const teacher = await signInMobile(t, asha.person.email);
+      expect((await list(teacher.accessToken)).status).toBe(403);
+      expect((await list(admin)).status).toBe(403);
+    });
+
+    it('stops an Institution Admin whose Institution has its staff blocked, and not the Owner', async () => {
+      await team();
+      await blocks.setBlock(ownerDb, societyA, first, 2, true);
+      const stopped = await list(institutionAdmin.token);
+      expect(stopped.status).toBe(423);
+      expect(stopped.body.code).toBe('SECTION_BLOCKED');
+      expect(namesOf(await list(owner.token))).toEqual(['Asha', 'Dev', 'Meera', 'Zara']);
+    });
+  });
+
+  describe('STF-13 change the login email', () => {
+    it('changes the email of a person who holds only this record: same person, sessions ended, both addresses told, audited masked', async () => {
+      const staff = await added();
+      const { accessToken } = await signInMobile(t, staff.person.email);
+      expect((await api('get', `/v1/staff/${staff.id}`, accessToken)).status).toBe(200);
+      const to = `z${email()}`.toUpperCase();
+
+      const res = await change(staff.id, institutionAdmin.token, { email: to, version: 1 });
+      expect(res.status).toBe(200);
+      expect(res.body.data).toMatchObject({
+        id: staff.id,
+        version: 2,
+        person: { id: staff.person.id, email: to.toLowerCase() },
+        updatedBy: { id: institutionAdmin.person },
+      });
+      expect(await emailOf(staff.person.id)).toBe(to.toLowerCase());
+      // The session the old email opened ends at once.
+      expect((await api('get', `/v1/staff/${staff.id}`, accessToken)).status).toBe(401);
+      expect(t.email.latest(staff.person.email, 'email-changed-old')?.text).toContain(
+        'your school',
+      );
+      expect(t.email.latest(to.toLowerCase(), 'email-changed-new')).toBeDefined();
+      // The new address signs in as the same teacher.
+      const login = await signInMobile(t, to.toLowerCase());
+      expect(login.contexts).toEqual([
+        expect.objectContaining({ roleCode: 4, societyId: societyA }),
+      ]);
+
+      const entry = (await audit(staff.id)).find((e) => e.action === 'staff.email_changed');
+      expect(entry).toMatchObject({
+        actor_user_id: institutionAdmin.person,
+        institution_id: first,
+        old_values: { email: `${staff.person.email.slice(0, 1)}***@staff.test` },
+        new_values: { email: 'z***@staff.test', outcome: 'edited' },
+      });
+      expect(JSON.stringify(entry)).not.toContain(staff.person.email);
+      expect(JSON.stringify(entry)).not.toContain(to.toLowerCase());
+    });
+
+    it('writes nothing for the email the person already has, whatever its case', async () => {
+      const staff = await added();
+      const { accessToken } = await signInMobile(t, staff.person.email);
+      const res = await change(staff.id, owner.token, {
+        email: staff.person.email.toUpperCase(),
+        version: 1,
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.data).toMatchObject({ version: 1, person: { email: staff.person.email } });
+      expect((await api('get', `/v1/staff/${staff.id}`, accessToken)).status).toBe(200);
+      expect((await audit(staff.id)).some((e) => e.action === 'staff.email_changed')).toBe(false);
+      expect(t.email.latest(staff.person.email, 'email-changed-old')).toBeUndefined();
+    });
+
+    it('moves the record to the person the email belongs to, and leaves the old account as it was', async () => {
+      const staff = await added();
+      const { accessToken } = await signInMobile(t, staff.person.email);
+      const other = await fixtures.institutionAdmin(societyA, [second]);
+
+      const res = await change(staff.id, owner.token, {
+        email: other.email.toUpperCase(),
+        version: 1,
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.data).toMatchObject({
+        id: staff.id,
+        version: 2,
+        person: { id: other.person, email: other.email },
+      });
+      expect(await emailOf(staff.person.id)).toBe(staff.person.email);
+      expect((await api('get', `/v1/staff/${staff.id}`, accessToken)).status).toBe(401);
+      expect((await signInMobile(t, staff.person.email)).contexts).toEqual([]);
+      const moved = await signInMobile(t, other.email);
+      expect(moved.contexts.map((c) => c.roleCode).toSorted()).toEqual([3, 4]);
+      expect(t.email.latest(staff.person.email, 'staff-access-moved')).toBeDefined();
+      expect(t.email.latest(other.email, 'welcome')?.variables).toMatchObject({ role: 'Teacher' });
+      const entry = (await audit(staff.id)).find((e) => e.action === 'staff.email_changed');
+      expect(entry?.new_values).toMatchObject({ outcome: 'moved', personId: other.person });
+    });
+
+    it('does not change the email of a person who holds more: the record moves to a new person and the Owner keeps their login', async () => {
+      const staff = await added({ email: owner.email });
+      expect(staff.person.id).toBe(owner.person);
+      const to = email();
+      const res = await change(staff.id, institutionAdmin.token, { email: to, version: 1 });
+      expect(res.status).toBe(200);
+      expect(personOf(res).email).toBe(to);
+      expect(personOf(res).id).not.toBe(owner.person);
+      staffUsers.push(personOf(res).id);
+      expect(await emailOf(owner.person)).toBe(owner.email);
+      const ownerLogin = await signInMobile(t, owner.email);
+      expect(ownerLogin.contexts.map((c) => c.roleCode)).toEqual([2]);
+      const created = await signInMobile(t, to);
+      expect(created.contexts).toEqual([expect.objectContaining({ roleCode: 4 })]);
+      const { rows } = await sql<{ first_name: string | null; account_status: number }>`
+        select first_name, account_status from users where email = ${to}`.execute(ownerDb);
+      expect(rows[0]).toEqual({ first_name: 'Meera', account_status: 1 });
+    });
+
+    it('does not change the email of a person who is staff in another Society too', async () => {
+      const staff = await added();
+      const elsewhere = await api('post', '/v1/institutions', otherOwner.token, {
+        name: 'Hill School',
+        code: `I${newId().slice(-10)}`,
+        address: { line1: '1 Hill Road' },
+      });
+      await api('post', '/v1/staff', otherOwner.token, {
+        homeInstitutionId: elsewhere.body.data.id,
+        email: staff.person.email,
+        firstName: 'Meera',
+        classCategoryId: categoryId,
+        mobile: { countryCode: '91', number: '9876500001' },
+      });
+      const to = email();
+      const res = await change(staff.id, owner.token, { email: to, version: 1 });
+      expect(res.status).toBe(200);
+      staffUsers.push(personOf(res).id);
+      expect(personOf(res).id).not.toBe(staff.person.id);
+      expect(await emailOf(staff.person.id)).toBe(staff.person.email);
+    });
+
+    it('refuses an email whose person already has a record in this Society, and changes nothing', async () => {
+      const staff = await added();
+      const colleague = await added({ homeInstitutionId: second });
+      const res = await change(staff.id, owner.token, {
+        email: colleague.person.email,
+        version: 1,
+      });
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe('EMAIL_IN_USE');
+      const read = await api('get', `/v1/staff/${staff.id}`, owner.token);
+      expect(read.body.data).toMatchObject({ version: 1, person: { id: staff.person.id } });
+    });
+
+    it('lets a person whose record here ended take a record, and refuses a Super Admin and a blocked person', async () => {
+      const staff = await added();
+      const earlier = await added({ homeInstitutionId: second });
+      expect((await api('delete', `/v1/staff/${earlier.id}`, owner.token)).status).toBe(200);
+      const back = await change(staff.id, owner.token, { email: earlier.person.email, version: 1 });
+      expect(back.status).toBe(200);
+      expect(personOf(back).id).toBe(earlier.person.id);
+
+      const again = await added();
+      const conflict = await change(again.id, owner.token, { email: superAdmin.email, version: 1 });
+      expect(conflict.status).toBe(409);
+      expect(conflict.body.code).toBe('ROLE_CONFLICT');
+
+      const blocked = await fixtures.institutionAdmin(societyA, [second]);
+      await sql`update users set account_status = 2, blocked_at = now() where id = ${blocked.person}`.execute(
+        ownerDb,
+      );
+      const refused = await change(again.id, owner.token, { email: blocked.email, version: 1 });
+      expect(refused.status).toBe(409);
+      expect(refused.body.code).toBe('ACCOUNT_BLOCKED');
+      expect(await emailOf(again.person.id)).toBe(again.person.email);
+    });
+
+    it('checks the version, the body, the record and the caller', async () => {
+      const staff = await added();
+      const to = email();
+      const stale = await change(staff.id, owner.token, { email: to, version: 9 });
+      expect(stale.status).toBe(409);
+      expect(stale.body.code).toBe('VERSION_CONFLICT');
+      expect(
+        (await change(staff.id, owner.token, { email: 'not-an-email', version: 1 })).status,
+      ).toBe(400);
+      expect((await change(staff.id, owner.token, { version: 1 })).status).toBe(400);
+      expect((await change(staff.id, owner.token, { email: to })).status).toBe(400);
+      expect((await change(missing, owner.token, { email: to, version: 1 })).status).toBe(404);
+
+      const mine = await added({ email: institutionAdmin.email }, owner.token);
+      const self = await change(mine.id, institutionAdmin.token, { email: to, version: 1 });
+      expect(self.status).toBe(409);
+      expect(self.body.code).toBe('CANNOT_ACT_ON_SELF');
+
+      expect((await api('delete', `/v1/staff/${staff.id}`, owner.token)).status).toBe(200);
+      expect((await change(staff.id, owner.token, { email: to, version: 2 })).status).toBe(404);
+    });
+
+    it('is the home Institution’s Admin or the Society’s Owner, and nobody else', async () => {
+      const homeSecond = await added({ homeInstitutionId: second });
+      const to = email();
+      // An Admin of the first Institution does not reach the second; another Society's Owner reaches nothing here.
+      expect(
+        (await change(homeSecond.id, institutionAdmin.token, { email: to, version: 1 })).status,
+      ).toBe(404);
+      expect(
+        (await change(homeSecond.id, otherOwner.token, { email: to, version: 1 })).status,
+      ).toBe(404);
+      expect((await change(homeSecond.id, admin, { email: to, version: 1 })).status).toBe(403);
+      const teacher = await signInMobile(t, homeSecond.person.email);
+      expect(
+        (await change(homeSecond.id, teacher.accessToken, { email: to, version: 1 })).status,
+      ).toBe(403);
+      expect(await emailOf(homeSecond.person.id)).toBe(homeSecond.person.email);
+    });
+
+    it('lets exactly one of two requests that move records to one person win', async () => {
+      const a = await added();
+      const b = await added({ homeInstitutionId: second });
+      const target = await fixtures.institutionAdmin(societyA, [first]);
+      const results = await Promise.all([
+        change(a.id, owner.token, { email: target.email, version: 1 }),
+        change(b.id, owner.token, { email: target.email, version: 1 }),
+      ]);
+      expect(results.map((r) => r.status).toSorted()).toEqual([200, 409]);
+      expect(results.find((r) => r.status === 409)?.body.code).toBe('EMAIL_IN_USE');
+      expect(await accountOf(target.email)).toBe(target.person);
     });
   });
 
