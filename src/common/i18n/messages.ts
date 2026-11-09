@@ -73,6 +73,11 @@ const en: Catalogue = {
   EMAIL_IN_USE: 'This email already belongs to another person',
   EMPLOYEE_ID_TAKEN: 'Another active staff member of this Institution has this Employee ID',
   CANNOT_ACT_ON_SELF: 'You cannot do this to your own account',
+  ALREADY_ADMIN: 'This person is already an Admin of this Institution',
+  ADMIN_ACCESS_HELD: 'This person is an Admin of this Institution; revoke that access first',
+  STAFF_BLOCKED: 'This staff member is blocked; lift the block first',
+  STAFF_NOT_AT_INSTITUTION:
+    'This person works at another Institution; make this one their home or an extra Institution first',
   NOT_LOCKED: 'This account is not locked',
   AUTHENTICATOR_LOCKED: 'The authenticator is locked; lift the lock first',
   // Platform dues (API design 10.22)

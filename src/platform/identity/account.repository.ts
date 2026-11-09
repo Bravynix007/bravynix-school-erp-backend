@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { sql, type Selectable, type Updateable } from 'kysely';
+import { RoleCode } from '../../common/auth/roles.js';
 import { newId } from '../../common/ids/ids.js';
 import type { Db, Tx } from '../database/index.js';
 import { AccountStatus } from './auth-codes.js';
@@ -128,6 +129,49 @@ export class AccountRepository {
       .where('society_id', societyId === null ? 'is' : '=', societyId)
       .where('revoked_at', 'is', null)
       .executeTakeFirst();
+  }
+
+  /** Gives the person Institution Admin access to one Institution, tied to their staff record (API design 10.5). */
+  async insertAdminGrant(
+    tx: Tx,
+    grant: {
+      userId: string;
+      societyId: string;
+      institutionId: string;
+      staffMemberId: string;
+      by: string;
+      now: Date;
+    },
+  ): Promise<GrantRow> {
+    return tx
+      .insertInto('role_assignments')
+      .values({
+        user_id: grant.userId,
+        role_code: RoleCode.InstitutionAdmin,
+        society_id: grant.societyId,
+        institution_id: grant.institutionId,
+        staff_member_id: grant.staffMemberId,
+        created_by: grant.by,
+        created_at: grant.now,
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+  }
+
+  /** The active Institution Admin grants of a staff record, one for each Institution. */
+  async activeAdminGrantsOfStaff(
+    tx: Tx,
+    staffMemberId: string,
+    institutionId?: string,
+  ): Promise<GrantRow[]> {
+    let query = tx
+      .selectFrom('role_assignments')
+      .selectAll()
+      .where('staff_member_id', '=', staffMemberId)
+      .where('role_code', '=', RoleCode.InstitutionAdmin)
+      .where('revoked_at', 'is', null);
+    if (institutionId !== undefined) query = query.where('institution_id', '=', institutionId);
+    return query.execute();
   }
 
   async holdsActiveGrant(db: Db, userId: string, roleCodes: readonly number[]): Promise<boolean> {

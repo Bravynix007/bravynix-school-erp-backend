@@ -6,6 +6,7 @@ import type { DatabaseService, Tx } from '../../platform/database/index.js';
 import type { FileDirectory } from '../../platform/files/index.js';
 import type {
   AccountDirectory,
+  GrantDirectory,
   PersonDirectory,
   StaffEmailChange,
 } from '../../platform/identity/index.js';
@@ -140,6 +141,12 @@ function build(current: StaffRow | null = staff()) {
     previousEmail: 'meera@example.com',
     sessionsEnded: 2,
   });
+  const revokeAdminAccessOfStaff = vi
+    .fn<AccountDirectory['revokeAdminAccessOfStaff']>()
+    .mockResolvedValue({ institutionIds: [], sessionsEnded: 0 });
+  const adminInstitutionIdsOfStaff = vi
+    .fn<GrantDirectory['adminInstitutionIdsOfStaff']>()
+    .mockResolvedValue([]);
   const announceStaffEmail = vi.fn<AccountDirectory['announceStaffEmail']>(() => {
     order.push('announce');
   });
@@ -171,9 +178,11 @@ function build(current: StaffRow | null = staff()) {
       welcomeAs,
       endRoleSessions,
       endStaffAccessSessions,
+      revokeAdminAccessOfStaff,
       changeStaffEmail,
       announceStaffEmail,
     } as unknown as AccountDirectory,
+    { adminInstitutionIdsOfStaff } as unknown as GrantDirectory,
     {
       describe: vi.fn<PersonDirectory['describe']>().mockResolvedValue(new Map()),
       emails: vi
@@ -218,6 +227,8 @@ function build(current: StaffRow | null = staff()) {
     welcomeAs,
     endRoleSessions,
     endStaffAccessSessions,
+    revokeAdminAccessOfStaff,
+    adminInstitutionIdsOfStaff,
     replaceSubjects,
     replaceInstitutions,
     subjectIds,
@@ -492,6 +503,29 @@ describe('StaffService', () => {
       });
     });
 
+    it('takes the Admin grants of the record with it and counts their sessions', async () => {
+      const t = build();
+      t.revokeAdminAccessOfStaff.mockResolvedValue({
+        institutionIds: ['institution-1', 'institution-2'],
+        sessionsEnded: 3,
+      });
+      await t.service.deactivate(owner, 'staff-1');
+      expect(t.revokeAdminAccessOfStaff).toHaveBeenCalledWith(
+        expect.anything(),
+        'staff-1',
+        'owner-1',
+        'staff_deactivated',
+        expect.any(Date),
+      );
+      expect(t.record.mock.calls[0]![1]).toMatchObject({
+        after: {
+          status: 0,
+          sessionsEnded: 5,
+          adminRevoked: ['institution-1', 'institution-2'],
+        },
+      });
+    });
+
     it('refuses the caller’s own record and a record already deactivated', async () => {
       const own = build(staff({ user_id: 'owner-1' }));
       expect(await fail(own.service.deactivate(owner, 'staff-1'))).toEqual({
@@ -542,12 +576,14 @@ describe('StaffService', () => {
         person,
         previousEmail: 'meera@example.com',
         sessionsEnded: 1,
+        adminRevoked: ['institution-1'],
       };
       t.changeStaffEmail.mockResolvedValue(moved);
       await t.service.changeEmail(owner, 'staff-1', request);
+      expect(t.changeStaffEmail.mock.calls[0]![1]).toMatchObject({ staffMemberId: 'staff-1' });
       expect(t.update.mock.calls[0]![2]).toEqual({ user_id: 'user-2', updated_by: 'owner-1' });
       expect(t.record.mock.calls[0]![1]).toMatchObject({
-        after: { personId: 'user-2', outcome: 'moved' },
+        after: { personId: 'user-2', outcome: 'moved', adminRevoked: ['institution-1'] },
       });
     });
 
@@ -590,7 +626,13 @@ describe('StaffService', () => {
       t.hasActiveRecord.mockResolvedValue(true);
       t.changeStaffEmail.mockImplementation(async (_tx, change) => {
         await change.vet('user-2');
-        return { kind: 'moved', person, previousEmail: 'meera@example.com', sessionsEnded: 0 };
+        return {
+          kind: 'moved',
+          person,
+          previousEmail: 'meera@example.com',
+          sessionsEnded: 0,
+          adminRevoked: [],
+        };
       });
       expect(await fail(t.service.changeEmail(owner, 'staff-1', request))).toEqual({
         status: 409,
@@ -608,6 +650,7 @@ describe('StaffService', () => {
         person,
         previousEmail: 'm@example.com',
         sessionsEnded: 0,
+        adminRevoked: [],
       });
       t.update.mockRejectedValue(unique('uq_staff_members_society_user'));
       expect(await fail(t.service.changeEmail(owner, 'staff-1', request))).toEqual({
@@ -758,6 +801,22 @@ describe('StaffService', () => {
         before: { institutionIds: ['institution-2'] },
         after: { institutionIds: ['institution-2', 'institution-3'] },
       });
+    });
+
+    it('refuses to drop an Institution the person is an Admin of, and keeps the ones that stay', async () => {
+      const t = build();
+      t.institutionIds.mockResolvedValue(['institution-2', 'institution-3']);
+      t.adminInstitutionIdsOfStaff.mockResolvedValue(['institution-3']);
+      expect(
+        await fail(
+          t.service.setInstitutions(owner, 'staff-1', { institutionIds: ['institution-2'] }),
+        ),
+      ).toEqual({ status: 409, code: 'ADMIN_ACCESS_HELD' });
+      expect(t.replaceInstitutions).not.toHaveBeenCalled();
+      await t.service.setInstitutions(owner, 'staff-1', {
+        institutionIds: ['institution-3', 'institution-4'],
+      });
+      expect(t.replaceInstitutions).toHaveBeenCalledTimes(1);
     });
 
     it('writes nothing for the same list', async () => {

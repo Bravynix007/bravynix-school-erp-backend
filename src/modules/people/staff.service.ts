@@ -23,6 +23,7 @@ import {
 import { FileDirectory, FilePurpose } from '../../platform/files/index.js';
 import {
   AccountDirectory,
+  GrantDirectory,
   maskEmail,
   PersonDirectory,
   type ChangeEmailDto,
@@ -57,6 +58,9 @@ import {
   type StaffSummary,
 } from './staff.resource.js';
 import { requireValidStaff, staffAuditView } from './staff.rules.js';
+
+/** Why the Admin grants of a staff record were revoked when the record was deactivated. */
+const STAFF_DEACTIVATED = 'staff_deactivated';
 
 const EMPLOYEE_CODE = 'uq_staff_members_home_employee_code';
 const ONE_RECORD_PER_PERSON = 'uq_staff_members_society_user';
@@ -154,6 +158,7 @@ export class StaffService {
     private readonly staff: StaffRepository,
     private readonly scope: ScopeService,
     private readonly accounts: AccountDirectory,
+    private readonly grants: GrantDirectory,
     private readonly people: PersonDirectory,
     private readonly masters: MasterReferences,
     private readonly files: FileDirectory,
@@ -407,8 +412,9 @@ export class StaffService {
 
   /**
    * STF-05: deactivates a staff member; nothing is deleted, and the Employee ID is free again. Their sessions as
-   * staff end at once. Admin access and teaching assignments end here too once those exist. 404 when already
-   * deactivated; 409 `CANNOT_ACT_ON_SELF` for the caller's own record.
+   * staff end at once, and so do their Institution Admin grants and the Admin sessions (INS-10). Teaching assignments
+   * end here too once those exist. 404 when already deactivated; 409 `CANNOT_ACT_ON_SELF` for the caller's own
+   * record.
    */
   async deactivate(principal: Principal, id: string): Promise<{ id: string; status: 0 }> {
     const context = await this.contextOf(principal, id);
@@ -419,20 +425,31 @@ export class StaffService {
         status: 0,
         ...updateStamp(principal.personId),
       });
-      const ended = await this.accounts.endRoleSessions(
+      const now = this.clock.now();
+      // The access belongs to the record: its Admin grants end with it, and the Admin sessions with them.
+      const admin = await this.accounts.revokeAdminAccessOfStaff(
         tx,
-        current.user_id,
-        RoleCode.TeacherStaff,
-        current.society_id,
-        this.clock.now(),
+        id,
+        principal.personId,
+        STAFF_DEACTIVATED,
+        now,
       );
+      const ended =
+        admin.sessionsEnded +
+        (await this.accounts.endRoleSessions(
+          tx,
+          current.user_id,
+          RoleCode.TeacherStaff,
+          current.society_id,
+          now,
+        ));
       await this.audit.record(tx, {
         action: 'staff.deactivated',
         institutionId: row.home_institution_id,
         entityType: 'staff_member',
         entityId: id,
         before: { status: current.status },
-        after: { status: 0, sessionsEnded: ended },
+        after: { status: 0, sessionsEnded: ended, adminRevoked: admin.institutionIds },
       });
     });
     return { id, status: 0 };
@@ -545,6 +562,16 @@ export class StaffService {
       const current = await this.lockedActive(tx, id);
       const before = await this.staff.institutionIds(tx, id);
       if (sameIds(before, body.institutionIds)) return this.resourceOf(tx, current);
+      // An Admin of an Institution must keep it as a home or an extra Institution: revoke the access first.
+      const dropped = new Set(await this.grants.adminInstitutionIdsOfStaff(tx, id));
+      const kept = new Set(body.institutionIds);
+      if (
+        [...dropped].some(
+          (institutionId) => before.includes(institutionId) && !kept.has(institutionId),
+        )
+      ) {
+        throw AppException.conflict(ErrorCode.ADMIN_ACCESS_HELD);
+      }
       const added = body.institutionIds.flatMap((institutionId, index) =>
         before.includes(institutionId)
           ? []
@@ -596,6 +623,7 @@ export class StaffService {
         requireVersion(current, body.version);
         requireNotSelf(principal.personId, current.user_id);
         const change = await this.accounts.changeStaffEmail(tx, {
+          staffMemberId: id,
           userId: current.user_id,
           societyId: current.society_id,
           email: body.email,
@@ -624,6 +652,7 @@ export class StaffService {
             personId: row.user_id,
             outcome: change.kind,
             sessionsEnded: change.sessionsEnded,
+            ...(change.kind === 'moved' ? { adminRevoked: change.adminRevoked } : {}),
           },
         });
         const society = await this.institutions.names(tx, [row.home_institution_id]);

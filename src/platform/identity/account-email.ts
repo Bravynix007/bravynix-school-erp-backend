@@ -71,6 +71,30 @@ export function staffMovedEmail(to: string): EmailMessage {
   };
 }
 
+/** Tells a person their Institution Admin access to an Institution was given or taken away. */
+export function adminAccessEmail(
+  to: string,
+  kind: 'granted' | 'revoked',
+  institutionName: string,
+): EmailMessage {
+  return {
+    to,
+    template: `admin-access-${kind}`,
+    subject:
+      kind === 'granted'
+        ? `You are now an Admin of ${institutionName} on BravyNix School ERP`
+        : `Your Admin access to ${institutionName} on BravyNix School ERP was removed`,
+    text: [
+      kind === 'granted'
+        ? `You have been given Institution Admin access to ${institutionName}. Sign in as usual and choose the Admin role.`
+        : `Your Institution Admin access to ${institutionName} was removed, and you have been signed out of the Admin role. Your other access, if any, is unchanged.`,
+      '',
+      'If you think this is a mistake, contact your school.',
+    ].join('\n'),
+    variables: { institution: institutionName },
+  };
+}
+
 /** Tells a Super Admin their authenticator was removed, so they know to set it up again at the next sign-in. */
 export function authenticatorResetEmail(to: string): EmailMessage {
   return {

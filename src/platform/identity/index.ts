@@ -4,6 +4,9 @@ export { OtpService, type OtpRequest, type OtpRequestResult } from './otp.servic
 export {
   AccountDirectory,
   RESTORABLE_REVOKE_REASONS,
+  STAFF_MOVED,
+  type AccessHolder,
+  type AdminGrantRequest,
   type GrantedPerson,
   type LinkedPerson,
   type StaffEmailChange,
@@ -13,6 +16,7 @@ export { maskEmail } from './account-rules.js';
 export { ChangeEmailDto, NewPersonDto } from './account.dto.js';
 export {
   GrantDirectory,
+  type InstitutionAdmin,
   OWNER_SORT_FIELDS,
   type OwnerGrant,
   type OwnerSortField,

@@ -26,6 +26,65 @@ export class GrantDirectory {
     return rows.flatMap((row) => (row.institution_id === null ? [] : [row.institution_id]));
   }
 
+  /** The Institutions a staff record holds Institution Admin access to, in the caller's transaction (STF-10). */
+  async adminInstitutionIdsOfStaff(tx: Tx, staffMemberId: string): Promise<string[]> {
+    const rows = await tx
+      .selectFrom('role_assignments')
+      .select('institution_id')
+      .where('staff_member_id', '=', staffMemberId)
+      .where('role_code', '=', 3)
+      .where('revoked_at', 'is', null)
+      .execute();
+    return rows.flatMap((row) => (row.institution_id === null ? [] : [row.institution_id]));
+  }
+
+  /** The Admins of one Institution, by name, a page at a time (INS-08). */
+  async institutionAdmins(
+    institutionId: string,
+    limit: number,
+    offset: number,
+  ): Promise<{ rows: InstitutionAdmin[]; total: number }> {
+    const matching = (eb: ExpressionBuilder<Database, 'role_assignments'>) =>
+      eb.and([
+        eb('role_assignments.role_code', '=', 3),
+        eb('role_assignments.institution_id', '=', institutionId),
+        eb('role_assignments.revoked_at', 'is', null),
+      ]);
+    const rows = await this.database.db
+      .selectFrom('role_assignments')
+      .innerJoin('users', 'users.id', 'role_assignments.user_id')
+      .select([
+        'role_assignments.staff_member_id',
+        'role_assignments.created_at as granted_at',
+        'users.id as user_id',
+        'users.email',
+        'users.first_name',
+        'users.last_name',
+      ])
+      .where(matching)
+      .orderBy(DISPLAY_NAME)
+      .orderBy('role_assignments.id')
+      .limit(limit)
+      .offset(offset)
+      .execute();
+    const { total } = await this.database.db
+      .selectFrom('role_assignments')
+      .select((eb) => eb.fn.countAll<number>().as('total'))
+      .where(matching)
+      .executeTakeFirstOrThrow();
+    return {
+      rows: rows.map((row) => ({
+        staffMemberId: row.staff_member_id!,
+        grantedAt: row.granted_at,
+        person: {
+          id: row.user_id,
+          displayName: personName(row.first_name, row.last_name) ?? row.email,
+        },
+      })),
+      total: Number(total),
+    };
+  }
+
   /**
    * The Institutions a Teacher / Staff member reaches in one Society: the home Institution of their active staff
    * record and the extra ones a Society Owner assigned (PRD 4, STF-10). Both come through definer functions, because
@@ -194,6 +253,13 @@ export class GrantDirectory {
 
 /** The person's name as lists show it: first and last name, else the email. */
 const DISPLAY_NAME = sql`coalesce(nullif(btrim(concat_ws(' ', users.first_name, users.last_name)), ''), users.email)`;
+
+/** An Admin of an Institution: the staff record the access is tied to, and the person who holds it. */
+export interface InstitutionAdmin {
+  staffMemberId: string;
+  grantedAt: Date;
+  person: { id: string; displayName: string };
+}
 
 export type OwnerSortField = 'name' | 'email' | 'createdAt';
 export const OWNER_SORT_FIELDS = ['name', 'email', 'createdAt'] as const;
