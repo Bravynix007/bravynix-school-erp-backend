@@ -23,7 +23,6 @@ import {
 import { FileDirectory, FilePurpose } from '../../platform/files/index.js';
 import {
   AccountDirectory,
-  GrantDirectory,
   maskEmail,
   PersonDirectory,
   type ChangeEmailDto,
@@ -158,7 +157,6 @@ export class StaffService {
     private readonly staff: StaffRepository,
     private readonly scope: ScopeService,
     private readonly accounts: AccountDirectory,
-    private readonly grants: GrantDirectory,
     private readonly people: PersonDirectory,
     private readonly masters: MasterReferences,
     private readonly files: FileDirectory,
@@ -459,7 +457,8 @@ export class StaffService {
    * STF-06: blocks the staff role of an active staff member in this Society (DDD D-02). Their sessions as Institution
    * Admin or Teacher / Staff here end at once (`SESSION_ENDED`, reason `blocked`) and the role answers 403
    * `ACCESS_BLOCKED` until STF-07; their account, their other Societies and their Owner role are untouched. 404 when
-   * deactivated; 409 `INVALID_STATE` when already blocked; 409 `CANNOT_ACT_ON_SELF` for the caller's own record.
+   * deactivated; 409 `INVALID_STATE` when already blocked; 409 `CANNOT_ACT_ON_SELF` for the caller's own record; 403 for an
+   * Institution Admin caller when the person is an Institution Admin (only a Society Owner may, API design 6.8).
    */
   async block(principal: Principal, id: string): Promise<StaffResource> {
     return this.setBlock(principal, id, true);
@@ -480,6 +479,7 @@ export class StaffService {
     return this.database.transaction(context.tenant, async (tx) => {
       const current = await this.lockedActive(tx, id);
       requireNotSelf(principal.personId, current.user_id);
+      await this.requireOwnerForAdmin(tx, principal, id);
       if ((current.access_blocked_at !== null) === blocked) {
         throw AppException.conflict(ErrorCode.INVALID_STATE);
       }
@@ -501,6 +501,18 @@ export class StaffService {
       });
       return this.resourceOf(tx, row);
     });
+  }
+
+  /**
+   * Only a Society Owner may block or unblock a staff member who is an Institution Admin, so an Admin cannot stop a
+   * fellow Admin or undo an Owner's block (API design 6.8). Held access counts, active or restorable. Read under the
+   * record lock the caller holds, so it cannot race a grant (INS-09). 403, with nothing changed.
+   */
+  private async requireOwnerForAdmin(tx: Tx, principal: Principal, id: string): Promise<void> {
+    if (principal.roleCode === RoleCode.SocietyOwner) return;
+    if ((await this.accounts.administeredInstitutionIds(tx, id)).length > 0) {
+      throw AppException.forbidden();
+    }
   }
 
   /**
@@ -562,11 +574,12 @@ export class StaffService {
       const current = await this.lockedActive(tx, id);
       const before = await this.staff.institutionIds(tx, id);
       if (sameIds(before, body.institutionIds)) return this.resourceOf(tx, current);
-      // An Admin of an Institution must keep it as a home or an extra Institution: revoke the access first.
-      const dropped = new Set(await this.grants.adminInstitutionIdsOfStaff(tx, id));
+      // An Admin of an Institution must keep it as an extra Institution: revoke the access first. Access that an
+      // Institution's deactivation took away, and a reactivation could return, counts as held.
+      const administered = await this.accounts.administeredInstitutionIds(tx, id);
       const kept = new Set(body.institutionIds);
       if (
-        [...dropped].some(
+        administered.some(
           (institutionId) => before.includes(institutionId) && !kept.has(institutionId),
         )
       ) {

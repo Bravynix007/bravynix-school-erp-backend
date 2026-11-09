@@ -158,18 +158,27 @@ export class AccountRepository {
       .executeTakeFirstOrThrow();
   }
 
-  /** The active Institution Admin grants of a staff record, one for each Institution. */
-  async activeAdminGrantsOfStaff(
+  /**
+   * The Institution Admin grants of a staff record, one for each Institution: the active ones, and with
+   * `restorable` also those revoked for a reason a reactivation restores, which are access that can come back.
+   */
+  async adminGrantsOfStaff(
     tx: Tx,
     staffMemberId: string,
-    institutionId?: string,
+    filter: { institutionId?: string; restorable?: readonly string[] } = {},
   ): Promise<GrantRow[]> {
+    const { institutionId, restorable } = filter;
     let query = tx
       .selectFrom('role_assignments')
       .selectAll()
       .where('staff_member_id', '=', staffMemberId)
-      .where('role_code', '=', RoleCode.InstitutionAdmin)
-      .where('revoked_at', 'is', null);
+      .where('role_code', '=', RoleCode.InstitutionAdmin);
+    query =
+      restorable === undefined
+        ? query.where('revoked_at', 'is', null)
+        : query.where((eb) =>
+            eb.or([eb('revoked_at', 'is', null), eb('revoke_reason', 'in', restorable)]),
+          );
     if (institutionId !== undefined) query = query.where('institution_id', '=', institutionId);
     return query.execute();
   }
@@ -214,6 +223,16 @@ export class AccountRepository {
       .updateTable('role_assignments')
       .set({ revoked_at: now, revoked_by: by, revoke_reason: reason })
       .where('id', '=', grantId)
+      .execute();
+  }
+
+  /** Gives revoked grants a new reason and keeps when and by whom they were revoked. */
+  async restampRevokeReason(tx: Tx, grantIds: string[], reason: string): Promise<void> {
+    if (grantIds.length === 0) return;
+    await tx
+      .updateTable('role_assignments')
+      .set({ revoke_reason: reason })
+      .where('id', 'in', grantIds)
       .execute();
   }
 

@@ -6,7 +6,6 @@ import type { DatabaseService, Tx } from '../../platform/database/index.js';
 import type { FileDirectory } from '../../platform/files/index.js';
 import type {
   AccountDirectory,
-  GrantDirectory,
   PersonDirectory,
   StaffEmailChange,
 } from '../../platform/identity/index.js';
@@ -144,8 +143,8 @@ function build(current: StaffRow | null = staff()) {
   const revokeAdminAccessOfStaff = vi
     .fn<AccountDirectory['revokeAdminAccessOfStaff']>()
     .mockResolvedValue({ institutionIds: [], sessionsEnded: 0 });
-  const adminInstitutionIdsOfStaff = vi
-    .fn<GrantDirectory['adminInstitutionIdsOfStaff']>()
+  const administeredInstitutionIds = vi
+    .fn<AccountDirectory['administeredInstitutionIds']>()
     .mockResolvedValue([]);
   const announceStaffEmail = vi.fn<AccountDirectory['announceStaffEmail']>(() => {
     order.push('announce');
@@ -179,10 +178,10 @@ function build(current: StaffRow | null = staff()) {
       endRoleSessions,
       endStaffAccessSessions,
       revokeAdminAccessOfStaff,
+      administeredInstitutionIds,
       changeStaffEmail,
       announceStaffEmail,
     } as unknown as AccountDirectory,
-    { adminInstitutionIdsOfStaff } as unknown as GrantDirectory,
     {
       describe: vi.fn<PersonDirectory['describe']>().mockResolvedValue(new Map()),
       emails: vi
@@ -228,7 +227,7 @@ function build(current: StaffRow | null = staff()) {
     endRoleSessions,
     endStaffAccessSessions,
     revokeAdminAccessOfStaff,
-    adminInstitutionIdsOfStaff,
+    administeredInstitutionIds,
     replaceSubjects,
     replaceInstitutions,
     subjectIds,
@@ -713,6 +712,52 @@ describe('StaffService', () => {
       expect(open.update).not.toHaveBeenCalled();
     });
 
+    describe('a staff member who is an Institution Admin', () => {
+      const admin = { ...owner, personId: 'admin-1', roleCode: 3 } as Principal;
+
+      it.each([
+        ['block', staff()],
+        ['unblock', staff({ access_blocked_at: new Date(), access_blocked_by: 'owner-1' })],
+      ] as const)(
+        'is for the Society Owner only: an Institution Admin gets 403 on %s, and nothing changes',
+        async (action, record) => {
+          const t = build(record);
+          t.administeredInstitutionIds.mockResolvedValue(['institution-1']);
+          expect(await fail(t.service[action](admin, 'staff-1'))).toEqual({
+            status: 403,
+            code: 'FORBIDDEN',
+          });
+          expect(t.administeredInstitutionIds).toHaveBeenCalledWith(expect.anything(), 'staff-1');
+          expect(t.update).not.toHaveBeenCalled();
+          expect(t.endStaffAccessSessions).not.toHaveBeenCalled();
+          expect(t.record).not.toHaveBeenCalled();
+        },
+      );
+
+      it('lets the Society Owner block and unblock them, without asking whether they are an Admin', async () => {
+        const t = build();
+        t.administeredInstitutionIds.mockResolvedValue(['institution-1']);
+        await t.service.block(owner, 'staff-1');
+        expect(t.update).toHaveBeenCalledTimes(1);
+        expect(t.administeredInstitutionIds).not.toHaveBeenCalled();
+      });
+
+      it('lets an Institution Admin block a staff member who is not an Admin', async () => {
+        const t = build();
+        await t.service.block(admin, 'staff-1');
+        expect(t.update).toHaveBeenCalledTimes(1);
+      });
+
+      it('answers the caller’s own record with 409 first', async () => {
+        const t = build(staff({ user_id: 'admin-1' }));
+        t.administeredInstitutionIds.mockResolvedValue(['institution-1']);
+        expect(await fail(t.service.block(admin, 'staff-1'))).toEqual({
+          status: 409,
+          code: 'CANNOT_ACT_ON_SELF',
+        });
+      });
+    });
+
     it('refuses the caller’s own record and a deactivated one', async () => {
       expect(
         await fail(build(staff({ user_id: 'owner-1' })).service.block(owner, 'staff-1')),
@@ -806,7 +851,7 @@ describe('StaffService', () => {
     it('refuses to drop an Institution the person is an Admin of, and keeps the ones that stay', async () => {
       const t = build();
       t.institutionIds.mockResolvedValue(['institution-2', 'institution-3']);
-      t.adminInstitutionIdsOfStaff.mockResolvedValue(['institution-3']);
+      t.administeredInstitutionIds.mockResolvedValue(['institution-3']);
       expect(
         await fail(
           t.service.setInstitutions(owner, 'staff-1', { institutionIds: ['institution-2'] }),
@@ -816,6 +861,14 @@ describe('StaffService', () => {
       await t.service.setInstitutions(owner, 'staff-1', {
         institutionIds: ['institution-3', 'institution-4'],
       });
+      expect(t.replaceInstitutions).toHaveBeenCalledTimes(1);
+    });
+
+    it('lets an Admin of the home Institution change the extras, as the home is never in the list', async () => {
+      const t = build();
+      t.institutionIds.mockResolvedValue(['institution-2']);
+      t.administeredInstitutionIds.mockResolvedValue(['institution-1']);
+      await t.service.setInstitutions(owner, 'staff-1', { institutionIds: ['institution-3'] });
       expect(t.replaceInstitutions).toHaveBeenCalledTimes(1);
     });
 

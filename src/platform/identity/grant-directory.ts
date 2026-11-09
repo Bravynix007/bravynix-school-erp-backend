@@ -26,18 +26,6 @@ export class GrantDirectory {
     return rows.flatMap((row) => (row.institution_id === null ? [] : [row.institution_id]));
   }
 
-  /** The Institutions a staff record holds Institution Admin access to, in the caller's transaction (STF-10). */
-  async adminInstitutionIdsOfStaff(tx: Tx, staffMemberId: string): Promise<string[]> {
-    const rows = await tx
-      .selectFrom('role_assignments')
-      .select('institution_id')
-      .where('staff_member_id', '=', staffMemberId)
-      .where('role_code', '=', 3)
-      .where('revoked_at', 'is', null)
-      .execute();
-    return rows.flatMap((row) => (row.institution_id === null ? [] : [row.institution_id]));
-  }
-
   /** The Admins of one Institution, by name, a page at a time (INS-08). */
   async institutionAdmins(
     institutionId: string,

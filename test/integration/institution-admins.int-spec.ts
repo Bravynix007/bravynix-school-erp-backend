@@ -120,6 +120,26 @@ describe('Institution Admins: promoted from the staff', () => {
       .execute(ownerDb)
       .then((result) => result.rows);
 
+  const superAdminCount = () =>
+    sql<{
+      n: string;
+    }>`select count(*) as n from role_assignments where role_code = 1 and revoked_at is null`
+      .execute(ownerDb)
+      .then((result) => Number(result.rows[0]!.n));
+
+  /** The record is an extra of `second` and administers it; then `second` is deactivated (INS-05). */
+  const dormant = async () => {
+    const staff = await added();
+    await api('put', `/v1/staff/${staff.id}/institutions`, owner.token, {
+      institutionIds: [second],
+    });
+    await grant(second, staff.id);
+    expect((await api('delete', `/v1/institutions/${second}`, owner.token)).status).toBe(200);
+    const [row] = await grantRows(staff.id);
+    expect(row).toMatchObject({ revoke_reason: 'institution_deactivated' });
+    return { staff, revokedAt: row!.revoked_at };
+  };
+
   beforeAll(async () => {
     await runMigrations(migrationUrl, 'latest');
     ownerDb = new Kysely({
@@ -155,6 +175,7 @@ describe('Institution Admins: promoted from the staff', () => {
     await clearLoginState(ownerDb);
     await removeScratchSocieties(ownerDb, societies.splice(0));
     for (const id of staffUsers.splice(0)) {
+      await sql`delete from role_assignments where user_id = ${id}`.execute(ownerDb);
       await sql`delete from users where id = ${id}`.execute(ownerDb);
     }
     await fixtures.cleanup();
@@ -234,6 +255,17 @@ describe('Institution Admins: promoted from the staff', () => {
       expect(refused.status).toBe(409);
       expect(refused.body.code).toBe('ACCOUNT_BLOCKED');
       expect(await grantRows(other.id)).toEqual([]);
+    });
+
+    it('is 409 ROLE_CONFLICT for a person who is a Super Admin, whichever way they came to hold both', async () => {
+      const staff = await added();
+      // PLT-13 now refuses staff, so the other order is made in the database, as old data could hold it.
+      await sql`insert into role_assignments (user_id, role_code, seat_no, created_by)
+        values (${staff.person.id}, 1, 3, ${superAdmin.id})`.execute(ownerDb);
+      const refused = await grant(first, staff.id);
+      expect(refused.status).toBe(409);
+      expect(refused.body.code).toBe('ROLE_CONFLICT');
+      expect(await grantRows(staff.id)).toEqual([]);
     });
 
     it('checks the body: a missing or malformed staffMemberId is 400, and no other field is allowed', async () => {
@@ -439,6 +471,93 @@ describe('Institution Admins: promoted from the staff', () => {
       ).toBe(200);
     });
 
+    it('only the Owner may block or unblock an Admin: an Admin is refused for a fellow Admin of their Institution and of another, and nothing changes', async () => {
+      const caller = await added();
+      const fellow = await added();
+      const elsewhere = await added();
+      await api('put', `/v1/staff/${elsewhere.id}/institutions`, owner.token, {
+        institutionIds: [second],
+      });
+      await grant(first, caller.id);
+      await grant(first, fellow.id);
+      await grant(second, elsewhere.id);
+      const { token } = await actingAs(caller.person.email, ADMIN);
+      const fellowToken = (await actingAs(fellow.person.email, ADMIN)).token;
+
+      for (const target of [fellow, elsewhere]) {
+        const refused = await api('post', `/v1/staff/${target.id}/block`, token);
+        expect(refused.status).toBe(403);
+        expect(refused.body.code).toBe('FORBIDDEN');
+      }
+      expect((await reads(fellowToken, first)).status).toBe(200);
+      expect((await audit(fellow.id)).map((row) => row.action)).not.toContain('staff.blocked');
+
+      // The Owner can, and an Admin cannot undo it.
+      expect((await api('post', `/v1/staff/${fellow.id}/block`, owner.token)).status).toBe(200);
+      const undone = await api('post', `/v1/staff/${fellow.id}/unblock`, token);
+      expect(undone.status).toBe(403);
+      expect((await api('get', `/v1/staff/${fellow.id}`, owner.token)).body.data.isBlocked).toBe(
+        true,
+      );
+      expect((await api('post', `/v1/staff/${fellow.id}/unblock`, owner.token)).status).toBe(200);
+
+      // A colleague who is not an Admin is still the Admin's to block.
+      const teacher = await added();
+      expect((await api('post', `/v1/staff/${teacher.id}/block`, token)).status).toBe(200);
+    });
+
+    it('lets an Admin of the home Institution change the extra Institutions, and the grant stays', async () => {
+      const staff = await added();
+      await grant(first, staff.id);
+      const changed = await api('put', `/v1/staff/${staff.id}/institutions`, owner.token, {
+        institutionIds: [second],
+      });
+      expect(changed.status).toBe(200);
+      expect(changed.body.data.institutionIds).toEqual([second]);
+      expect(
+        (
+          await api('put', `/v1/staff/${staff.id}/institutions`, owner.token, {
+            institutionIds: [],
+          })
+        ).status,
+      ).toBe(200);
+      expect((await grantRows(staff.id)).map((row) => row.revoked_at)).toEqual([null]);
+    });
+
+    describe('an Admin grant that went dormant with its Institution', () => {
+      it('STF-05 takes it from the record, so a reactivation cannot hand it back, and keeps when it was revoked', async () => {
+        const { staff, revokedAt } = await dormant();
+        expect((await api('delete', `/v1/staff/${staff.id}`, owner.token)).status).toBe(200);
+        expect(await grantRows(staff.id)).toEqual([
+          { institution_id: second, revoked_at: revokedAt, revoke_reason: 'staff_deactivated' },
+        ]);
+        const entry = (await audit(staff.id)).find((row) => row.action === 'staff.deactivated');
+        expect(entry?.new_values).toMatchObject({ adminRevoked: [second] });
+      });
+
+      it('STF-13 takes it from a record that moves to another person', async () => {
+        const { staff, revokedAt } = await dormant();
+        const moved = await api('put', `/v1/staff/${staff.id}/email`, owner.token, {
+          email: `${newId()}@moved.test`,
+          version: staff.version,
+        });
+        expect(moved.status).toBe(200);
+        staffUsers.push((moved.body.data as unknown as StaffData).person.id);
+        expect(await grantRows(staff.id)).toEqual([
+          { institution_id: second, revoked_at: revokedAt, revoke_reason: 'staff_moved' },
+        ]);
+      });
+
+      it('STF-10 still refuses to drop the Institution, because the access could come back', async () => {
+        const { staff } = await dormant();
+        const held = await api('put', `/v1/staff/${staff.id}/institutions`, owner.token, {
+          institutionIds: [],
+        });
+        expect(held.status).toBe(409);
+        expect(held.body.code).toBe('ADMIN_ACCESS_HELD');
+      });
+    });
+
     it('a block of the record stops the Admin role too, and lifting it brings it back', async () => {
       const staff = await added();
       await grant(first, staff.id);
@@ -450,6 +569,43 @@ describe('Institution Admins: promoted from the staff', () => {
       await api('post', `/v1/staff/${staff.id}/unblock`, owner.token);
       const { token } = await actingAs(staff.person.email, ADMIN);
       expect((await reads(token, first)).status).toBe(200);
+    });
+  });
+
+  describe('PLT-13 keeps the platform team apart from the school roles', () => {
+    it('refuses a staff member and an Institution Admin with 409 ROLE_CONFLICT, and creates nothing', async () => {
+      const teacher = await added();
+      const promoted = await added();
+      await grant(first, promoted.id);
+      const before = await superAdminCount();
+      for (const person of [teacher, promoted]) {
+        const refused = await api('post', '/v1/platform/super-admins', admin, {
+          email: person.person.email,
+        });
+        expect(refused.status).toBe(409);
+        expect(refused.body.code).toBe('ROLE_CONFLICT');
+      }
+      expect(await superAdminCount()).toBe(before);
+    });
+
+    it('refuses a staff member whose Institution is deactivated, because the record returns with it', async () => {
+      const staff = await added({ homeInstitutionId: second });
+      expect((await api('delete', `/v1/institutions/${second}`, owner.token)).status).toBe(200);
+      const refused = await api('post', '/v1/platform/super-admins', admin, {
+        email: staff.person.email,
+      });
+      expect(refused.status).toBe(409);
+      expect(refused.body.code).toBe('ROLE_CONFLICT');
+    });
+
+    it('accepts a person whose staff record has ended', async () => {
+      const staff = await added();
+      expect((await api('delete', `/v1/staff/${staff.id}`, owner.token)).status).toBe(200);
+      const made = await api('post', '/v1/platform/super-admins', admin, {
+        email: staff.person.email,
+      });
+      expect(made.status).toBe(201);
+      await api('delete', `/v1/platform/super-admins/${staff.person.id}`, admin);
     });
   });
 

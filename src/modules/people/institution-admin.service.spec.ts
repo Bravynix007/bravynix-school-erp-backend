@@ -218,6 +218,8 @@ describe('InstitutionAdminService', () => {
     it('revokes, audits who and how many sessions ended, and tells the person after the commit', async () => {
       const t = build();
       await t.service.revoke(owner, 'institution-1', 'staff-1');
+      // The record is locked first, so a move or a deactivation in flight finishes before the revoke reads.
+      expect(t.find).toHaveBeenCalledWith(expect.anything(), 'staff-1', true);
       expect(t.revokeInstitutionAdmin).toHaveBeenCalledWith(
         expect.anything(),
         'staff-1',

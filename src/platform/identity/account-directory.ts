@@ -412,6 +412,7 @@ export class AccountDirectory {
     const person = await this.accounts.findById(tx, request.userId, true);
     if (!person) throw AppException.notFound();
     requireCanHoldRole(person);
+    await this.requireSeparateRoles(tx, person.id, RoleCode.InstitutionAdmin);
     try {
       await this.accounts.insertAdminGrant(tx, request);
     } catch (error) {
@@ -435,7 +436,7 @@ export class AccountDirectory {
     reason: string,
     now: Date,
   ): Promise<AccessHolder & { sessionsEnded: number }> {
-    const [grant] = await this.accounts.activeAdminGrantsOfStaff(tx, staffMemberId, institutionId);
+    const [grant] = await this.accounts.adminGrantsOfStaff(tx, staffMemberId, { institutionId });
     if (!grant) throw AppException.notFound();
     await this.accounts.revokeGrant(tx, grant.id, by, reason, now);
     const person = await this.accounts.findById(tx, grant.user_id);
@@ -446,10 +447,22 @@ export class AccountDirectory {
   }
 
   /**
+   * The Institutions a staff record holds Institution Admin access to, or held it to until the Institution was
+   * deactivated and a reactivation could give it back (STF-10).
+   */
+  async administeredInstitutionIds(tx: Tx, staffMemberId: string): Promise<string[]> {
+    const grants = await this.accounts.adminGrantsOfStaff(tx, staffMemberId, {
+      restorable: RESTORABLE_REVOKE_REASONS,
+    });
+    return grants.map((grant) => grant.institution_id!);
+  }
+
+  /**
    * Every Institution Admin grant of a staff record ends, because the record does (STF-05) or moves to another person
-   * (STF-13): the access belongs to the record. The person's admin sessions in the Society end with them. Returns the
-   * Institutions the person no longer administers and how many sessions ended; nothing happens for a record with no
-   * grant.
+   * (STF-13): the access belongs to the record. The person's admin sessions in the Society end with them. A grant
+   * that was already revoked with its Institution is dormant, not gone, and a reactivation would give it back to
+   * someone who has left: it keeps its revoke time and takes the new reason, so nothing restores it. Returns the
+   * Institutions the record held access to and how many sessions ended; nothing happens for a record with no grant.
    */
   async revokeAdminAccessOfStaff(
     tx: Tx,
@@ -458,9 +471,17 @@ export class AccountDirectory {
     reason: string,
     now: Date,
   ): Promise<{ institutionIds: string[]; sessionsEnded: number }> {
-    const grants = await this.accounts.activeAdminGrantsOfStaff(tx, staffMemberId);
-    for (const grant of grants) await this.accounts.revokeGrant(tx, grant.id, by, reason, now);
-    const first = grants[0];
+    const grants = await this.accounts.adminGrantsOfStaff(tx, staffMemberId, {
+      restorable: RESTORABLE_REVOKE_REASONS,
+    });
+    const active = grants.filter((grant) => grant.revoked_at === null);
+    for (const grant of active) await this.accounts.revokeGrant(tx, grant.id, by, reason, now);
+    await this.accounts.restampRevokeReason(
+      tx,
+      grants.filter((grant) => grant.revoked_at !== null).map((grant) => grant.id),
+      reason,
+    );
+    const first = active[0];
     return {
       institutionIds: grants.map((grant) => grant.institution_id!),
       sessionsEnded: first
@@ -489,13 +510,32 @@ export class AccountDirectory {
     );
   }
 
-  /** Under the separation lock, so a concurrent grant of the other role sees this one or is seen by it. */
+  /**
+   * Under the separation lock, so a concurrent grant of the other role sees this one or is seen by it. A Super
+   * Admin and a Society Owner are never one person, and a Super Admin is never staff or an Institution Admin (PRD
+   * 5.2, API design 6.6): the platform team holds no school role. Dormant school access counts when a Super Admin is
+   * made, because it returns with its Institution or Society.
+   */
   private async requireSeparateRoles(tx: Tx, userId: string, roleCode: RoleCode): Promise<void> {
     await this.accounts.lockRoleSeparation(tx);
     const other = roleCode === RoleCode.SuperAdmin ? RoleCode.SocietyOwner : RoleCode.SuperAdmin;
-    if (await this.accounts.holdsActiveGrant(tx, userId, [other])) {
+    if (
+      (await this.accounts.holdsActiveGrant(tx, userId, [other])) ||
+      (roleCode === RoleCode.SuperAdmin && (await this.holdsSchoolRole(tx, userId)))
+    ) {
       throw AppException.conflict(ErrorCode.ROLE_CONFLICT);
     }
+  }
+
+  private async holdsSchoolRole(tx: Tx, userId: string): Promise<boolean> {
+    return (
+      (await this.accounts.holdsGrantOrRestorable(
+        tx,
+        userId,
+        [RoleCode.InstitutionAdmin],
+        RESTORABLE_REVOKE_REASONS,
+      )) || (await this.sessions.holdsStaffRecord(tx, userId))
+    );
   }
 
   /**
