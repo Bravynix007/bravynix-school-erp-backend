@@ -33,6 +33,13 @@ const activeBlocksOf = async (db: Kysely<unknown>, society: string, person: stri
   return rows;
 };
 
+/** The settings an Owner's tenant transaction of this Society carries. */
+const settingsOf = (tenant: { societyId: string; personId: string }) => ({
+  role: '2',
+  society: tenant.societyId,
+  person: tenant.personId,
+});
+
 describe('STF-02 to STF-05 staff (API design 9.5)', () => {
   let ownerDb: Kysely<unknown>;
   let t: TestApp;
@@ -139,6 +146,27 @@ describe('STF-02 to STF-05 staff (API design 9.5)', () => {
     const institution = await makeInstitution(ownerOfB.token);
     return { society, ownerOfB, institution };
   };
+
+  /** `app_has_staff_elsewhere` as a tenant of this Society, with the settings the transaction ends with. */
+  const asked = (
+    tenant: { societyId: string; personId: string },
+    person: string,
+    homeSociety: string,
+  ) =>
+    database.transaction(
+      { societyId: tenant.societyId, roleCode: 2, personId: tenant.personId },
+      async (tx) => {
+        const found = await sql<{
+          held: boolean;
+        }>`select app_has_staff_elsewhere(${person}::uuid, ${homeSociety}::uuid) as held`.execute(
+          tx,
+        );
+        const settings = await sql<{ role: string; society: string; person: string }>`
+            select current_setting('app.role_code') as role, current_setting('app.society_id') as society,
+              current_setting('app.person_id') as person`.execute(tx);
+        return { held: found.rows[0]?.held, settings: settings.rows[0] };
+      },
+    );
 
   const personOf = (res: { body: { data: unknown } }) => (res.body.data as StaffData).person;
 
@@ -1136,6 +1164,42 @@ describe('STF-02 to STF-05 staff (API design 9.5)', () => {
       staffUsers.push(personOf(res).id);
       expect(personOf(res).id).not.toBe(staff.person.id);
       expect(await emailOf(staff.person.id)).toBe(staff.person.email);
+    });
+
+    it('answers the staff-elsewhere lookup only for the person asked about, from a tenant transaction of any Society, and puts the settings back', async () => {
+      const staff = await added();
+      const { society: societyB, ownerOfB, institution } = await secondSociety();
+      const inB = await staffOf(ownerOfB.token, institution, staff.person.email);
+      expect(inB.status).toBe(201);
+
+      const fromA = { societyId: societyA, personId: owner.person };
+      const fromB = { societyId: societyB, personId: ownerOfB.person };
+      // The record in B counts from the home Society's tenant, and from a tenant of a Society that is not the home one.
+      expect(await asked(fromA, staff.person.id, societyA)).toEqual({
+        held: true,
+        settings: settingsOf(fromA),
+      });
+      expect(await asked(fromB, staff.person.id, societyA)).toEqual({
+        held: true,
+        settings: settingsOf(fromB),
+      });
+      // Only the person asked about: the Owner of A and a stranger hold no record in B, though B has one.
+      expect((await asked(fromB, owner.person, societyA)).held).toBe(false);
+      expect((await asked(fromB, newId(), societyA)).held).toBe(false);
+      expect(await asked(fromA, owner.person, societyA)).toEqual({
+        held: false,
+        settings: settingsOf(fromA),
+      });
+      // Asked from the other side the record in A is the one elsewhere. Once B's record has ended, the one in the
+      // home Society itself does not count, and neither does the ended one.
+      expect((await asked(fromA, staff.person.id, societyB)).held).toBe(true);
+      expect((await asked(fromB, staff.person.id, societyB)).held).toBe(true);
+      const inBId = (inB.body.data as unknown as StaffData).id;
+      expect((await api('delete', `/v1/staff/${inBId}`, ownerOfB.token)).status).toBe(200);
+      expect(await asked(fromA, staff.person.id, societyA)).toEqual({
+        held: false,
+        settings: settingsOf(fromA),
+      });
     });
 
     it('counts an Owner grant revoked by a deactivated Society as held: the record moves to a new person', async () => {
