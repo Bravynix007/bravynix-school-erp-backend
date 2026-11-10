@@ -22,6 +22,16 @@ describe('DocumentRepository', () => {
     expect(parameters).toEqual(['staff-1', 1]);
   });
 
+  it('asks whether a file is that of an active document of the person’s own active record', async () => {
+    const { tx, queries } = sqlRecorder();
+    expect(await repository.isOwnFile(tx, 'file-1', 'user-1')).toBe(false);
+    const { sql, parameters } = queries[0]!;
+    expect(sql).toContain('inner join "staff_members" as "s" on "s"."id" = "d"."staff_member_id"');
+    expect(sql).toContain('"d"."file_id" = $1 and "d"."status" = $2');
+    expect(sql).toContain('"s"."user_id" = $3 and "s"."status" = $4');
+    expect(parameters).toEqual(['file-1', 1, 'user-1', 1]);
+  });
+
   it('deactivates by status and author, and changes nothing else', async () => {
     const { tx, queries } = sqlRecorder();
     await repository.deactivate(tx, 'doc-1', 'admin-1');

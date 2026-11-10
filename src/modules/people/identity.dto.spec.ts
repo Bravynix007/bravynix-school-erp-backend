@@ -30,11 +30,19 @@ describe('SetIdentityDto', () => {
   });
 });
 
+const reason = (length: number) =>
+  body(RevealIdentityDto, { field: 'aadhaar', reason: 'x'.repeat(length) });
+
 describe('RevealIdentityDto', () => {
   it('takes the field and a reason', async () => {
     expect(
       await problems(body(RevealIdentityDto, { field: 'aadhaar', reason: 'Payroll check' })),
     ).toEqual([]);
+  });
+
+  it('has the one limit of the contract, 500, whatever the service says after it', async () => {
+    expect(await problems(reason(500))).toEqual([]);
+    expect(await problems(reason(501))).toEqual([{ field: 'reason', code: 'TOO_LONG' }]);
   });
 
   it.each([

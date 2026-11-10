@@ -1,6 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { AcademicSetupModule, TeachingStaff } from '../academic-setup/index.js';
-import { FilesModule } from '../../platform/files/index.js';
+import { FileReaders, FilesModule } from '../../platform/files/index.js';
 import { MastersModule } from '../../platform/masters/index.js';
 import { AssignmentRepository } from './assignment.repository.js';
 import { AssignmentService } from './assignment.service.js';
@@ -10,6 +10,7 @@ import { DocumentService } from './document.service.js';
 import { IdentityRepository } from './identity.repository.js';
 import { InstitutionAdminController } from './institution-admin.controller.js';
 import { InstitutionAdminService } from './institution-admin.service.js';
+import { PeopleFileReaders } from './people-file-readers.js';
 import { PeopleTeachingStaff } from './people-teaching-staff.js';
 import { StaffDocumentController } from './staff-document.controller.js';
 import { StaffIdentityController } from './staff-identity.controller.js';
@@ -22,7 +23,7 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
 
 /**
  * People (PRD 7.5, 7.6): the staff of a Society, and later its students and their guardians. Global so that Academic
- * setup, which may not import People (SDD 9.3), finds what it asks of it (`TeachingStaff`).
+ * setup and Files, which may not import People (SDD 9.3), find what they ask of it (`TeachingStaff`, `FileReaders`).
  */
 @Global()
 @Module({
@@ -48,7 +49,9 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
     DocumentService,
     PeopleTeachingStaff,
     { provide: TeachingStaff, useExisting: PeopleTeachingStaff },
+    PeopleFileReaders,
+    { provide: FileReaders, useExisting: PeopleFileReaders },
   ],
-  exports: [TeachingStaff],
+  exports: [TeachingStaff, FileReaders],
 })
 export class PeopleModule {}

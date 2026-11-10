@@ -6,9 +6,10 @@ import type { StaffIdentitiesTable } from './people.tables.js';
 
 export type IdentityRow = Selectable<StaffIdentitiesTable>;
 
-/** The staff member who holds a number, and whether that record is still active. */
+/** The staff member who holds a number, the Institution of that record and whether it is still active. */
 export interface NumberHolder {
   staffMemberId: string;
+  homeInstitutionId: string;
   status: number;
 }
 
@@ -23,16 +24,22 @@ export class IdentityRepository {
       .executeTakeFirst();
   }
 
-  /** The record, other than `staffMemberId`, whose Aadhaar has this hash, with the status of that record. */
+  /** The record, other than `staffMemberId`, whose Aadhaar has this hash, with its home Institution and status. */
   async holderOf(tx: Tx, hmac: Buffer, staffMemberId: string): Promise<NumberHolder | undefined> {
     const row = await tx
       .selectFrom('staff_identities as i')
       .innerJoin('staff_members as s', 's.id', 'i.staff_member_id')
-      .select(['i.staff_member_id', 's.status'])
+      .select(['i.staff_member_id', 's.home_institution_id', 's.status'])
       .where('i.aadhaar_hmac', '=', hmac)
       .where('i.staff_member_id', '<>', staffMemberId)
       .executeTakeFirst();
-    return row && { staffMemberId: row.staff_member_id, status: row.status };
+    return (
+      row && {
+        staffMemberId: row.staff_member_id,
+        homeInstitutionId: row.home_institution_id,
+        status: row.status,
+      }
+    );
   }
 
   /** Sets the number, or clears it with `null`; the row is made on the first write and kept after. */

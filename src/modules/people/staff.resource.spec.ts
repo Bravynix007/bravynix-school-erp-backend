@@ -135,4 +135,14 @@ describe('staffResource', () => {
       updatedAt: '2026-06-02T05:00:00.000Z',
     });
   });
+
+  it('has `aadhaarMasked` only when it is given: null for no number, absent for a reader who may not see it', () => {
+    const access = { subjectIds: [], institutionIds: [], classTeachers: [] };
+    const people = new Map<string, AuthorRef>();
+    const make = (masked?: string | null) =>
+      staffResource(row, [], [], 'meera@example.com', access, people, masked);
+    expect(make('XXXX XXXX 0124').aadhaarMasked).toBe('XXXX XXXX 0124');
+    expect(make(null).aadhaarMasked).toBeNull();
+    expect(make()).not.toHaveProperty('aadhaarMasked');
+  });
 });

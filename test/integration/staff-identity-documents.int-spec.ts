@@ -1,6 +1,6 @@
 import { Kysely, PostgresDialect, sql } from 'kysely';
 import request from 'supertest';
-import { DatabaseService } from '../../src/platform/database/index.js';
+import { DatabaseService, type Tx } from '../../src/platform/database/index.js';
 import { createPool } from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
@@ -23,6 +23,14 @@ const DIGITS = '234567890124';
 const OTHER = '9876 5432 1096';
 const PDF = Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(60, 2)]);
 const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(60, 1)]);
+
+/** The four columns of a sealed number, with a hash that is all one byte. */
+const sealed = (hmacByte: number) => ({
+  aadhaar_ciphertext: Buffer.from('sealed'),
+  aadhaar_key_version: 1,
+  aadhaar_hmac: Buffer.alloc(32, hmacByte),
+  aadhaar_last4: '0124',
+});
 
 interface Ticket {
   fileId: string;
@@ -74,6 +82,28 @@ describe('a staff member’s Aadhaar number and documents', () => {
     return res.body.data as unknown as DocumentBody[];
   };
 
+  const profile = (staff: SchoolStaff, token = owner.token) =>
+    api('get', `/v1/staff/${staff.id}`, token);
+
+  const open = (fileId: string, token: string) => api('get', `/v1/files/${fileId}/download`, token);
+  const attached = async (staff: SchoolStaff, institutionId = first) => {
+    const fileId = await readyFile({ institutionId });
+    const made = await attach(staff, { title: 'Letter', fileId });
+    expect(made.status).toBe(201);
+    return { fileId, documentId: made.body.data.id as string };
+  };
+
+  const tenant = (institutionIds: string[], society = societyId) => ({
+    personId: owner.person,
+    roleCode: 2,
+    societyId: society,
+    institutionIds,
+  });
+  const seen = (institutionIds: string[]) =>
+    database.transaction(tenant(institutionIds), async (tx) =>
+      (await tx.selectFrom('documents').select('id').execute()).map((row) => row.id).toSorted(),
+    );
+
   /** The rows of the tables as the Society's own session reads them. */
   const read = <T>(
     work: (tx: Parameters<Parameters<DatabaseService['transaction']>[1]>[0]) => Promise<T>,
@@ -104,17 +134,34 @@ describe('a staff member’s Aadhaar number and documents', () => {
       await readAuditRows<{
         action: string;
         entity_id: string;
+        entity_type: string;
+        institution_id: string | null;
+        actor_user_id: string | null;
         reason: string | null;
         old_values: unknown;
         new_values: unknown;
       }>(ownerDb, sql`entity_id = ${entityId}`)
-    ).map(({ action, entity_id, reason, old_values, new_values }) => ({
-      action,
-      entity_id,
-      reason,
-      before: old_values,
-      after: new_values,
-    }));
+    ).map(
+      ({
+        action,
+        entity_id,
+        entity_type,
+        institution_id,
+        actor_user_id,
+        reason,
+        old_values,
+        new_values,
+      }) => ({
+        action,
+        entity_id,
+        entityType: entity_type,
+        institutionId: institution_id,
+        actor: actor_user_id,
+        reason,
+        before: old_values,
+        after: new_values,
+      }),
+    );
 
   const ticket = async (fields: object = {}, token = owner.token) => {
     const res = await api('post', '/v1/files/uploads', token, {
@@ -310,9 +357,39 @@ describe('a staff member’s Aadhaar number and documents', () => {
       expect(await audit(ana.id)).toContainEqual(
         expect.objectContaining({
           action: 'identity.released',
+          entityType: 'staff_identities',
           after: { aadhaarMasked: null, takenBy: bo.id },
         }),
       );
+    });
+
+    it('audits the release at the Institution of the record that lost the number, not of the one that took it', async () => {
+      await identity(cy, NUMBER);
+      expect((await api('delete', `/v1/staff/${cy.id}`, owner.token)).status).toBe(200);
+      // An Admin of `first` does not reach `second`; the entry is still written where the lost number was kept.
+      expect((await identity(ana, NUMBER, institutionAdmin.token)).status).toBe(200);
+      expect(await audit(cy.id)).toContainEqual(
+        expect.objectContaining({ action: 'identity.released', institutionId: second }),
+      );
+      expect(await audit(ana.id)).toContainEqual(
+        expect.objectContaining({ action: 'identity.updated', institutionId: first }),
+      );
+    });
+
+    it('audits the one row under one entity type, whether it is set, cleared or revealed', async () => {
+      await identity(ana, NUMBER);
+      expect((await reveal(ana)).status).toBe(200);
+      await identity(ana, null);
+      const entries = await audit(ana.id);
+      expect(
+        entries
+          .filter((e) => e.action.startsWith('identity.'))
+          .map((e) => [e.action, e.entityType]),
+      ).toEqual([
+        ['identity.updated', 'staff_identities'],
+        ['identity.reveal', 'staff_identities'],
+        ['identity.cleared', 'staff_identities'],
+      ]);
     });
 
     it('is for the admins of the record’s Institution; a teacher, a Super Admin and strangers are refused', async () => {
@@ -361,6 +438,17 @@ describe('a staff member’s Aadhaar number and documents', () => {
       );
       expect((await reveal(ana, { reason: undefined })).status).toBe(400);
       expect((await audit(ana.id)).filter((e) => e.action === 'identity.reveal')).toEqual([]);
+    });
+
+    it('has one limit for the reason, 500: 501 is TOO_LONG and says max 500', async () => {
+      await identity(ana, NUMBER);
+      const long = await reveal(ana, { reason: 'x'.repeat(501) });
+      expect(long.status).toBe(400);
+      expect(long.body.errors).toEqual([
+        expect.objectContaining({ field: 'reason', code: 'TOO_LONG' }),
+      ]);
+      expect(JSON.stringify(long.body)).toContain('"max":500');
+      expect((await reveal(ana, { reason: 'x'.repeat(500) })).status).toBe(200);
     });
 
     it('stops an admin at ten a day with 429 and a wait', async () => {
@@ -539,6 +627,188 @@ describe('a staff member’s Aadhaar number and documents', () => {
       expect(
         (await api('delete', `/v1/documents/${mine.body.data.id}`, institutionAdmin.token)).status,
       ).toBe(200);
+    });
+  });
+
+  describe('STF-03 shows the masked Aadhaar number to admins', () => {
+    it('is null with no number, then follows STF-11: set, replaced, cleared', async () => {
+      expect((await profile(ana)).body.data.aadhaarMasked).toBeNull();
+      await identity(ana, NUMBER);
+      expect((await profile(ana)).body.data.aadhaarMasked).toBe('XXXX XXXX 0124');
+      expect((await profile(ana, institutionAdmin.token)).body.data.aadhaarMasked).toBe(
+        'XXXX XXXX 0124',
+      );
+      await identity(ana, OTHER);
+      expect((await profile(ana)).body.data.aadhaarMasked).toBe('XXXX XXXX 1096');
+      await identity(ana, null);
+      expect((await profile(ana)).body.data.aadhaarMasked).toBeNull();
+    });
+
+    it('is on the answer of the other admin calls, and never the number itself', async () => {
+      await identity(ana, NUMBER);
+      const edited = await api('patch', `/v1/staff/${ana.id}`, owner.token, {
+        version: (await profile(ana)).body.data.version,
+        firstName: 'Anna',
+      });
+      expect(edited.body.data.aadhaarMasked).toBe('XXXX XXXX 0124');
+      expect(JSON.stringify(edited.body)).not.toContain(DIGITS);
+    });
+
+    it('is not on a teacher’s own profile', async () => {
+      await identity(ana, NUMBER);
+      const teacher = await kit.actingAs(ana.person.email, TEACHER, societyId);
+      const own = await profile(ana, teacher);
+      expect(own.status).toBe(200);
+      expect(own.body.data).not.toHaveProperty('aadhaarMasked');
+      expect(JSON.stringify(own.body)).not.toContain('0124');
+    });
+  });
+
+  describe('FIL-03 for a teacher: the file of their own document', () => {
+    it('gives a teacher a link to their own document’s file, and audits it', async () => {
+      const { fileId } = await attached(ana);
+      const teacher = await kit.actingAs(ana.person.email, TEACHER, societyId);
+      const res = await open(fileId, teacher);
+      expect(res.status).toBe(200);
+      expect(typeof res.body.data.url).toBe('string');
+      expect(
+        (await audit(fileId)).filter((e) => e.action === 'file.download').map((e) => e.actor),
+      ).toEqual([ana.person.id]);
+    });
+
+    it('is 404 for a colleague’s document, one of another Institution, and a file no document holds', async () => {
+      const mine = await attached(ana);
+      const colleague = await attached(bo);
+      const elsewhere = await attached(cy, second);
+      const loose = await readyFile();
+      const teacher = await kit.actingAs(ana.person.email, TEACHER, societyId);
+      expect((await open(mine.fileId, teacher)).status).toBe(200);
+      for (const fileId of [colleague.fileId, elsewhere.fileId, loose]) {
+        expect((await open(fileId, teacher)).status).toBe(404);
+      }
+      expect((await audit(colleague.fileId)).filter((e) => e.action === 'file.download')).toEqual(
+        [],
+      );
+    });
+
+    it('is 404 once the document is deactivated, while an admin still has the link until the sweep', async () => {
+      const { fileId, documentId } = await attached(ana);
+      const teacher = await kit.actingAs(ana.person.email, TEACHER, societyId);
+      expect((await open(fileId, teacher)).status).toBe(200);
+      expect((await api('delete', `/v1/documents/${documentId}`, owner.token)).status).toBe(200);
+      expect((await open(fileId, teacher)).status).toBe(404);
+      expect((await open(fileId, owner.token)).status).toBe(200);
+    });
+
+    it('is 404 for a file of another purpose, and a teacher still may not ask to upload or confirm', async () => {
+      const photo = await readyFile({ purpose: 4, contentType: 'image/jpeg' }, JPEG, 'image/jpeg');
+      const teacher = await kit.actingAs(ana.person.email, TEACHER, societyId);
+      expect((await open(photo, teacher)).status).toBe(404);
+      expect((await open(photo, owner.token)).status).toBe(200);
+      const asked = await api('post', '/v1/files/uploads', teacher, {
+        purpose: 6,
+        institutionId: first,
+        contentType: 'application/pdf',
+        sizeBytes: PDF.length,
+        fileName: 'mine.pdf',
+      });
+      expect(asked.status).toBe(403);
+      expect((await api('post', `/v1/files/${photo}/confirm`, teacher)).status).toBe(403);
+    });
+  });
+
+  describe('the rules the database keeps itself', () => {
+    it('refuses an identity row for a record of another Society', async () => {
+      const otherSociety = await kit.society(admin);
+      const otherOwner = await fixtures.owner(otherSociety);
+      const school = await kit.institution(otherOwner.token, categoryId);
+      const stranger = await kit.staff(otherOwner.token, school, categoryId, { firstName: 'Di' });
+      await expect(
+        database.transaction(tenant([first]), (tx) =>
+          tx
+            .insertInto('staff_identities')
+            .values({ staff_member_id: stranger.id, society_id: otherSociety, ...sealed(1) })
+            .execute(),
+        ),
+      ).rejects.toThrow(/row-level security/);
+    });
+
+    it('keeps one record per number in a Society even when two rows are written straight to the table', async () => {
+      await expect(
+        database.transaction(tenant([first]), async (tx) => {
+          for (const staff of [ana, bo]) {
+            await tx
+              .insertInto('staff_identities')
+              .values({ staff_member_id: staff.id, society_id: societyId, ...sealed(7) })
+              .execute();
+          }
+        }),
+      ).rejects.toMatchObject({ code: '23505', constraint: 'uq_staff_identities_society_aadhaar' });
+    });
+
+    it('gives the application no right to delete an identity row', async () => {
+      await identity(ana, NUMBER);
+      await expect(
+        database.transaction(tenant([first]), (tx) =>
+          tx.deleteFrom('staff_identities').where('staff_member_id', '=', ana.id).execute(),
+        ),
+      ).rejects.toMatchObject({ code: '42501' });
+    });
+
+    it('refuses a document for an Institution the session does not reach', async () => {
+      const fileId = await readyFile({ institutionId: second });
+      await expect(
+        database.transaction(tenant([first]), (tx) =>
+          tx
+            .insertInto('documents')
+            .values({
+              society_id: societyId,
+              institution_id: second,
+              owner_type: 2,
+              staff_member_id: cy.id,
+              title: 'Letter',
+              file_id: fileId,
+            })
+            .execute(),
+        ),
+      ).rejects.toThrow(/row-level security/);
+    });
+
+    it('shows a session only the documents of the Institutions it reaches', async () => {
+      const mine = await attach(ana, { title: 'Letter', fileId: await readyFile() });
+      const theirs = await attach(cy, {
+        title: 'Letter',
+        fileId: await readyFile({ institutionId: second }),
+      });
+      expect(await seen([first])).toEqual([mine.body.data.id]);
+      expect(await seen([second])).toEqual([theirs.body.data.id]);
+      expect(await seen([first, second])).toEqual(
+        [mine.body.data.id, theirs.body.data.id].toSorted(),
+      );
+    });
+
+    it('lets the application change only the status of a document, and never delete one', async () => {
+      const made = await attach(ana, { title: 'Letter', fileId: await readyFile() });
+      const id = made.body.data.id as string;
+      const other = await readyFile();
+      const attempts: ((tx: Tx) => Promise<unknown>)[] = [
+        (tx: Tx) =>
+          tx.updateTable('documents').set({ title: 'Changed' }).where('id', '=', id).execute(),
+        (tx: Tx) =>
+          tx.updateTable('documents').set({ file_id: other }).where('id', '=', id).execute(),
+        (tx: Parameters<Parameters<DatabaseService['transaction']>[1]>[0]) =>
+          tx
+            .updateTable('documents')
+            .set({ institution_id: second })
+            .where('id', '=', id)
+            .execute(),
+        (tx: Tx) => tx.deleteFrom('documents').where('id', '=', id).execute(),
+      ];
+      for (const attempt of attempts) {
+        await expect(database.transaction(tenant([first]), attempt)).rejects.toMatchObject({
+          code: '42501',
+        });
+      }
     });
   });
 });

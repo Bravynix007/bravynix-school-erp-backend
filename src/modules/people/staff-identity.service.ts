@@ -4,7 +4,12 @@ import { AppException } from '../../common/http/app-exception.js';
 import { ErrorCode } from '../../common/http/error-codes.js';
 import { Clock } from '../../common/time/clock.js';
 import { AuditService } from '../../platform/audit/index.js';
-import { DatabaseService, isDuplicateOn, type Tx } from '../../platform/database/index.js';
+import {
+  DatabaseService,
+  isDuplicateOn,
+  type TenantContext,
+  type Tx,
+} from '../../platform/database/index.js';
 import {
   IdentityNumbers,
   maskAadhaar,
@@ -52,18 +57,19 @@ export class StaffIdentityService {
       body.aadhaar === null
         ? null
         : this.numbers.protect(body.aadhaar, { table: 'staff_identities', rowId: id });
+    const tenant = await this.reaching(context.tenant, id, claim);
     return this.database
-      .transaction(context.tenant, async (tx) => {
+      .transaction(tenant, async (tx) => {
         const current = await this.context.lockedActive(tx, id);
         const before = await this.identities.find(tx, id);
         if (sameNumber(before, claim)) return identityResource(before);
-        if (claim) await this.releaseHolder(tx, current, claim, principal.personId);
+        if (claim) await this.releaseHolder(tx, tenant, current, claim, principal.personId);
         const slot = { staffMemberId: id, societyId: current.society_id, by: principal.personId };
         await this.identities.put(tx, slot, claim);
         await this.audit.record(tx, {
           action: claim ? 'identity.updated' : 'identity.cleared',
           institutionId: current.home_institution_id,
-          entityType: 'staff_identity',
+          entityType: 'staff_identities',
           entityId: id,
           before: { aadhaarMasked: maskedAadhaar(before) },
           after: { aadhaarMasked: claim ? maskAadhaar(claim.last4) : null },
@@ -78,9 +84,34 @@ export class StaffIdentityService {
       });
   }
 
-  /** An active record that holds the number refuses it (409); a deactivated one gives it up. */
+  /**
+   * The caller's tenant, widened by the home Institution of a deactivated record that holds the number, so that the
+   * entry of its release can be written at that Institution, where its admins will look for it (the caller may not
+   * reach it). Society-level tables are read the same either way; nothing else changes.
+   */
+  private async reaching(
+    tenant: TenantContext,
+    claimantId: string,
+    claim: ProtectedAadhaar | null,
+  ): Promise<TenantContext> {
+    if (!claim) return tenant;
+    const holder = await this.database.transaction(tenant, (tx) =>
+      this.identities.holderOf(tx, claim.hmac, claimantId),
+    );
+    if (holder?.status !== 0) return tenant;
+    return {
+      ...tenant,
+      institutionIds: [...new Set([...(tenant.institutionIds ?? []), holder.homeInstitutionId])],
+    };
+  }
+
+  /**
+   * An active record that holds the number refuses it (409); a deactivated one gives it up, audited at its own
+   * Institution (at the claimant's in the rare case that it was deactivated since `reaching` looked).
+   */
   private async releaseHolder(
     tx: Tx,
+    tenant: TenantContext,
     claimant: StaffRow,
     claim: ProtectedAadhaar,
     by: string,
@@ -95,8 +126,10 @@ export class StaffIdentityService {
     );
     await this.audit.record(tx, {
       action: 'identity.released',
-      institutionId: claimant.home_institution_id,
-      entityType: 'staff_identity',
+      institutionId: tenant.institutionIds?.includes(holder.homeInstitutionId)
+        ? holder.homeInstitutionId
+        : claimant.home_institution_id,
+      entityType: 'staff_identities',
       entityId: holder.staffMemberId,
       before: { aadhaarMasked: maskAadhaar(claim.last4) },
       after: { aadhaarMasked: null, takenBy: claimant.id },

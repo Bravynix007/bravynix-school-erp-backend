@@ -96,7 +96,17 @@ function build(held?: IdentityRow, current: StaffRow | undefined = staff()) {
     { record } as unknown as AuditService,
     new FixedClock('2026-11-10T04:30:00.000Z'),
   );
-  return { service, find, identityFind, holderOf, put, record, reveal, requireInstitution };
+  return {
+    service,
+    transaction,
+    find,
+    identityFind,
+    holderOf,
+    put,
+    record,
+    reveal,
+    requireInstitution,
+  };
 }
 
 describe('StaffIdentityService.set (STF-11)', () => {
@@ -117,7 +127,7 @@ describe('StaffIdentityService.set (STF-11)', () => {
     expect(t.record.mock.calls[0]![1]).toEqual({
       action: 'identity.updated',
       institutionId: 'institution-1',
-      entityType: 'staff_identity',
+      entityType: 'staff_identities',
       entityId: 'staff-1',
       before: { aadhaarMasked: null },
       after: { aadhaarMasked: 'XXXX XXXX 0124' },
@@ -188,7 +198,11 @@ describe('StaffIdentityService.set (STF-11)', () => {
 
   it('refuses a number an active record holds with 409, and writes nothing', async () => {
     const t = build();
-    t.holderOf.mockResolvedValue({ staffMemberId: 'staff-2', status: 1 });
+    t.holderOf.mockResolvedValue({
+      staffMemberId: 'staff-2',
+      homeInstitutionId: 'institution-1',
+      status: 1,
+    });
     expect(await refusal(t.service.set(admin, 'staff-1', { aadhaar: NUMBER }))).toEqual({
       status: 409,
       code: 'AADHAAR_EXISTS_IN_SOCIETY',
@@ -200,7 +214,11 @@ describe('StaffIdentityService.set (STF-11)', () => {
   it('takes the number from a deactivated record, clearing it there and auditing both', async () => {
     const t = build();
     t.identityFind.mockResolvedValueOnce(undefined).mockResolvedValueOnce(stored(NUMBER));
-    t.holderOf.mockResolvedValue({ staffMemberId: 'staff-9', status: 0 });
+    t.holderOf.mockResolvedValue({
+      staffMemberId: 'staff-9',
+      homeInstitutionId: 'institution-9',
+      status: 0,
+    });
     await t.service.set(admin, 'staff-1', { aadhaar: NUMBER });
     expect(t.put.mock.calls.map(([, who, value]) => [who.staffMemberId, value === null])).toEqual([
       ['staff-9', true],
@@ -211,10 +229,60 @@ describe('StaffIdentityService.set (STF-11)', () => {
       ['identity.released', 'staff-9'],
       ['identity.updated', 'staff-1'],
     ]);
+    // The entry belongs to the record that lost the number, at that record's Institution (not the claimant's).
     expect(t.record.mock.calls[0]![1]).toMatchObject({
+      institutionId: 'institution-9',
+      entityType: 'staff_identities',
       before: { aadhaarMasked: 'XXXX XXXX 0124' },
       after: { aadhaarMasked: null, takenBy: 'staff-1' },
     });
+    // The caller reaches institution-1 only; the entry could be written at institution-9 because the tenant of the
+    // transaction was widened by that one Institution, and only for a deactivated holder.
+    expect(t.transaction.mock.calls.slice(1).map(([tenant]) => tenant.institutionIds)).toEqual([
+      ['institution-1'],
+      ['institution-1', 'institution-9'],
+    ]);
+  });
+
+  it('keeps the caller’s own reach when the holder is active, or when it is at an Institution the caller reaches', async () => {
+    const active = build();
+    active.holderOf.mockResolvedValue({
+      staffMemberId: 'staff-2',
+      homeInstitutionId: 'institution-9',
+      status: 1,
+    });
+    await refusal(active.service.set(admin, 'staff-1', { aadhaar: NUMBER }));
+    expect(active.transaction.mock.calls.slice(1).map(([tenant]) => tenant.institutionIds)).toEqual(
+      [['institution-1'], ['institution-1']],
+    );
+    const near = build();
+    near.holderOf.mockResolvedValue({
+      staffMemberId: 'staff-3',
+      homeInstitutionId: 'institution-1',
+      status: 0,
+    });
+    await near.service.set(admin, 'staff-1', { aadhaar: NUMBER });
+    expect(near.transaction.mock.calls[2]![0].institutionIds).toEqual(['institution-1']);
+  });
+
+  it('audits the release at the claimant’s Institution when the holder was deactivated after the reach was fixed', async () => {
+    const t = build();
+    t.holderOf.mockResolvedValueOnce(undefined).mockResolvedValue({
+      staffMemberId: 'staff-9',
+      homeInstitutionId: 'institution-9',
+      status: 0,
+    });
+    await t.service.set(admin, 'staff-1', { aadhaar: NUMBER });
+    expect(t.record.mock.calls[0]![1]).toMatchObject({
+      action: 'identity.released',
+      institutionId: 'institution-1',
+    });
+  });
+
+  it('does not look for a holder when the number is cleared', async () => {
+    const t = build(stored(NUMBER));
+    await t.service.set(admin, 'staff-1', { aadhaar: null });
+    expect(t.holderOf).not.toHaveBeenCalled();
   });
 
   it('turns the unique index into 409 when two records claim a number at once', async () => {

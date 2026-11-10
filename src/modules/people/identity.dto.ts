@@ -25,6 +25,6 @@ export class RevealIdentityDto {
 
   @ApiProperty({ minLength: 10, maxLength: 500 })
   @IsString()
-  @MaxLength(1000)
+  @MaxLength(500)
   reason!: string;
 }
