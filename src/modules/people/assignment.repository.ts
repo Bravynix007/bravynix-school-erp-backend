@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { Insertable, Selectable } from 'kysely';
+import { sql, type Insertable, type Selectable } from 'kysely';
 import type { Tx } from '../../platform/database/index.js';
 import { STAFF_NAME } from './staff.repository.js';
 import type { ClassTeacherAssignmentsTable, TeachingAssignmentsTable } from './people.tables.js';
@@ -13,6 +13,14 @@ export type NewTeaching = Insertable<TeachingAssignmentsTable>;
 export interface TeachingView extends TeachingRow {
   staff_first_name: string;
   staff_last_name: string | null;
+}
+
+/** The class teacher of one section, with the name. */
+export interface ClassTeacherView {
+  section_id: string;
+  staff_member_id: string;
+  first_name: string;
+  last_name: string | null;
 }
 
 /** What ASG-01 asks for: the active assignments of one Institution's year. */
@@ -101,6 +109,51 @@ export class AssignmentRepository {
       .updateTable('teaching_assignments')
       .set({ ended_at: now, ended_by: by })
       .where('id', '=', id)
+      .execute();
+  }
+
+  /** The sections the staff member leads or teaches in the year, from the active rows of both tables. */
+  async activeSectionIds(tx: Tx, staffMemberId: string, academicYearId: string): Promise<string[]> {
+    const rows = await sql<{ section_id: string }>`
+      select section_id from class_teacher_assignments
+        where staff_member_id = ${staffMemberId} and academic_year_id = ${academicYearId} and ended_at is null
+      union
+      select section_id from teaching_assignments
+        where staff_member_id = ${staffMemberId} and academic_year_id = ${academicYearId} and ended_at is null
+    `.execute(tx);
+    return rows.rows.map((row) => row.section_id);
+  }
+
+  /** The years of the Institution in which the staff member has an active assignment of either kind. */
+  async activeYearIds(tx: Tx, staffMemberId: string, institutionId: string): Promise<string[]> {
+    const rows = await sql<{ academic_year_id: string }>`
+      select academic_year_id from class_teacher_assignments
+        where staff_member_id = ${staffMemberId} and institution_id = ${institutionId} and ended_at is null
+      union
+      select academic_year_id from teaching_assignments
+        where staff_member_id = ${staffMemberId} and institution_id = ${institutionId} and ended_at is null
+    `.execute(tx);
+    return rows.rows.map((row) => row.academic_year_id);
+  }
+
+  /** The class teacher of each of these sections in the year, with the name. */
+  classTeachersOf(
+    tx: Tx,
+    academicYearId: string,
+    sectionIds: readonly string[],
+  ): Promise<ClassTeacherView[]> {
+    return tx
+      .selectFrom('class_teacher_assignments as a')
+      .innerJoin('staff_members', 'staff_members.id', 'a.staff_member_id')
+      .select([
+        'a.section_id',
+        'a.staff_member_id',
+        'staff_members.first_name',
+        'staff_members.last_name',
+      ])
+      .where('a.academic_year_id', '=', academicYearId)
+      .where('a.section_id', 'in', sectionIds)
+      .where('a.ended_at', 'is', null)
       .execute();
   }
 

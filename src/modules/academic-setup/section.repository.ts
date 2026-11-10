@@ -24,11 +24,10 @@ export class SectionRepository {
       .select(['p.code as predefined_code', 'p.name as predefined_name']);
   }
 
-  /** The active sections of a class, in the order of the predefined sections. */
-  active(tx: Tx, classId: string): Promise<SectionView[]> {
-    return this.view(tx)
-      .where('s.class_id', '=', classId)
-      .where('s.status', '=', 1)
+  /** The active sections of a class, in the order of the predefined sections; with `ids`, only those of them. */
+  active(tx: Tx, classId: string, ids?: readonly string[]): Promise<SectionView[]> {
+    const query = this.view(tx).where('s.class_id', '=', classId).where('s.status', '=', 1);
+    return (ids ? query.where('s.id', 'in', ids) : query)
       .orderBy('p.display_order')
       .orderBy('s.id')
       .execute();

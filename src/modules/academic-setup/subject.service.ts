@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
+import { RoleCode } from '../../common/auth/roles.js';
 import { ApiResult } from '../../common/http/api-result.js';
 import { authorIdsOf } from '../../common/http/author-stamps.js';
 import { AppException } from '../../common/http/app-exception.js';
@@ -20,6 +21,7 @@ import { PersonDirectory } from '../../platform/identity/index.js';
 import type { CreateSubjectDto, UpdateSubjectDto } from './subject.dto.js';
 import { SubjectRepository, type SubjectChanges, type SubjectRow } from './subject.repository.js';
 import { subjectResource, type SubjectResource } from './subject.resource.js';
+import { TeachingStaff } from './teaching-staff.js';
 
 /** What the audit log keeps of a subject. */
 function auditView(row: SubjectRow): AuditValues {
@@ -44,15 +46,18 @@ export class SubjectService {
     private readonly database: DatabaseService,
     private readonly subjects: SubjectRepository,
     private readonly people: PersonDirectory,
+    private readonly teaching: TeachingStaff,
     private readonly audit: AuditService,
   ) {}
 
-  /** SUB-01: the active subjects by name. */
+  /** SUB-01: the active subjects by name. A teacher reads only the subjects they can teach (API design 10.4i). */
   async list(principal: Principal): Promise<ApiResult<SubjectResource[]>> {
     const { tenant, societyId } = this.societyOf(principal);
-    const rows = await this.database.transaction(tenant, (tx) =>
-      this.subjects.active(tx, societyId),
-    );
+    const rows = await this.database.transaction(tenant, async (tx) => {
+      if (principal.roleCode !== RoleCode.TeacherStaff) return this.subjects.active(tx, societyId);
+      const own = await this.teaching.ownSubjectIds(tx, principal.personId);
+      return own.size === 0 ? [] : this.subjects.active(tx, societyId, [...own]);
+    });
     const people = await this.people.describe(authorIdsOf(rows));
     return ApiResult.list(
       rows.map((row) => subjectResource(row, people)),

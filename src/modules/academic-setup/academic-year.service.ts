@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
+import { RoleCode } from '../../common/auth/roles.js';
 import { ApiResult } from '../../common/http/api-result.js';
 import { AppException } from '../../common/http/app-exception.js';
 import { ErrorCode } from '../../common/http/error-codes.js';
@@ -29,6 +30,7 @@ import {
 import { academicYearResource, type AcademicYearResource } from './academic-year.resource.js';
 import { requireYearDates, translateYearError } from './academic-year.rules.js';
 import { institutionOfActive } from './row-context.js';
+import { TeachingStaff } from './teaching-staff.js';
 
 /** What the audit log keeps of a year. */
 function auditView(row: AcademicYearRow): AuditValues {
@@ -54,18 +56,26 @@ export class AcademicYearService {
     private readonly years: AcademicYearRepository,
     private readonly scope: ScopeService,
     private readonly people: PersonDirectory,
+    private readonly teaching: TeachingStaff,
     private readonly audit: AuditService,
   ) {}
 
-  /** AY-01: the active years, the latest start first. */
+  /**
+   * AY-01: the active years, the latest start first. A teacher reads only the years in which they hold an
+   * assignment (API design 10.4h).
+   */
   async list(
     principal: Principal,
     query: ListAcademicYearsQueryDto,
   ): Promise<ApiResult<AcademicYearResource[]>> {
     const { tenant } = await this.scope.requireInstitution(principal, query.institutionId);
-    const rows = await this.database.transaction(tenant, (tx) =>
-      this.years.active(tx, query.institutionId),
-    );
+    const rows = await this.database.transaction(tenant, async (tx) => {
+      if (principal.roleCode !== RoleCode.TeacherStaff) {
+        return this.years.active(tx, query.institutionId);
+      }
+      const own = await this.teaching.ownYearIds(tx, principal.personId, query.institutionId);
+      return own.size === 0 ? [] : this.years.active(tx, query.institutionId, [...own]);
+    });
     const people = await this.people.describe(authorIdsOf(rows));
     return ApiResult.list(
       rows.map((row) => academicYearResource(row, people)),

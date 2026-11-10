@@ -61,6 +61,32 @@ describe('AssignmentRepository', () => {
     expect(locked?.parameters).toEqual(['row-1']);
   });
 
+  it('reads the sections of a year from the active rows of both tables, once each', async () => {
+    const [query] = await sqlOf((tx) => repository.activeSectionIds(tx, 'staff-1', 'year-1'));
+    expect(query?.sql).toContain('from class_teacher_assignments');
+    expect(query?.sql).toContain('from teaching_assignments');
+    expect(query?.sql).toContain('union');
+    expect(query?.sql.match(/ended_at is null/g)).toHaveLength(2);
+    expect(query?.parameters).toEqual(['staff-1', 'year-1', 'staff-1', 'year-1']);
+  });
+
+  it('reads the years of an Institution in which the staff member has an active assignment', async () => {
+    const [query] = await sqlOf((tx) => repository.activeYearIds(tx, 'staff-1', 'institution-1'));
+    expect(query?.sql.match(/ended_at is null/g)).toHaveLength(2);
+    expect(query?.sql.match(/institution_id =/g)).toHaveLength(2);
+    expect(query?.parameters).toEqual(['staff-1', 'institution-1', 'staff-1', 'institution-1']);
+  });
+
+  it('reads the active class teachers of the sections in a year, with their names', async () => {
+    const [query] = await sqlOf((tx) =>
+      repository.classTeachersOf(tx, 'year-1', ['section-1', 'section-2']),
+    );
+    expect(query?.sql).toContain('inner join "staff_members"');
+    expect(query?.sql).toContain('"a"."ended_at" is null');
+    expect(query?.sql).toContain('"a"."section_id" in ($2, $3)');
+    expect(query?.parameters).toEqual(['year-1', 'section-1', 'section-2']);
+  });
+
   describe('pageTeaching', () => {
     it('lists the active assignments of the Institution and year by teacher name, a page at a time', async () => {
       const [list] = await sqlOf((tx) => repository.pageTeaching(tx, filter(), 10, 20));

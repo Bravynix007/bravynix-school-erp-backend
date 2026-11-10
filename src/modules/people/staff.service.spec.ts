@@ -55,6 +55,14 @@ const staff = (overrides: Partial<StaffRow> = {}): StaffRow =>
     ...overrides,
   }) as StaffRow;
 
+const old = () => staff({ id: 'staff-old', home_institution_id: 'institution-closed' });
+
+const closed = (t: ReturnType<typeof build>, found: StaffRow | null = old()) => {
+  t.activeHomeIds.mockResolvedValue(['institution-closed', 'institution-1']);
+  t.inactive.mockResolvedValue(['institution-closed']);
+  t.activeOfUser.mockResolvedValue(found ?? undefined);
+};
+
 const unique = (constraint: string) =>
   Object.assign(new Error('unique'), { code: '23505', constraint });
 
@@ -155,6 +163,9 @@ function build(current: StaffRow | null = staff()) {
     order.push('announce');
   });
   const hasActiveRecord = vi.fn<StaffRepository['hasActiveRecord']>().mockResolvedValue(false);
+  const activeHomeIds = vi.fn<StaffRepository['activeHomeIds']>().mockResolvedValue([]);
+  const activeOfUser = vi.fn<StaffRepository['activeOfUser']>().mockResolvedValue(undefined);
+  const inactive = vi.fn<InstitutionDirectory['inactive']>().mockResolvedValue([]);
   const page = vi
     .fn<StaffRepository['page']>()
     .mockResolvedValue({ rows: [current ?? staff()], total: 41 });
@@ -165,6 +176,8 @@ function build(current: StaffRow | null = staff()) {
     insert,
     update,
     hasActiveRecord,
+    activeHomeIds,
+    activeOfUser,
     page,
     replaceEducations,
     replaceEmergencyContacts,
@@ -221,6 +234,7 @@ function build(current: StaffRow | null = staff()) {
         ]),
       ),
       requireActive: requireActiveInstitutions,
+      inactive,
     } as unknown as InstitutionDirectory,
     { requireActive } as unknown as SubjectDirectory,
     { record } as unknown as AuditService,
@@ -229,6 +243,7 @@ function build(current: StaffRow | null = staff()) {
   return {
     service,
     order,
+    transaction,
     find,
     insert,
     update,
@@ -257,6 +272,9 @@ function build(current: StaffRow | null = staff()) {
     changeStaffEmail,
     announceStaffEmail,
     hasActiveRecord,
+    activeHomeIds,
+    activeOfUser,
+    inactive,
     page,
     forPrincipal,
     record,
@@ -285,8 +303,71 @@ describe('StaffService', () => {
         entityType: 'staff_member',
       });
       expect(t.welcomeAs).toHaveBeenCalledWith({ email: 'meera@example.com' }, 4, 'Sunrise Trust');
-      expect(t.order).toEqual(['commit', 'welcome']);
+      expect(t.order).toEqual(['commit', 'commit', 'welcome']);
       expect(created).toMatchObject({ firstName: 'Meera', person: { email: 'meera@example.com' } });
+    });
+
+    describe('a person whose home Institution is closed', () => {
+      it('ends the old record as STF-05 does, audited, before the new one starts', async () => {
+        const t = build();
+        closed(t);
+        t.update.mockResolvedValueOnce(staff({ ...old(), status: 0 }));
+        const { transaction } = t;
+        await t.service.create(owner, body);
+        expect(transaction.mock.calls[1]![0].institutionIds).toEqual([
+          'institution-1',
+          'institution-closed',
+        ]);
+        expect(t.update.mock.calls[0]).toMatchObject([
+          expect.anything(),
+          'staff-old',
+          { status: 0 },
+        ]);
+        expect(t.revokeAdminAccessOfStaff.mock.calls[0]![1]).toBe('staff-old');
+        expect(t.endAllOfStaff.mock.calls[0]![1]).toBe('staff-old');
+        expect(t.endRoleSessions).toHaveBeenCalledWith(
+          expect.anything(),
+          'user-1',
+          4,
+          'society-1',
+          expect.anything(),
+        );
+        const [ended, created] = t.record.mock.calls.map(([, entry]) => entry);
+        expect(ended).toMatchObject({
+          action: 'staff.deactivated',
+          institutionId: 'institution-closed',
+          entityId: 'staff-old',
+          after: { status: 0, replacedBy: t.insert.mock.calls[0]![1].id },
+        });
+        expect(created).toMatchObject({ action: 'staff.created', institutionId: 'institution-1' });
+        expect(t.update.mock.invocationCallOrder[0]).toBeLessThan(
+          t.insert.mock.invocationCallOrder[0]!,
+        );
+      });
+
+      it('leaves a record that is based at an open Institution to answer DUPLICATE', async () => {
+        const t = build();
+        closed(t, staff({ id: 'staff-old', home_institution_id: 'institution-2' }));
+        await t.service.create(owner, body);
+        expect(t.update).not.toHaveBeenCalled();
+        expect(t.endAllOfStaff).not.toHaveBeenCalled();
+      });
+
+      it('does nothing when the person has no active record', async () => {
+        const t = build();
+        closed(t, null);
+        await t.service.create(owner, body);
+        expect(t.update).not.toHaveBeenCalled();
+      });
+
+      it('is for the Society Owner alone: an Institution Admin reaches no closed home', async () => {
+        const t = build();
+        closed(t);
+        const admin = { ...owner, personId: 'admin-1', roleCode: 3 } as Principal;
+        await t.service.create(admin, body);
+        expect(t.activeHomeIds).not.toHaveBeenCalled();
+        expect(t.update).not.toHaveBeenCalled();
+      });
     });
 
     it('checks the dates before opening a transaction', async () => {

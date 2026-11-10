@@ -137,6 +137,17 @@ export class StaffRepository {
     return row !== undefined;
   }
 
+  /** The home Institutions of the active records in the caller's Society, each once. */
+  async activeHomeIds(tx: Tx): Promise<string[]> {
+    const rows = await tx
+      .selectFrom('staff_members')
+      .select('home_institution_id')
+      .distinct()
+      .where('status', '=', 1)
+      .execute();
+    return rows.map((row) => row.home_institution_id);
+  }
+
   /** The active staff record of this person in the caller's Society: a person holds at most one. */
   activeOfUser(tx: Tx, userId: string): Promise<StaffRow | undefined> {
     return tx

@@ -8,6 +8,7 @@ import type { InstitutionContext, ScopeService } from '../../platform/tenancy/in
 import type { ClassRepository, ClassRow } from './class.repository.js';
 import type { SectionRepository, SectionRow, SectionView } from './section.repository.js';
 import { SectionService } from './section.service.js';
+import type { ClassTeacherRef, TeachingStaff } from './teaching-staff.js';
 
 const owner = {
   personId: 'owner-1',
@@ -82,6 +83,9 @@ const fail = async (work: Promise<unknown>) => {
 const unique = (constraint: string) =>
   Object.assign(new Error('unique'), { code: '23505', constraint });
 
+const teacher = { ...owner, personId: 'teacher-1', roleCode: 4 } as Principal;
+const lead: ClassTeacherRef = { staffMemberId: 'staff-1', firstName: 'Meera', lastName: 'Rao' };
+
 function build(current: SectionRow | null = row(), parent: ClassRow | null = classRow()) {
   const tx = {} as Tx;
   const transaction = vi.fn<DatabaseService['transaction']>((_tenant, work) => work(tx));
@@ -108,6 +112,12 @@ function build(current: SectionRow | null = row(), parent: ClassRow | null = cla
   const forPrincipal = vi
     .fn<ScopeService['forPrincipal']>()
     .mockResolvedValue({ tenant } as Awaited<ReturnType<ScopeService['forPrincipal']>>);
+  const ownSectionIds = vi
+    .fn<TeachingStaff['ownSectionIds']>()
+    .mockResolvedValue(new Set(['section-1']));
+  const classTeachers = vi
+    .fn<TeachingStaff['classTeachers']>()
+    .mockResolvedValue(new Map([['section-1', lead]]));
   const record = vi.fn<AuditService['record']>().mockResolvedValue('audit-1');
   const service = new SectionService(
     { transaction } as unknown as DatabaseService,
@@ -118,9 +128,20 @@ function build(current: SectionRow | null = row(), parent: ClassRow | null = cla
     {
       describe: vi.fn<PersonDirectory['describe']>().mockResolvedValue(new Map()),
     } as unknown as PersonDirectory,
+    { ownSectionIds, classTeachers } as unknown as TeachingStaff,
     { record } as unknown as AuditService,
   );
-  return { service, active, insert, update, record, findClass, requirePredefinedSection };
+  return {
+    service,
+    ownSectionIds,
+    classTeachers,
+    active,
+    insert,
+    update,
+    record,
+    findClass,
+    requirePredefinedSection,
+  };
 }
 
 const body = { classId: 'class-1', predefinedSectionId: 'ps-b' };
@@ -133,7 +154,54 @@ describe('SectionService', () => {
       expect(result.data).toEqual([
         expect.objectContaining({ id: 'section-1', displayName: 'A', currentStudentCount: null }),
       ]);
-      expect(t.active).toHaveBeenCalledWith(expect.anything(), 'class-1');
+      expect(t.active).toHaveBeenCalledWith(expect.anything(), 'class-1', undefined);
+      expect(t.ownSectionIds).not.toHaveBeenCalled();
+    });
+
+    it('shows the class teacher of the current year on each section, and null for a section with none', async () => {
+      const t = build();
+      t.active.mockResolvedValue([viewOf(row()), viewOf(row({ id: 'section-2' }))]);
+      const result = await t.service.list(owner, 'class-1');
+      expect(result.data.map((section) => section.classTeacher)).toEqual([lead, null]);
+      expect(t.classTeachers).toHaveBeenCalledWith(expect.anything(), 'inst-1', [
+        'section-1',
+        'section-2',
+      ]);
+    });
+
+    it('does not ask who leads when the class has no section', async () => {
+      const t = build();
+      t.active.mockResolvedValue([]);
+      expect((await t.service.list(owner, 'class-1')).data).toEqual([]);
+      expect(t.classTeachers).not.toHaveBeenCalled();
+    });
+
+    it('shows a teacher only the sections they lead or teach this year', async () => {
+      const t = build();
+      t.ownSectionIds.mockResolvedValue(new Set(['section-1', 'section-9']));
+      const result = await t.service.list(teacher, 'class-1');
+      expect(t.ownSectionIds).toHaveBeenCalledWith(expect.anything(), 'teacher-1', 'inst-1');
+      expect(t.active).toHaveBeenCalledWith(expect.anything(), 'class-1', [
+        'section-1',
+        'section-9',
+      ]);
+      expect(result.data).toHaveLength(1);
+    });
+
+    it('is 403 NOT_ASSIGNED for a teacher who has no section of the class, and asks nothing of the database when they have none at all', async () => {
+      const none = build();
+      none.ownSectionIds.mockResolvedValue(new Set());
+      expect(await fail(none.service.list(teacher, 'class-1'))).toMatchObject({
+        status: 403,
+        code: 'NOT_ASSIGNED',
+      });
+      expect(none.active).not.toHaveBeenCalled();
+      const elsewhere = build();
+      elsewhere.active.mockResolvedValue([]);
+      expect(await fail(elsewhere.service.list(teacher, 'class-1'))).toMatchObject({
+        status: 403,
+        code: 'NOT_ASSIGNED',
+      });
     });
 
     it('is 404 for an unknown or deactivated class', async () => {
@@ -199,6 +267,13 @@ describe('SectionService', () => {
         await fail(t.service.update(owner, 'section-1', { version: 2, capacity: 30 })),
       ).toMatchObject({ status: 409 });
       expect(t.update).not.toHaveBeenCalled();
+    });
+
+    it('shows the class teacher of the current year on the section it returns', async () => {
+      const t = build();
+      const saved = await t.service.update(owner, 'section-1', { version: 1, capacity: 30 });
+      expect(saved.classTeacher).toEqual(lead);
+      expect(t.classTeachers).toHaveBeenCalledWith(expect.anything(), 'inst-1', ['section-1']);
     });
 
     it('writes nothing when nothing changes', async () => {

@@ -64,3 +64,11 @@ describe('InstitutionDirectory.requireActive', () => {
     });
   });
 });
+
+describe('InstitutionDirectory.inactive', () => {
+  it('names the deactivated Institutions among those asked, in one read', async () => {
+    const t = build([institution('a'), institution('b', 0), institution('c', 0)]);
+    await expect(t.directory.inactive(tx, ['a', 'b', 'c', 'gone'])).resolves.toEqual(['b', 'c']);
+    expect(t.refs).toHaveBeenCalledTimes(1);
+  });
+});

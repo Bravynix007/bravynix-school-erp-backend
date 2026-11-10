@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
+import { RoleCode } from '../../common/auth/roles.js';
 import { ApiResult } from '../../common/http/api-result.js';
 import { AppException } from '../../common/http/app-exception.js';
 import { authorIdsOf } from '../../common/http/author-stamps.js';
@@ -32,6 +33,7 @@ import {
   translateClassError,
 } from './class.rules.js';
 import { SectionRepository } from './section.repository.js';
+import { TeachingStaff } from './teaching-staff.js';
 import { classAuditView, sectionAuditEntry, sectionAuditView } from './structure.audit.js';
 import { institutionOfActive } from './row-context.js';
 
@@ -50,18 +52,26 @@ export class ClassService {
     private readonly masters: MasterReferences,
     private readonly scope: ScopeService,
     private readonly people: PersonDirectory,
+    private readonly teaching: TeachingStaff,
     private readonly audit: AuditService,
   ) {}
 
-  /** CLS-01: the active classes with their section counts. */
+  /**
+   * CLS-01: the active classes with their section counts. A teacher reads only the classes with a section they lead
+   * or teach this year, and the count is of those sections (API design 10.4j).
+   */
   async list(
     principal: Principal,
     query: ListClassesQueryDto,
   ): Promise<ApiResult<ClassResource[]>> {
     const { tenant } = await this.scope.requireInstitution(principal, query.institutionId);
-    const rows = await this.database.transaction(tenant, (tx) =>
-      this.classes.active(tx, query.institutionId),
-    );
+    const rows = await this.database.transaction(tenant, async (tx) => {
+      if (principal.roleCode !== RoleCode.TeacherStaff) {
+        return this.classes.active(tx, query.institutionId);
+      }
+      const own = await this.teaching.ownSectionIds(tx, principal.personId, query.institutionId);
+      return own.size === 0 ? [] : this.classes.active(tx, query.institutionId, [...own]);
+    });
     return ApiResult.list(await this.resources(rows), null);
   }
 

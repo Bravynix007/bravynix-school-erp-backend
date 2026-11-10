@@ -10,13 +10,14 @@ export type SubjectChanges = Updateable<SubjectsTable>;
 /** Queries on `subjects`; every one runs in the caller's transaction, under row-level security. */
 @Injectable()
 export class SubjectRepository {
-  /** The Society's active subjects by name. */
-  active(tx: Tx, societyId: string): Promise<SubjectRow[]> {
-    return tx
+  /** The Society's active subjects by name; with `ids`, only those of them. */
+  active(tx: Tx, societyId: string, ids?: readonly string[]): Promise<SubjectRow[]> {
+    const query = tx
       .selectFrom('subjects')
       .selectAll()
       .where('society_id', '=', societyId)
-      .where('status', '=', 1)
+      .where('status', '=', 1);
+    return (ids ? query.where('id', 'in', ids) : query)
       .orderBy(sql`lower(name)`)
       .orderBy('id')
       .execute();

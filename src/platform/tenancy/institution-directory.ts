@@ -67,6 +67,12 @@ export class InstitutionDirectory {
     }
   }
 
+  /** The deactivated Institutions among `ids` (an ID the caller cannot see is left out). */
+  async inactive(tx: Tx, ids: readonly string[]): Promise<string[]> {
+    const found = await this.institutions.refs(tx, ids);
+    return [...found.values()].filter((row) => row.status === 0).map((row) => row.id);
+  }
+
   /** How many Societies, and how many Institutions in them, are active: the dashboard's figures. */
   async activeCounts(tx: Tx): Promise<{ societies: number; institutions: number }> {
     return {

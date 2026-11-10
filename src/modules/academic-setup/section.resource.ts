@@ -5,10 +5,12 @@ import {
 } from '../../common/http/author-stamps.js';
 import type { NamedRef } from './class.resource.js';
 import type { SectionView } from './section.repository.js';
+import type { ClassTeacherRef } from './teaching-staff.js';
 
 /**
- * One section as the API shows it (API design 10.4j). The student count and the class teacher need the People
- * module (Phase 4): until then they are `null`, so the screens can already read the final shape.
+ * One section as the API shows it (API design 10.4j). The class teacher is the one of the Institution's current
+ * year, or `null`. The student count needs the Students slice (Phase 4): until then it is `null`, so the screens can
+ * already read the final shape.
  */
 export interface SectionResource extends AuthorStamps {
   id: string;
@@ -18,7 +20,7 @@ export interface SectionResource extends AuthorStamps {
   displayName: string;
   capacity: number | null;
   currentStudentCount: null;
-  classTeacher: null;
+  classTeacher: ClassTeacherRef | null;
   status: number;
   version: number;
 }
@@ -26,6 +28,7 @@ export interface SectionResource extends AuthorStamps {
 export function sectionResource(
   row: SectionView,
   people: ReadonlyMap<string, AuthorRef>,
+  classTeacher: ClassTeacherRef | null,
 ): SectionResource {
   return {
     id: row.id,
@@ -39,7 +42,7 @@ export function sectionResource(
     displayName: row.display_name,
     capacity: row.capacity,
     currentStudentCount: null,
-    classTeacher: null,
+    classTeacher,
     status: row.status,
     version: row.version,
     ...authorStamps(row, people),

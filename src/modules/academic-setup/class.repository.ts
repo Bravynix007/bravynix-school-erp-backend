@@ -19,7 +19,9 @@ export interface ClassView extends ClassRow {
 /** Queries on `classes`; every one runs in the caller's transaction, under row-level security. */
 @Injectable()
 export class ClassRepository {
-  private view(tx: Tx) {
+  /** `sectionIds` limits the section count to those sections: a teacher's own. */
+  private view(tx: Tx, sectionIds?: readonly string[]) {
+    const own = sectionIds ? sql` and s.id = any(${sql.val(sectionIds)}::uuid[])` : sql``;
     return tx
       .selectFrom('classes as c')
       .innerJoin('predefined_classes as p', 'p.id', 'c.predefined_class_id')
@@ -30,17 +32,31 @@ export class ClassRepository {
         'p.name as predefined_name',
         'g.code as category_code',
         'g.name as category_name',
-        sql<number>`(select count(*)::int from sections s where s.class_id = c.id and s.status = 1)`.as(
+        sql<number>`(select count(*)::int from sections s where s.class_id = c.id and s.status = 1${own})`.as(
           'section_count',
         ),
       ]);
   }
 
-  /** The active classes in the order of the lists: category, predefined class, then stream. */
-  active(tx: Tx, institutionId: string): Promise<ClassView[]> {
-    return this.view(tx)
+  /**
+   * The active classes in the order of the lists: category, predefined class, then stream. With `sectionIds`, only
+   * the classes that have one of those active sections, counting only those (a teacher's own classes).
+   */
+  active(tx: Tx, institutionId: string, sectionIds?: readonly string[]): Promise<ClassView[]> {
+    const query = this.view(tx, sectionIds)
       .where('c.institution_id', '=', institutionId)
-      .where('c.status', '=', 1)
+      .where('c.status', '=', 1);
+    return (
+      sectionIds
+        ? query.where('c.id', 'in', (eb) =>
+            eb
+              .selectFrom('sections as o')
+              .select('o.class_id')
+              .where('o.status', '=', 1)
+              .where('o.id', 'in', sectionIds),
+          )
+        : query
+    )
       .orderBy('g.display_order')
       .orderBy('p.display_order')
       .orderBy(sql`lower(c.stream_name)`, (order) => order.asc().nullsFirst())

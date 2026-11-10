@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
+import { RoleCode } from '../../common/auth/roles.js';
 import { ApiResult } from '../../common/http/api-result.js';
 import { AppException } from '../../common/http/app-exception.js';
+import { ErrorCode } from '../../common/http/error-codes.js';
 import { authorIdsOf } from '../../common/http/author-stamps.js';
 import { changedColumns } from '../../common/http/changed-columns.js';
 import { newId } from '../../common/ids/ids.js';
@@ -23,6 +25,7 @@ import { SectionRepository, type SectionRow, type SectionView } from './section.
 import { sectionResource, type SectionResource } from './section.resource.js';
 import { sectionAuditEntry, sectionAuditView } from './structure.audit.js';
 import { institutionOfActive } from './row-context.js';
+import { TeachingStaff, type ClassTeacherRef } from './teaching-staff.js';
 
 /**
  * SEC-01 to SEC-04 (API design 10.4j): the sections of a class. Who may do what is the same as for classes, and
@@ -38,16 +41,27 @@ export class SectionService {
     private readonly masters: MasterReferences,
     private readonly scope: ScopeService,
     private readonly people: PersonDirectory,
+    private readonly teaching: TeachingStaff,
     private readonly audit: AuditService,
   ) {}
 
-  /** SEC-01: the active sections of a class; 404 for a class the caller cannot reach or one that is deactivated. */
+  /**
+   * SEC-01: the active sections of a class, each with its class teacher; 404 for a class the caller cannot reach or
+   * one that is deactivated. A teacher reads only the sections they lead or teach this year, and 403 `NOT_ASSIGNED`
+   * when the class has none (API design 6.4, 10.4j).
+   */
   async list(principal: Principal, classId: string): Promise<ApiResult<SectionResource[]>> {
     const context = await this.classContext(principal, classId);
-    const views = await this.database.transaction(context.tenant, (tx) =>
-      this.sections.active(tx, classId),
-    );
-    return ApiResult.list(await this.resources(views), null);
+    const { views, classTeachers } = await this.database.transaction(context.tenant, async (tx) => {
+      const own =
+        principal.roleCode === RoleCode.TeacherStaff
+          ? [...(await this.teaching.ownSectionIds(tx, principal.personId, context.institutionId))]
+          : undefined;
+      const found = own?.length === 0 ? [] : await this.sections.active(tx, classId, own);
+      if (own && found.length === 0) throw AppException.forbidden(ErrorCode.NOT_ASSIGNED);
+      return { views: found, classTeachers: await this.classTeachersOf(tx, context, found) };
+    });
+    return ApiResult.list(await this.resources(views, classTeachers), null);
   }
 
   /** SEC-02: 409 `DUPLICATE` on `predefinedSectionId` or `displayName` when an active section of the class has it. */
@@ -79,13 +93,14 @@ export class SectionService {
       .catch((error: unknown) => {
         throw translateSectionError(error);
       });
-    return (await this.resources([view]))[0]!;
+    // A section that was just made has no class teacher.
+    return (await this.resources([view], new Map()))[0]!;
   }
 
   /** SEC-03: `version` first; a request that changes nothing writes nothing. A deactivated section is 404. */
   async update(principal: Principal, id: string, body: UpdateSectionDto): Promise<SectionResource> {
     const context = await this.contextOf(principal, id);
-    const view = await this.database
+    const { view, classTeachers } = await this.database
       .transaction(context.tenant, async (tx) => {
         const current = await this.lockedActive(tx, id);
         requireVersion(current, body.version);
@@ -103,12 +118,13 @@ export class SectionService {
             after: sectionAuditView(updated),
           });
         }
-        return this.sections.viewOf(tx, id);
+        const updated = await this.sections.viewOf(tx, id);
+        return { view: updated, classTeachers: await this.classTeachersOf(tx, context, [updated]) };
       })
       .catch((error: unknown) => {
         throw translateSectionError(error);
       });
-    return (await this.resources([view]))[0]!;
+    return (await this.resources([view], classTeachers))[0]!;
   }
 
   /** SEC-04: deactivates; nothing is deleted, and the name is free again. Phase 4 refuses it while students are placed. */
@@ -149,9 +165,27 @@ export class SectionService {
     return found;
   }
 
-  private async resources(views: readonly SectionView[]): Promise<SectionResource[]> {
+  /** Who leads each of these sections in the Institution's current year. */
+  private async classTeachersOf(
+    tx: Tx,
+    context: InstitutionContext,
+    views: readonly SectionView[],
+  ): Promise<ReadonlyMap<string, ClassTeacherRef>> {
+    return views.length === 0
+      ? new Map()
+      : this.teaching.classTeachers(
+          tx,
+          context.institutionId,
+          views.map((view) => view.id),
+        );
+  }
+
+  private async resources(
+    views: readonly SectionView[],
+    classTeachers: ReadonlyMap<string, ClassTeacherRef>,
+  ): Promise<SectionResource[]> {
     const people = await this.people.describe(authorIdsOf(views));
-    return views.map((view) => sectionResource(view, people));
+    return views.map((view) => sectionResource(view, people, classTeachers.get(view.id) ?? null));
   }
 
   private record(

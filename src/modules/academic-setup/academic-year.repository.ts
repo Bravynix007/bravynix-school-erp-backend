@@ -20,15 +20,14 @@ export class AcademicYearRepository {
     `.execute(tx);
   }
 
-  /** The active years, the one that starts latest first. */
-  active(tx: Tx, institutionId: string): Promise<AcademicYearRow[]> {
-    return tx
+  /** The active years, the one that starts latest first; with `ids`, only those of them. */
+  active(tx: Tx, institutionId: string, ids?: readonly string[]): Promise<AcademicYearRow[]> {
+    const query = tx
       .selectFrom('academic_years')
       .selectAll()
       .where('institution_id', '=', institutionId)
-      .where('status', '=', 1)
-      .orderBy('start_date', 'desc')
-      .execute();
+      .where('status', '=', 1);
+    return (ids ? query.where('id', 'in', ids) : query).orderBy('start_date', 'desc').execute();
   }
 
   async find(tx: Tx, id: string, lock = false): Promise<AcademicYearRow | undefined> {
