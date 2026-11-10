@@ -42,6 +42,8 @@ import {
   type UpdateStaffDto,
 } from './staff.dto.js';
 import { AssignmentRepository } from './assignment.repository.js';
+import { IdentityRepository } from './identity.repository.js';
+import { maskedAadhaar } from './identity.resource.js';
 import { classTeacherResource } from './assignment.resource.js';
 import { StaffContext } from './staff-context.js';
 import {
@@ -165,6 +167,7 @@ export class StaffService {
     private readonly scope: ScopeService,
     private readonly context: StaffContext,
     private readonly assignments: AssignmentRepository,
+    private readonly identities: IdentityRepository,
     private readonly accounts: AccountDirectory,
     private readonly people: PersonDirectory,
     private readonly masters: MasterReferences,
@@ -271,11 +274,14 @@ export class StaffService {
       });
     this.accounts.welcomeAs({ email: created.email }, RoleCode.TeacherStaff, created.societyName);
     // A record that has just been made has no subjects and no extra Institutions yet.
-    return this.resource(created.row, created.educations, created.contacts, created.email, {
-      subjectIds: [],
-      institutionIds: [],
-      classTeachers: [],
-    });
+    return this.resource(
+      created.row,
+      created.educations,
+      created.contacts,
+      created.email,
+      { subjectIds: [], institutionIds: [], classTeachers: [] },
+      null,
+    );
   }
 
   /**
@@ -313,14 +319,23 @@ export class StaffService {
     );
   }
 
-  /** STF-03: the profile; 404 for a person who is not at an Institution the caller reaches. */
+  /**
+   * STF-03: the profile; 404 for a person who is not at an Institution the caller reaches. An admin sees the Aadhaar
+   * number masked; a teacher reading their own profile does not see it at all.
+   */
   async get(principal: Principal, id: string): Promise<StaffResource> {
     const context = await this.context.of(principal, id);
     return this.database.transaction(context.tenant, async (tx) => {
       const row = await this.staff.find(tx, id);
       if (!row) throw AppException.notFound();
       const [educations, contacts] = await this.lists(tx, id);
-      return this.resourceIn(tx, row, educations, contacts);
+      return this.resourceIn(
+        tx,
+        row,
+        educations,
+        contacts,
+        principal.roleCode !== RoleCode.TeacherStaff,
+      );
     });
   }
 
@@ -809,13 +824,23 @@ export class StaffService {
     row: StaffRow,
     educations: readonly EducationRow[],
     contacts: readonly EmergencyContactRow[],
+    withIdentity = true,
   ): Promise<StaffResource> {
     const email = (await this.people.emails([row.user_id])).get(row.user_id) ?? '';
-    return this.resource(row, educations, contacts, email, {
-      subjectIds: await this.staff.subjectIds(tx, row.id),
-      institutionIds: await this.staff.institutionIds(tx, row.id),
-      classTeachers: (await this.assignments.classTeacherOf(tx, row.id)).map(classTeacherResource),
-    });
+    return this.resource(
+      row,
+      educations,
+      contacts,
+      email,
+      {
+        subjectIds: await this.staff.subjectIds(tx, row.id),
+        institutionIds: await this.staff.institutionIds(tx, row.id),
+        classTeachers: (await this.assignments.classTeacherOf(tx, row.id)).map(
+          classTeacherResource,
+        ),
+      },
+      withIdentity ? maskedAadhaar(await this.identities.find(tx, row.id)) : undefined,
+    );
   }
 
   private async resource(
@@ -824,6 +849,7 @@ export class StaffService {
     contacts: readonly EmergencyContactRow[],
     email: string,
     access: StaffAccess,
+    aadhaarMasked: string | null | undefined,
   ): Promise<StaffResource> {
     return staffResource(
       row,
@@ -832,6 +858,7 @@ export class StaffService {
       email,
       access,
       await this.people.describe(authorIdsOf([row])),
+      aadhaarMasked,
     );
   }
 

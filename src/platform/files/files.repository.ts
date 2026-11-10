@@ -14,6 +14,11 @@ export class FilesRepository {
     return tx.selectFrom('files').selectAll().where('id', '=', id).executeTakeFirst();
   }
 
+  findMany(tx: Tx, ids: readonly string[]): Promise<FileRow[]> {
+    if (ids.length === 0) return Promise.resolve([]);
+    return tx.selectFrom('files').selectAll().where('id', 'in', ids).execute();
+  }
+
   insert(tx: Tx, values: NewFile): Promise<FileRow> {
     return tx.insertInto('files').values(values).returningAll().executeTakeFirstOrThrow();
   }

@@ -103,6 +103,8 @@ const en: Catalogue = {
   FILE_CHECK_FAILED: 'The file is not what it was said to be and was discarded',
   // Identity numbers (API design 10.8, 10.9)
   INVALID_AADHAAR: 'This is not a valid Aadhaar number',
+  AADHAAR_EXISTS_IN_SOCIETY: 'This Aadhaar number is already recorded for someone in this Society',
+  NOT_SET: 'No value has been set',
   REVEAL_LIMIT: 'You have reached the limit of ID reveals for today; try again tomorrow',
   // Field codes
   REQUIRED: 'This field is required',

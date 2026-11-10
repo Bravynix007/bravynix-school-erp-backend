@@ -14,6 +14,7 @@ import type { SubjectDirectory } from '../academic-setup/index.js';
 import type { InstitutionDirectory, ScopeService } from '../../platform/tenancy/index.js';
 import type { CreateStaffDto, ListStaffQueryDto, UpdateStaffDto } from './staff.dto.js';
 import type { AssignmentRepository, ClassTeacherRow } from './assignment.repository.js';
+import type { IdentityRepository, IdentityRow } from './identity.repository.js';
 import { StaffContext } from './staff-context.js';
 import type { StaffRepository, StaffRow } from './staff.repository.js';
 import { StaffService } from './staff.service.js';
@@ -190,6 +191,7 @@ function build(current: StaffRow | null = staff()) {
   } as unknown as StaffRepository;
   const scopeService = { requireInstitution, forPrincipal } as unknown as ScopeService;
   const classTeacherOf = vi.fn<AssignmentRepository['classTeacherOf']>().mockResolvedValue([]);
+  const identityFind = vi.fn<IdentityRepository['find']>().mockResolvedValue(undefined);
   const activeSubjectsOf = vi.fn<AssignmentRepository['activeSubjectsOf']>().mockResolvedValue([]);
   const endAllOfStaff = vi
     .fn<AssignmentRepository['endAllOfStaff']>()
@@ -200,6 +202,7 @@ function build(current: StaffRow | null = staff()) {
     scopeService,
     new StaffContext(database, repository, scopeService),
     { classTeacherOf, endAllOfStaff, activeSubjectsOf } as unknown as AssignmentRepository,
+    { find: identityFind } as unknown as IdentityRepository,
     {
       linkStaff,
       welcomeAs,
@@ -261,6 +264,7 @@ function build(current: StaffRow | null = staff()) {
     adminAccessOfStaff,
     releaseDormantAdminAccess,
     classTeacherOf,
+    identityFind,
     endAllOfStaff,
     activeSubjectsOf,
     replaceSubjects,
@@ -304,7 +308,11 @@ describe('StaffService', () => {
       });
       expect(t.welcomeAs).toHaveBeenCalledWith({ email: 'meera@example.com' }, 4, 'Sunrise Trust');
       expect(t.order).toEqual(['commit', 'commit', 'welcome']);
-      expect(created).toMatchObject({ firstName: 'Meera', person: { email: 'meera@example.com' } });
+      expect(created).toMatchObject({
+        firstName: 'Meera',
+        person: { email: 'meera@example.com' },
+        aadhaarMasked: null,
+      });
     });
 
     describe('a person whose home Institution is closed', () => {
@@ -485,6 +493,32 @@ describe('StaffService', () => {
       const profile = await t.service.get(owner, 'staff-1');
       expect(t.classTeacherOf).toHaveBeenCalledWith(expect.anything(), 'staff-1');
       expect(profile.classTeachers).toEqual([{ academicYearId: 'year-1', sectionId: 'section-1' }]);
+    });
+  });
+
+  describe('get (STF-03): the Aadhaar number', () => {
+    const held = { aadhaar_last4: '0124' } as IdentityRow;
+    const teacher = { ...owner, personId: 'user-1', roleCode: 4 } as Principal;
+
+    it('shows an admin the masked number, or null when none is set', async () => {
+      const t = build();
+      expect((await t.service.get(owner, 'staff-1')).aadhaarMasked).toBeNull();
+      t.identityFind.mockResolvedValue(held);
+      expect((await t.service.get(owner, 'staff-1')).aadhaarMasked).toBe('XXXX XXXX 0124');
+      expect(t.identityFind).toHaveBeenCalledWith(expect.anything(), 'staff-1');
+    });
+
+    it('shows a teacher their own profile without the key, and does not read the number', async () => {
+      const t = build();
+      t.identityFind.mockResolvedValue(held);
+      const profile = await t.service.get(teacher, 'staff-1');
+      expect(profile).not.toHaveProperty('aadhaarMasked');
+      expect(t.identityFind).not.toHaveBeenCalled();
+    });
+
+    it('keeps the key in the answer of an access change', async () => {
+      const t = build();
+      expect(await t.service.block(owner, 'staff-1')).toHaveProperty('aadhaarMasked', null);
     });
   });
 

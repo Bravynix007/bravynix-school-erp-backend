@@ -59,3 +59,26 @@ describe('FileDirectory.requireReady', () => {
     });
   });
 });
+
+describe('FileDirectory.briefs', () => {
+  it('shows what a list needs of each file the caller can see, and leaves the rest out', async () => {
+    const rows = [
+      ready({
+        id: 'a',
+        content_type: 'application/pdf',
+        size_bytes: 10,
+        original_filename: 'a.pdf',
+      }),
+      ready({ id: 'b', content_type: 'image/png', size_bytes: 20, original_filename: null }),
+    ];
+    const findMany = vi.fn<FilesRepository['findMany']>().mockResolvedValue(rows);
+    const files = new FileDirectory({ findMany } as unknown as FilesRepository);
+    expect(await files.briefs(tx, ['a', 'b', 'gone'])).toEqual(
+      new Map([
+        ['a', { id: 'a', contentType: 'application/pdf', sizeBytes: 10, fileName: 'a.pdf' }],
+        ['b', { id: 'b', contentType: 'image/png', sizeBytes: 20, fileName: null }],
+      ]),
+    );
+    expect(findMany).toHaveBeenCalledWith(tx, ['a', 'b', 'gone']);
+  });
+});

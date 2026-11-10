@@ -32,7 +32,10 @@ export interface StaffAccess {
   classTeachers: ClassTeacherResource[];
 }
 
-/** One staff member as an admin sees them (API design 9.5). Identity numbers and documents arrive with their own endpoints. */
+/**
+ * One staff member as an admin sees them (API design 9.5). The Aadhaar number comes only masked, and only to an admin:
+ * a teacher reading their own profile has no `aadhaarMasked` (PRD 7.5). The whole number is STF-12; documents are STF-14.
+ */
 export interface StaffResource extends AuthorStamps {
   id: string;
   homeInstitutionId: string;
@@ -69,6 +72,7 @@ export interface StaffResource extends AuthorStamps {
   subjectIds: string[];
   institutionIds: string[];
   classTeachers: ClassTeacherResource[];
+  aadhaarMasked?: string | null;
   status: number;
   version: number;
 }
@@ -118,6 +122,7 @@ export function staffResource(
   email: string,
   access: StaffAccess,
   people: ReadonlyMap<string, AuthorRef>,
+  aadhaarMasked?: string | null,
 ): StaffResource {
   return {
     id: row.id,
@@ -165,6 +170,7 @@ export function staffResource(
     subjectIds: access.subjectIds,
     institutionIds: access.institutionIds,
     classTeachers: access.classTeachers,
+    ...(aadhaarMasked === undefined ? {} : { aadhaarMasked }),
     status: row.status,
     version: row.version,
     ...authorStamps(row, people),

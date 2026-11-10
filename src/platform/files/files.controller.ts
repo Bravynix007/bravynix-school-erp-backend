@@ -48,10 +48,10 @@ export class FilesController {
   }
 
   @Policy({
-    roles: ADMINS,
+    roles: [...ADMINS, RoleCode.TeacherStaff],
     scope: 'society',
     operationId: 'FIL-03',
-    rule: 'The uploader, or an Owner or Admin of the file’s Institution, gets a five-minute link; document purposes are audited',
+    rule: 'An Owner or Admin of the file’s Institution, or a teacher for a file the owning module lets them open (their own staff documents), gets a five-minute link; document purposes are audited',
   })
   @Get(':fileId/download')
   download(

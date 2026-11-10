@@ -5,6 +5,7 @@ import { FixedClock } from '../../common/time/clock.js';
 import type { AuditService } from '../audit/index.js';
 import type { DatabaseService, Tx } from '../database/index.js';
 import type { ScopeService } from '../tenancy/index.js';
+import type { FileReaders } from './file-readers.js';
 import type { FilesRepository, FileRow } from './files.repository.js';
 import { FilesService } from './files.service.js';
 import { ObjectStorage } from './object-storage.js';
@@ -90,6 +91,7 @@ function build(stored: FileRow | null = file(), bytes: Buffer | null = JPEG) {
   });
   const forPrincipal = vi.fn<ScopeService['forPrincipal']>().mockResolvedValue({ tenant } as never);
   const record = vi.fn<AuditService['record']>().mockResolvedValue('audit-1');
+  const mayOpen = vi.fn<FileReaders['mayOpen']>().mockResolvedValue(false);
   const service = new FilesService(
     { transaction } as unknown as DatabaseService,
     { find, insert, settlePending } as unknown as FilesRepository,
@@ -97,6 +99,7 @@ function build(stored: FileRow | null = file(), bytes: Buffer | null = JPEG) {
     { requireInstitution, forPrincipal } as unknown as ScopeService,
     { record } as unknown as AuditService,
     clock,
+    { mayOpen } as unknown as FileReaders,
   );
   return {
     service,
@@ -109,6 +112,7 @@ function build(stored: FileRow | null = file(), bytes: Buffer | null = JPEG) {
     createDownload,
     requireInstitution,
     record,
+    mayOpen,
   };
 }
 
@@ -328,6 +332,31 @@ describe('FilesService', () => {
       expect(
         (await build(row).service.download(admin({ personId: 'o', roleCode: 2 }), 'file-1')).url,
       ).toBe('http://store/down');
+    });
+
+    it('asks the owner of the purpose for anyone but an Owner or Admin, and is 404 when it says no', async () => {
+      const row = file({ file_status: 2, purpose: 6, content_type: 'application/pdf' });
+      const teacher = admin({ personId: 'user-1', roleCode: 4 });
+      const refused = build(row);
+      expect(await fail(refused.service.download(teacher, 'file-1'))).toMatchObject({
+        status: 404,
+      });
+      expect(refused.mayOpen).toHaveBeenCalledWith(expect.anything(), 'user-1', row);
+      expect(refused.record).not.toHaveBeenCalled();
+      const allowed = build(row);
+      allowed.mayOpen.mockResolvedValue(true);
+      expect((await allowed.service.download(teacher, 'file-1')).url).toBe('http://store/down');
+      expect(allowed.record).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ action: 'file.download', entityId: 'file-1' }),
+      );
+    });
+
+    it('does not ask the owner of the purpose for an Owner or Admin', async () => {
+      const t = build(file({ file_status: 2 }));
+      await t.service.download(admin({ roleCode: 3 }), 'file-1');
+      await t.service.download(admin({ roleCode: 2 }), 'file-1');
+      expect(t.mayOpen).not.toHaveBeenCalled();
     });
 
     it('is 404 for a purpose nobody registered', async () => {

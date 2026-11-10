@@ -3,11 +3,13 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { AppException } from '../../common/http/app-exception.js';
 import { ErrorCode } from '../../common/http/error-codes.js';
+import { RoleCode } from '../../common/auth/roles.js';
 import { newId } from '../../common/ids/ids.js';
 import { Clock } from '../../common/time/clock.js';
 import { AuditService } from '../audit/index.js';
 import { DatabaseService } from '../database/index.js';
 import { ScopeService } from '../tenancy/index.js';
+import { FileReaders } from './file-readers.js';
 import { matchesDeclaredType } from './file-signature.js';
 import { MAX_FILE_BYTES, PRIVATE_BUCKET, PURPOSES, type FilePurpose } from './file-purposes.js';
 import type { RequestUploadDto } from './files.dto.js';
@@ -53,6 +55,7 @@ export class FilesService {
     private readonly scope: ScopeService,
     private readonly audit: AuditService,
     private readonly clock: Clock,
+    private readonly readers: FileReaders,
   ) {}
 
   /** FIL-01: 413 over 5 MB, 415 for a type the purpose does not take, 403 for a role the purpose does not allow. */
@@ -134,10 +137,10 @@ export class FilesService {
   }
 
   /**
-   * FIL-03: a five-minute link to a Ready file. The policy admits Society Owners and Institution Admins, and
-   * row-level security narrows them to the Institutions they reach; any other file, and any file that is not Ready,
-   * is 404. Teachers, parents and staff themselves join with the slice that owns their purpose. The links of purposes
-   * that hold documents are written to the audit log before the link is made.
+   * FIL-03: a five-minute link to a Ready file. Society Owners and Institution Admins get it for the Institutions
+   * they reach (row-level security narrows them); a teacher gets it only where the module that owns the purpose says so
+   * (`FileReaders`: their own staff documents). Any other file, and any file that is not Ready, is 404. The links of
+   * purposes that hold documents are written to the audit log before the link is made.
    */
   async download(principal: Principal, fileId: string): Promise<DownloadTicket> {
     const { tenant } = await this.scope.forPrincipal(principal);
@@ -146,6 +149,9 @@ export class FilesService {
       // A purpose nobody registered has no rule that lets anyone fetch it.
       const rule = found && PURPOSES[found.purpose as FilePurpose];
       if (!found || !rule || found.file_status !== 2) throw AppException.notFound();
+      if (!isAdmin(principal) && !(await this.readers.mayOpen(tx, principal.personId, found))) {
+        throw AppException.notFound();
+      }
       if (rule.auditedDownload) {
         await this.audit.record(tx, {
           action: 'file.download',
@@ -165,6 +171,9 @@ export class FilesService {
     });
   }
 }
+
+const isAdmin = (principal: Principal): boolean =>
+  principal.roleCode === RoleCode.SocietyOwner || principal.roleCode === RoleCode.InstitutionAdmin;
 
 const alreadyConfirmed = (): AppException =>
   new AppException(HttpStatus.CONFLICT, ErrorCode.ALREADY_CONFIRMED);

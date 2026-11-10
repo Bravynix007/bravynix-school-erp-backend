@@ -13,6 +13,8 @@ declare module '../../platform/database/schema.js' {
     staff_subjects: StaffSubjectsTable;
     class_teacher_assignments: ClassTeacherAssignmentsTable;
     teaching_assignments: TeachingAssignmentsTable;
+    staff_identities: StaffIdentitiesTable;
+    documents: DocumentsTable;
   }
 }
 
@@ -128,4 +130,41 @@ export type ClassTeacherAssignmentsTable = AssignmentColumns;
 /** A teacher teaching a subject in a section for one year (ASG-02). */
 export interface TeachingAssignmentsTable extends AssignmentColumns {
   subject_id: string;
+}
+
+/**
+ * A staff member's Aadhaar number (DDD 9.5, 15.6): sealed, hashed for duplicate checks and masked by its last four
+ * digits. The four columns are all set or all empty; the row stays when the number is cleared.
+ */
+export interface StaffIdentitiesTable {
+  staff_member_id: string;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  created_by: string | null;
+  updated_at: ColumnType<Date, never, Date>;
+  updated_by: string | null;
+  version: Generated<number>;
+  society_id: string;
+  aadhaar_ciphertext: Buffer | null;
+  aadhaar_key_version: number | null;
+  aadhaar_hmac: Buffer | null;
+  aadhaar_last4: string | null;
+}
+
+/** A file attached to a staff member (STF-15); deactivated (`status` 0) by DOC-03, never deleted. */
+export interface DocumentsTable {
+  id: Generated<string>;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  created_by: string | null;
+  updated_at: ColumnType<Date, never, Date>;
+  updated_by: string | null;
+  /** 1 active, 0 deactivated. */
+  status: Generated<number>;
+  society_id: string;
+  /** The staff member's home Institution. */
+  institution_id: string;
+  /** 2 staff member; 1 student arrives with the students table. */
+  owner_type: number;
+  staff_member_id: string | null;
+  title: string;
+  file_id: string;
 }

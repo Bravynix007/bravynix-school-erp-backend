@@ -29,7 +29,7 @@ export const seededStaffId = (personaKey: string): string => {
 
 /**
  * A staff record for each two-worlds persona that holds the Teacher and Staff role, at the first Institution of the
- * grant, each with one education, one emergency contact and one subject, so a test can show one Society's people are
+ * grant, each with one education, one emergency contact, one subject, an empty identity row and one document, so a test can show one Society's people are
  * hidden from another. Each also teaches that subject in a section of the home Institution for its current year, and
  * the first ones there lead a section each (the teacher at place `n` takes the `n`-th section, the class teacher
  * only while there are sections left). The Institutions of a grant after the first are the member's extra Institutions. The pending,
@@ -102,6 +102,28 @@ async function writeIn(tx: Kysely<unknown>): Promise<void> {
         on conflict (id) do nothing
       `.execute(tx);
     }
+    // No number is seeded (nothing here is a real person's): the row stands for a record whose Aadhaar is not set yet.
+    await sql`
+      insert into staff_identities (staff_member_id, society_id)
+      values (${id}, ${societyId})
+      on conflict (staff_member_id) do nothing
+    `.execute(tx);
+    // One Ready staff document, as FIL-01, FIL-02 and STF-15 would leave it. No object is stored behind it.
+    await sql`
+      insert into files
+        (id, society_id, institution_id, storage_bucket, object_key, purpose, content_type, size_bytes,
+         original_filename, file_status, confirmed_at)
+      values (${seedId(3901 + index)}, ${societyId}, ${home.id}, 1,
+        ${`${societyId}/${home.id}/6/seeded-${index.toString()}`}, 6, 'application/pdf', 2048,
+        'appointment-letter.pdf', 2, now())
+      on conflict (id) do nothing
+    `.execute(tx);
+    await sql`
+      insert into documents (id, society_id, institution_id, owner_type, staff_member_id, title, file_id)
+      values (${seedId(4001 + index)}, ${societyId}, ${home.id}, 2, ${id}, 'Appointment letter',
+        ${seedId(3901 + index)})
+      on conflict (id) do nothing
+    `.execute(tx);
     await sql`
       insert into staff_emergency_contacts
         (id, society_id, staff_member_id, contact_name, relation, country_code, phone_number, is_primary)
