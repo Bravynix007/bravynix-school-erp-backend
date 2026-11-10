@@ -4,9 +4,16 @@ import { FilesModule } from '../../platform/files/index.js';
 import { MastersModule } from '../../platform/masters/index.js';
 import { AssignmentRepository } from './assignment.repository.js';
 import { AssignmentService } from './assignment.service.js';
+import { DocumentController } from './document.controller.js';
+import { DocumentRepository } from './document.repository.js';
+import { DocumentService } from './document.service.js';
+import { IdentityRepository } from './identity.repository.js';
 import { InstitutionAdminController } from './institution-admin.controller.js';
 import { InstitutionAdminService } from './institution-admin.service.js';
 import { PeopleTeachingStaff } from './people-teaching-staff.js';
+import { StaffDocumentController } from './staff-document.controller.js';
+import { StaffIdentityController } from './staff-identity.controller.js';
+import { StaffIdentityService } from './staff-identity.service.js';
 import { StaffContext } from './staff-context.js';
 import { StaffController } from './staff.controller.js';
 import { StaffRepository } from './staff.repository.js';
@@ -20,7 +27,14 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
 @Global()
 @Module({
   imports: [MastersModule, FilesModule, AcademicSetupModule],
-  controllers: [StaffController, InstitutionAdminController, TeachingAssignmentController],
+  controllers: [
+    StaffController,
+    StaffIdentityController,
+    StaffDocumentController,
+    DocumentController,
+    InstitutionAdminController,
+    TeachingAssignmentController,
+  ],
   providers: [
     StaffRepository,
     StaffContext,
@@ -28,6 +42,10 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
     InstitutionAdminService,
     AssignmentRepository,
     AssignmentService,
+    IdentityRepository,
+    StaffIdentityService,
+    DocumentRepository,
+    DocumentService,
     PeopleTeachingStaff,
     { provide: TeachingStaff, useExisting: PeopleTeachingStaff },
   ],
