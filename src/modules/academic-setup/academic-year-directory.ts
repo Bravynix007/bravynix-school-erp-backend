@@ -22,21 +22,18 @@ export class AcademicYearDirectory {
   }
 
   /**
-   * Whether the year of this Institution is open to new work, or `undefined` when the caller cannot see it or it
-   * belongs to another Institution. For a caller that answers a closed year in its own words.
+   * The year of this Institution: whether it is open to new work (for a caller that answers a closed year in its own
+   * words) and its first and last day; `undefined` when the caller cannot see it or it belongs to another Institution.
    */
-  async openIn(tx: Tx, yearId: string, institutionId: string): Promise<boolean | undefined> {
-    const year = await this.years.find(tx, yearId);
-    return year?.institution_id === institutionId ? year.status === 1 : undefined;
-  }
-
-  /** The first and last day of a year the caller can see, or `undefined`. */
-  async spanOf(
+  async openYear(
     tx: Tx,
     yearId: string,
-  ): Promise<{ startDate: string; endDate: string } | undefined> {
+    institutionId: string,
+  ): Promise<{ open: boolean; startDate: string; endDate: string } | undefined> {
     const year = await this.years.find(tx, yearId);
-    return year ? { startDate: year.start_date, endDate: year.end_date } : undefined;
+    return year?.institution_id === institutionId
+      ? { open: year.status === 1, startDate: year.start_date, endDate: year.end_date }
+      : undefined;
   }
 
   /** The current academic year of the Institution, or `null` when none is set. */

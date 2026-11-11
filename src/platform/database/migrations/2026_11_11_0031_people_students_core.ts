@@ -22,8 +22,8 @@ const keyed = (table: string) => sql`
  *   (a gist exclusion on the dates), a roll number once among the current students of a section, and a section that
  *   belongs to the enrolment's class (composite keys). A move closes the row and opens another.
  *
- * All four use the Institution-level policy (DDD 15.3). A person also reads the guardian rows that are theirs, and
- * the child record those rows name, whichever Institution they are at ("own records", as staff do in migration 0025):
+ * All four use the Institution-level policy (DDD 15.3). A person also reads the guardian rows that are theirs,
+ * whichever Institution they are at ("own records", as staff do in migration 0025):
  * the two block functions of migration 0011 look for them with the person's settings, before any tenant is set. Those
  * two functions now answer
  * for a person who is a guardian of an active student in the Society, as they do for staff and Admins, so a blocked
@@ -237,7 +237,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     `.execute(db);
     await sql`alter table ${name} enable row level security`.execute(db);
     await sql`alter table ${name} force row level security`.execute(db);
-    if (table !== 'student_guardians' && table !== 'students') {
+    if (table !== 'student_guardians') {
       await sql`create policy ${policy('select')} on ${name} for select using (${inScope})`.execute(
         db,
       );
@@ -250,17 +250,6 @@ export async function up(db: Kysely<unknown>): Promise<void> {
         using (${inScope}) with check (${inScope})
     `.execute(db);
   }
-  // A guardian also reads the child they are a guardian of, whichever Institution it is at.
-  await sql`
-    create policy students_select on students for select
-      using (
-        (society_id = app_current_society_id() and institution_id = any (app_current_institution_ids()))
-        or exists (
-          select 1 from student_guardians g
-          where g.student_id = students.id and g.user_id = app_current_person_id() and g.status = 1
-        )
-      )
-  `.execute(db);
   await sql`
     create policy student_guardians_select on student_guardians for select
       using (
@@ -287,7 +276,8 @@ export async function up(db: Kysely<unknown>): Promise<void> {
 /**
  * The two definer functions of migration 0011, as migration 0024 left them, answering now for a guardian of an active
  * student as well. A function acts as Super Admin for the one read and as the person it is asked about (so the
- * "own records" policy shows their guardian rows), then puts the caller's settings back. `withGuardian` false
+ * "own records" policy shows their guardian rows) and with the Society's Institutions (so the student rows are in
+ * scope), then puts the caller's settings back. `withGuardian` false
  * leaves the guardian out again.
  */
 async function replaceBlockFunctions(db: Kysely<unknown>, withGuardian: boolean): Promise<void> {
@@ -320,10 +310,16 @@ async function replaceBlockFunctions(db: Kysely<unknown>, withGuardian: boolean)
       caller_role text := current_setting('app.role_code', true);
       caller_society text := current_setting('app.society_id', true);
       caller_person text := current_setting('app.person_id', true);
+      caller_institutions text := current_setting('app.institution_ids', true);
     begin
       perform set_config('app.role_code', '1', true);
       perform set_config('app.society_id', society::text, true);
       perform set_config('app.person_id', person::text, true);
+      perform set_config(
+        'app.institution_ids',
+        coalesce((select string_agg(i.id::text, ',') from institutions i where i.society_id = society), ''),
+        true
+      );
       return query
         select b.section, b.institution_id from access_blocks b
         where b.society_id = society and b.lifted_at is null
@@ -331,6 +327,7 @@ async function replaceBlockFunctions(db: Kysely<unknown>, withGuardian: boolean)
       perform set_config('app.role_code', coalesce(caller_role, ''), true);
       perform set_config('app.society_id', coalesce(caller_society, ''), true);
       perform set_config('app.person_id', coalesce(caller_person, ''), true);
+      perform set_config('app.institution_ids', coalesce(caller_institutions, ''), true);
     end;
     $$
   `.execute(db);
@@ -343,17 +340,24 @@ async function replaceBlockFunctions(db: Kysely<unknown>, withGuardian: boolean)
       caller_role text := current_setting('app.role_code', true);
       caller_society text := current_setting('app.society_id', true);
       caller_person text := current_setting('app.person_id', true);
+      caller_institutions text := current_setting('app.institution_ids', true);
       found_name text;
     begin
       perform set_config('app.role_code', '1', true);
       perform set_config('app.society_id', society::text, true);
       perform set_config('app.person_id', person::text, true);
+      perform set_config(
+        'app.institution_ids',
+        coalesce((select string_agg(i.id::text, ',') from institutions i where i.society_id = society), ''),
+        true
+      );
       select s.name into found_name from societies s
       where s.id = society
         and (${holds('society', 'person')});
       perform set_config('app.role_code', coalesce(caller_role, ''), true);
       perform set_config('app.society_id', coalesce(caller_society, ''), true);
       perform set_config('app.person_id', coalesce(caller_person, ''), true);
+      perform set_config('app.institution_ids', coalesce(caller_institutions, ''), true);
       return found_name;
     end;
     $$
@@ -366,8 +370,6 @@ export async function down(db: Kysely<unknown>): Promise<void> {
     throw new Error('Refusing to drop students in production: later tables refer to them');
   }
   await replaceBlockFunctions(db, false);
-  // The policy on students reads the guardians, so it goes before they do.
-  await sql`drop policy if exists students_select on students`.execute(db);
   await sql`drop table if exists student_section_placements`.execute(db);
   await sql`drop table if exists student_enrolments`.execute(db);
   await sql`drop table if exists student_guardians`.execute(db);

@@ -1,11 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import {
-  sql,
-  type ExpressionBuilder,
-  type Insertable,
-  type Selectable,
-  type Updateable,
-} from 'kysely';
+import { sql, type ExpressionBuilder, type Insertable, type Selectable } from 'kysely';
 import { containsPattern, type SortKey } from '../../common/pagination/pagination.js';
 import type { Database, Tx } from '../../platform/database/index.js';
 import type {
@@ -18,7 +12,6 @@ import type { StudentSortField } from './student.dto.js';
 
 export type StudentRow = Selectable<StudentsTable>;
 export type NewStudent = Insertable<StudentsTable>;
-export type StudentChanges = Updateable<StudentsTable>;
 export type GuardianRow = Selectable<StudentGuardiansTable>;
 export type NewGuardian = Insertable<StudentGuardiansTable>;
 export type EnrolmentRow = Selectable<StudentEnrolmentsTable>;
@@ -68,17 +61,16 @@ const STUDENT_NAME = sql`lower(concat_ws(' ', students.first_name, students.last
 const SORT_COLUMN = {
   name: STUDENT_NAME,
   admissionNo: sql`lower(students.admission_no)`,
-  // Numbers in numeric order, then the rest: "9" before "10", "A1" after both.
-  rollNumber: sql`lpad(pl.roll_number, 20, '0')`,
+  // Numbers in numeric order, then the rest in text order: "9" before "10", "A1" after both.
+  rollNumber: sql`(pl.roll_number !~ '^[0-9]+$')::int::text || lpad(pl.roll_number, 20, '0')`,
   createdAt: sql`students.created_at`,
 } as const;
 
 /** Queries on the student tables; every one runs in the caller's transaction, under row-level security. */
 @Injectable()
 export class StudentRepository {
-  async find(tx: Tx, id: string, lock = false): Promise<StudentRow | undefined> {
-    const query = tx.selectFrom('students').selectAll().where('id', '=', id);
-    return (lock ? query.forUpdate() : query).executeTakeFirst();
+  find(tx: Tx, id: string): Promise<StudentRow | undefined> {
+    return tx.selectFrom('students').selectAll().where('id', '=', id).executeTakeFirst();
   }
 
   insert(tx: Tx, values: NewStudent): Promise<StudentRow> {
