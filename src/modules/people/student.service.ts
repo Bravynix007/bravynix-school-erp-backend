@@ -89,7 +89,7 @@ export class StudentService {
    * guardian's email links the person it belongs to (one email can be several children's, PRD decision 12) or makes
    * a Pending account; the welcome mails go after the commit. The placement starts on `admissionDate`, or today.
    * 409 `ADMISSION_NO_TAKEN`, 409 `ROLL_NUMBER_TAKEN`; 422 `YEAR_NOT_ACTIVE`, `INACTIVE_SECTION`,
-   * `SECTION_NOT_IN_CLASS`, `PRIMARY_GUARDIAN_REQUIRED`; 409 `ACCOUNT_BLOCKED` for a guardian
+   * `SECTION_NOT_IN_CLASS`, `PRIMARY_GUARDIAN_REQUIRED`; 409 `ROLE_CONFLICT` (a Super Admin) and `ACCOUNT_BLOCKED` for a guardian
    * email that cannot be linked. A section over its capacity is a warning, not a stop.
    */
   async create(principal: Principal, body: CreateStudentDto): Promise<ApiResult<StudentResource>> {

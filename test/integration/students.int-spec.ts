@@ -569,12 +569,15 @@ describe('students: add, read and list', () => {
       expect((await add({}, token)).status).toBe(403);
     });
 
-    it('links a guardian email that belongs to a Super Admin: a parent may hold any other role', async () => {
+    it('refuses a guardian email that belongs to a Super Admin, and links a teacher', async () => {
       const res = await add({ guardians: [guardian({ email: superAdmin.email })] });
-      expect(res.status).toBe(201);
-      expect(res.body.data).toMatchObject({
-        guardians: [{ email: superAdmin.email, hasLogin: true }],
+      expect([res.status, res.body.code]).toEqual([409, 'ROLE_CONFLICT']);
+      const teacher = await kit.staff(owner.token, first, categoryId);
+      const linked = await add({
+        guardians: [guardian({ email: teacher.person.email })],
+        ...roll('8'),
       });
+      expect(linked.status).toBe(201);
     });
   });
 
@@ -914,6 +917,7 @@ describe('students: add, read and list', () => {
       const parent = guardian();
       await added({ guardians: [parent] });
       const userId = (await usersWith(parent.email))[0]!.id;
+      const otherSociety = otherOwner.contexts[0]!.societyId!;
       await blocks.setBlock(ownerDb, societyA, first, 3, true);
       const settings = (tx: Parameters<Parameters<typeof database.transaction>[1]>[0]) =>
         sql<{ values: string[] }>`
@@ -928,12 +932,26 @@ describe('students: add, read and list', () => {
         const afterBlocks = (await settings(tx)).rows[0]!.values;
         await sql`select app_society_name(${societyA}, ${userId})`.execute(tx);
         const afterName = (await settings(tx)).rows[0]!.values;
-        return { before, afterBlocks, afterName, seen: seen.rows.length };
+        // Asked about another Society, the caller's own Society must still be put back.
+        await sql`select * from app_active_blocks(${otherSociety}, ${userId})`.execute(tx);
+        const afterOtherBlocks = (await settings(tx)).rows[0]!.values;
+        await sql`select app_society_name(${otherSociety}, ${userId})`.execute(tx);
+        const afterOtherName = (await settings(tx)).rows[0]!.values;
+        return {
+          before,
+          afterBlocks,
+          afterName,
+          afterOtherBlocks,
+          afterOtherName,
+          seen: seen.rows.length,
+        };
       });
       expect(unchanged.seen).toBe(1);
       expect(unchanged.before[3]).toBe(`${first},${second}`);
       expect(unchanged.afterBlocks).toEqual(unchanged.before);
       expect(unchanged.afterName).toEqual(unchanged.before);
+      expect(unchanged.afterOtherBlocks).toEqual(unchanged.before);
+      expect(unchanged.afterOtherName).toEqual(unchanged.before);
     });
 
     it('stop answering once every child of the guardian is deactivated, but not while one stays', async () => {

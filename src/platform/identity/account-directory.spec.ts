@@ -388,14 +388,21 @@ describe('AccountDirectory.linkGuardian', () => {
     expect(t.insertPending).not.toHaveBeenCalled();
   });
 
-  it('links a Super Admin, a Society Owner or a teacher too: a parent may hold any other role', async () => {
+  it('refuses a Super Admin, under the separation lock', async () => {
     const t = build(user());
     t.holdsActiveGrant.mockResolvedValue(true);
+    await expect(
+      t.directory.linkGuardian(tx, { email: 'asha@example.com' }, 'admin-1'),
+    ).rejects.toMatchObject({ status: 409, code: 'ROLE_CONFLICT' });
+    expect(t.lockRoleSeparation).toHaveBeenCalled();
+    expect(t.holdsActiveGrant).toHaveBeenCalledWith(tx, 'user-1', [1]);
+  });
+
+  it('links a teacher or an Owner: a parent may hold any role but Super Admin', async () => {
+    const t = build(user());
     t.holdsStaffRecord.mockResolvedValue(true);
     const linked = await t.directory.linkGuardian(tx, { email: 'asha@example.com' }, 'admin-1');
     expect(linked).toMatchObject({ id: 'user-1', created: false });
-    expect(t.holdsActiveGrant).not.toHaveBeenCalled();
-    expect(t.holdsStaffRecord).not.toHaveBeenCalled();
   });
 
   it.each([
