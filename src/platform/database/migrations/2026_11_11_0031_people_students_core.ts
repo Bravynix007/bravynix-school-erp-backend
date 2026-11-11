@@ -20,11 +20,12 @@ const keyed = (table: string) => sql`
  *   checked by composite keys to the same Institution.
  * - `student_section_placements`: which section and roll number from which day to which day. One section at a time
  *   (a gist exclusion on the dates), a roll number once among the current students of a section, and a section that
- *   belongs to the enrolment's class (composite keys). Rows are closed, not edited, when a student moves.
+ *   belongs to the enrolment's class (composite keys). A move closes the row and opens another.
  *
- * All four use the Institution-level policy (DDD 15.3). A person also reads the guardian rows that are theirs,
- * whichever Institution they are at ("own records", as staff do in migration 0025): the two block functions of
- * migration 0011 look for them with the person's settings, before any tenant is set. Those two functions now answer
+ * All four use the Institution-level policy (DDD 15.3). A person also reads the guardian rows that are theirs, and
+ * the child record those rows name, whichever Institution they are at ("own records", as staff do in migration 0025):
+ * the two block functions of migration 0011 look for them with the person's settings, before any tenant is set. Those
+ * two functions now answer
  * for a person who is a guardian of an active student in the Society, as they do for staff and Admins, so a blocked
  * parent is stopped and told why.
  */
@@ -236,7 +237,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     `.execute(db);
     await sql`alter table ${name} enable row level security`.execute(db);
     await sql`alter table ${name} force row level security`.execute(db);
-    if (table !== 'student_guardians') {
+    if (table !== 'student_guardians' && table !== 'students') {
       await sql`create policy ${policy('select')} on ${name} for select using (${inScope})`.execute(
         db,
       );
@@ -249,6 +250,17 @@ export async function up(db: Kysely<unknown>): Promise<void> {
         using (${inScope}) with check (${inScope})
     `.execute(db);
   }
+  // A guardian also reads the child they are a guardian of, whichever Institution it is at.
+  await sql`
+    create policy students_select on students for select
+      using (
+        (society_id = app_current_society_id() and institution_id = any (app_current_institution_ids()))
+        or exists (
+          select 1 from student_guardians g
+          where g.student_id = students.id and g.user_id = app_current_person_id() and g.status = 1
+        )
+      )
+  `.execute(db);
   await sql`
     create policy student_guardians_select on student_guardians for select
       using (
@@ -293,6 +305,7 @@ async function replaceBlockFunctions(db: Kysely<unknown>, withGuardian: boolean)
             ? `
         or exists (
           select 1 from student_guardians sg
+          join students st on st.id = sg.student_id and st.status = 1
           where sg.user_id = ${person} and sg.society_id = ${society} and sg.status = 1
         )`
             : ''
@@ -353,6 +366,8 @@ export async function down(db: Kysely<unknown>): Promise<void> {
     throw new Error('Refusing to drop students in production: later tables refer to them');
   }
   await replaceBlockFunctions(db, false);
+  // The policy on students reads the guardians, so it goes before they do.
+  await sql`drop policy if exists students_select on students`.execute(db);
   await sql`drop table if exists student_section_placements`.execute(db);
   await sql`drop table if exists student_enrolments`.execute(db);
   await sql`drop table if exists student_guardians`.execute(db);

@@ -36,6 +36,17 @@ describe('AcademicYearDirectory', () => {
     });
   });
 
+  describe('spanOf', () => {
+    it('gives the first and last day of a year, and undefined for one the caller cannot see', async () => {
+      const found = year({ start_date: '2026-06-01', end_date: '2027-03-31' });
+      await expect(build(found).directory.spanOf(tx, 'year-1')).resolves.toEqual({
+        startDate: '2026-06-01',
+        endDate: '2027-03-31',
+      });
+      await expect(build().directory.spanOf(tx, 'year-1')).resolves.toBeUndefined();
+    });
+  });
+
   describe('requireActive', () => {
     it('passes for an active year of the Institution', async () => {
       const t = build(year());
