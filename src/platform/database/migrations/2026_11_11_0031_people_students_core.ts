@@ -275,10 +275,9 @@ export async function up(db: Kysely<unknown>): Promise<void> {
 
 /**
  * The two definer functions of migration 0011, as migration 0024 left them, answering now for a guardian of an active
- * student as well. A function acts as Super Admin for the one read and as the person it is asked about (so the
- * "own records" policy shows their guardian rows) and with the Society's Institutions (so the student rows are in
- * scope), then puts the caller's settings back. `withGuardian` false
- * leaves the guardian out again.
+ * student as well. A function acts as Super Admin for the one read, with the Society and its Institutions set (so the
+ * staff, guardian and student rows of the Society are in scope), then puts the caller's settings back.
+ * `withGuardian` false leaves the guardian out again.
  */
 async function replaceBlockFunctions(db: Kysely<unknown>, withGuardian: boolean): Promise<void> {
   const holds = (society: string, person: string) =>
@@ -309,12 +308,10 @@ async function replaceBlockFunctions(db: Kysely<unknown>, withGuardian: boolean)
     declare
       caller_role text := current_setting('app.role_code', true);
       caller_society text := current_setting('app.society_id', true);
-      caller_person text := current_setting('app.person_id', true);
       caller_institutions text := current_setting('app.institution_ids', true);
     begin
       perform set_config('app.role_code', '1', true);
       perform set_config('app.society_id', society::text, true);
-      perform set_config('app.person_id', person::text, true);
       perform set_config(
         'app.institution_ids',
         coalesce((select string_agg(i.id::text, ',') from institutions i where i.society_id = society), ''),
@@ -326,7 +323,6 @@ async function replaceBlockFunctions(db: Kysely<unknown>, withGuardian: boolean)
           and (${holds('society', 'person')});
       perform set_config('app.role_code', coalesce(caller_role, ''), true);
       perform set_config('app.society_id', coalesce(caller_society, ''), true);
-      perform set_config('app.person_id', coalesce(caller_person, ''), true);
       perform set_config('app.institution_ids', coalesce(caller_institutions, ''), true);
     end;
     $$
@@ -339,13 +335,11 @@ async function replaceBlockFunctions(db: Kysely<unknown>, withGuardian: boolean)
     declare
       caller_role text := current_setting('app.role_code', true);
       caller_society text := current_setting('app.society_id', true);
-      caller_person text := current_setting('app.person_id', true);
       caller_institutions text := current_setting('app.institution_ids', true);
       found_name text;
     begin
       perform set_config('app.role_code', '1', true);
       perform set_config('app.society_id', society::text, true);
-      perform set_config('app.person_id', person::text, true);
       perform set_config(
         'app.institution_ids',
         coalesce((select string_agg(i.id::text, ',') from institutions i where i.society_id = society), ''),
@@ -356,7 +350,6 @@ async function replaceBlockFunctions(db: Kysely<unknown>, withGuardian: boolean)
         and (${holds('society', 'person')});
       perform set_config('app.role_code', coalesce(caller_role, ''), true);
       perform set_config('app.society_id', coalesce(caller_society, ''), true);
-      perform set_config('app.person_id', coalesce(caller_person, ''), true);
       perform set_config('app.institution_ids', coalesce(caller_institutions, ''), true);
       return found_name;
     end;
