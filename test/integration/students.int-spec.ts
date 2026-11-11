@@ -643,17 +643,21 @@ describe('students: add, read and list', () => {
     });
 
     it('puts the numeric roll numbers first in numeric order, then the rest in text order', async () => {
-      for (const rollNumber of ['100', 'A1', '9', '10']) {
+      for (const rollNumber of ['100', 'A1', '9', '10', 'B', '2A']) {
         await added({ firstName: `R${rollNumber}`, ...roll(rollNumber) });
       }
       expect(namesOf(await list(`?sectionId=${sectionA}&sort=rollNumber`))).toEqual([
         'R9',
         'R10',
         'R100',
+        'R2A',
         'RA1',
+        'RB',
       ]);
       expect(namesOf(await list(`?sectionId=${sectionA}&sort=-rollNumber`))).toEqual([
+        'RB',
         'RA1',
+        'R2A',
         'R100',
         'R10',
         'R9',

@@ -73,7 +73,10 @@ describe('StudentRepository.page', () => {
   it.each([
     ['name', 'lower(concat_ws'],
     ['admissionNo', 'lower(students.admission_no)'],
-    ['rollNumber', "(pl.roll_number !~ '^[0-9]+$')::int::text || lpad(pl.roll_number, 20, '0')"],
+    [
+      'rollNumber',
+      "case when pl.roll_number ~ '^[0-9]+$' then '0' || lpad(pl.roll_number, 20, '0') else '1' || lower(pl.roll_number) end",
+    ],
     ['createdAt', 'students.created_at'],
   ] as const)(
     'sorts by %s, nulls last in both directions, and by ID at the end',
