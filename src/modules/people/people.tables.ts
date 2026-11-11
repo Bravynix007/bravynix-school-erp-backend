@@ -210,6 +210,9 @@ export interface StudentsTable extends StudentOwned {
   state_id: string | null;
   city_id: string | null;
   pincode: string | null;
+  /** Why a deactivated student left: 1 Left the Institution, 2 Created by mistake, 3 Other. Empty while active. */
+  inactive_reason: number | null;
+  inactive_at: Date | null;
   /** Name and Admission ID, lower case: the database keeps it, behind the search index. */
   search_text: ColumnType<string, never, never>;
 }

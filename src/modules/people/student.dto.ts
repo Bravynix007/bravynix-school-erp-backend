@@ -24,6 +24,8 @@ import { LowerCaseUuid } from '../../common/validation/lower-case-uuid.js';
 import { NotBlank } from '../../common/validation/not-blank.js';
 import { PhoneDto } from '../../common/validation/phone.dto.js';
 import { PlaceDto } from '../../common/validation/place.dto.js';
+import { VersionDto } from '../../common/validation/version.dto.js';
+import { WhenPresent } from '../../common/validation/when-present.js';
 import { BLOOD_GROUPS, GENDERS } from './staff.dto.js';
 
 export const MAX_GUARDIANS = 5;
@@ -122,20 +124,11 @@ export class GuardianDto {
   isEmergencyContact!: boolean;
 }
 
-/** STU-02 body (API design 10.6). A body is JSON: no `@Type` on a primitive. Optional text is cleared with `null`. */
-export class CreateStudentDto {
-  @ApiProperty({ format: 'uuid', description: 'The Institution the child joins' })
-  @LowerCaseUuid()
-  @IsUUID()
-  institutionId!: string;
-
-  @ApiProperty({ minLength: 1, maxLength: 100 })
-  @IsString()
-  @MinLength(1)
-  @MaxLength(100)
-  @NotBlank()
-  firstName!: string;
-
+/**
+ * The optional fields of a student's record, as STU-02 takes them and STU-04 changes them. A body is JSON: no `@Type`
+ * on a primitive. Optional text is cleared with `null`.
+ */
+export class StudentDetailsDto {
   @ApiPropertyOptional({ maxLength: 100, nullable: true })
   @IsOptional()
   @IsString()
@@ -208,12 +201,6 @@ export class CreateStudentDto {
   @MaxLength(254)
   contactEmail?: string | null;
 
-  @ApiProperty({ type: PhoneDto })
-  @IsObject()
-  @ValidateNested()
-  @Type(() => PhoneDto)
-  mobile!: PhoneDto;
-
   @ApiPropertyOptional({
     nullable: true,
     description: '6 to 15 digits, in the country of `mobile`',
@@ -228,6 +215,27 @@ export class CreateStudentDto {
   @ValidateNested()
   @Type(() => StudentAddressDto)
   address?: StudentAddressDto;
+}
+
+/** STU-02 body (API design 10.6). */
+export class CreateStudentDto extends StudentDetailsDto {
+  @ApiProperty({ format: 'uuid', description: 'The Institution the child joins' })
+  @LowerCaseUuid()
+  @IsUUID()
+  institutionId!: string;
+
+  @ApiProperty({ minLength: 1, maxLength: 100 })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(100)
+  @NotBlank()
+  firstName!: string;
+
+  @ApiProperty({ type: PhoneDto })
+  @IsObject()
+  @ValidateNested()
+  @Type(() => PhoneDto)
+  mobile!: PhoneDto;
 
   @ApiProperty({ type: StudentEnrolmentDto })
   @IsObject()
@@ -243,6 +251,81 @@ export class CreateStudentDto {
   @ValidateNested({ each: true })
   @Type(() => GuardianDto)
   guardians!: GuardianDto[];
+}
+
+/** The fields of STU-04 that cannot be cleared: sent, they need a value. */
+class StudentRequiredChangesDto {
+  @ApiPropertyOptional({ minLength: 1, maxLength: 100 })
+  @WhenPresent()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(100)
+  @NotBlank()
+  firstName?: string;
+
+  @ApiPropertyOptional({ type: PhoneDto })
+  @WhenPresent()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => PhoneDto)
+  mobile?: PhoneDto;
+}
+
+/**
+ * STU-04 body: an omitted field stays and `null` clears one that may be empty. The guardians change on their own
+ * endpoints, the class, section and roll number by STU-08, and the Institution never changes.
+ */
+export class UpdateStudentDto extends IntersectionType(
+  VersionDto,
+  IntersectionType(StudentRequiredChangesDto, StudentDetailsDto),
+) {}
+
+/** Why a student is deactivated: 1 Left the Institution, 2 Created by mistake, 3 Other (DDD 9.6). */
+export const INACTIVE_REASONS = [1, 2, 3] as const;
+
+/** STU-05 body. */
+export class DeactivateStudentDto {
+  @ApiProperty({
+    enum: INACTIVE_REASONS,
+    description: '1 Left the Institution, 2 Created by mistake, 3 Other',
+  })
+  @IsInt()
+  @IsIn(INACTIVE_REASONS)
+  reason!: number;
+}
+
+/**
+ * STU-08 body: the section and the roll number the student has from `effectiveDate` (today when absent). Send the one
+ * that changes, or both; the class and the year are those of the student's enrolment.
+ */
+export class MoveStudentDto {
+  @ApiPropertyOptional({ format: 'uuid', description: 'An open section of the same class' })
+  @WhenPresent()
+  @LowerCaseUuid()
+  @IsUUID()
+  sectionId?: string;
+
+  @ApiPropertyOptional({
+    minLength: 1,
+    maxLength: 20,
+    example: '14',
+    description: 'Unique in the section',
+  })
+  @WhenPresent()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(20)
+  @NotBlank()
+  rollNumber?: string;
+
+  @ApiPropertyOptional({
+    example: '2026-07-01',
+    description:
+      'First day in the new section: not before the current placement started, not after today',
+  })
+  @WhenPresent()
+  @IsCalendarDate()
+  effectiveDate?: string;
 }
 
 export const STUDENT_SORT_FIELDS = ['name', 'admissionNo', 'rollNumber', 'createdAt'] as const;

@@ -1,4 +1,4 @@
-import { FixedClock, nextIstMidnight, toIstDate } from './clock.js';
+import { dayBefore, FixedClock, nextIstMidnight, toIstDate } from './clock.js';
 
 describe('toIstDate', () => {
   it('uses the IST calendar day, not the UTC one', () => {
@@ -42,5 +42,14 @@ describe('FixedClock', () => {
     const clock = new FixedClock('2026-10-23T04:30:00.000Z');
     clock.now().setFullYear(2000);
     expect(clock.now().getUTCFullYear()).toBe(2026);
+  });
+});
+
+describe('dayBefore', () => {
+  it('steps back one calendar day, across month, year and leap days', () => {
+    expect(dayBefore('2026-11-11')).toBe('2026-11-10');
+    expect(dayBefore('2026-11-01')).toBe('2026-10-31');
+    expect(dayBefore('2027-01-01')).toBe('2026-12-31');
+    expect(dayBefore('2028-03-01')).toBe('2028-02-29');
   });
 });

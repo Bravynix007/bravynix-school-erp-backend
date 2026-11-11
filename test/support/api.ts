@@ -18,7 +18,7 @@ export function apiCaller(t: TestApp) {
     const http = request(t.app.getHttpServer());
     const res = await http[method](path)
       .set('Authorization', `Bearer ${token}`)
-      .send(method === 'get' || method === 'delete' ? undefined : (body ?? {}));
+      .send(method === 'get' || (method === 'delete' && body === undefined) ? undefined : (body ?? {}));
     return { status: res.status, body: res.body as Body, headers: res.headers };
   };
 }

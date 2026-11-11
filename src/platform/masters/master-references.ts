@@ -13,6 +13,19 @@ export interface PlaceIds {
   cityId?: string | null;
 }
 
+/** The place columns of a stored record or of a set of changes, as the master check names them. */
+export function placeOf(row: {
+  country_id?: string | null;
+  state_id?: string | null;
+  city_id?: string | null;
+}): PlaceIds {
+  return {
+    ...(row.country_id === undefined ? {} : { countryId: row.country_id }),
+    ...(row.state_id === undefined ? {} : { stateId: row.state_id }),
+    ...(row.city_id === undefined ? {} : { cityId: row.city_id }),
+  };
+}
+
 /** A class category as another module shows it. */
 export interface ClassCategoryRef {
   id: string;

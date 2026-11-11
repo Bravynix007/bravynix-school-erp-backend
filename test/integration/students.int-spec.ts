@@ -20,6 +20,9 @@ const migrationUrl = process.env.TEST_DATABASE_MIGRATION_URL!;
 const superAdmin = personaByKey('SA1');
 const missing = '00000000-0000-7000-8000-00000000ffff';
 
+const fieldCodes = (res: { body: { errors?: { field: string; code: string }[] } }) =>
+  res.body.errors?.map(({ field, code }) => ({ field, code }));
+
 const guardian = (fields: object = {}) => ({
   firstName: 'Ravi',
   lastName: 'Shetty',
@@ -103,6 +106,46 @@ describe('students: add, read and list', () => {
   });
   const refused = (statement: ReturnType<typeof sql>) =>
     database.transaction(tenant(), (tx) => statement.execute(tx));
+  const enrolmentOf = async (id: string) =>
+    (
+      await database.transaction(tenant(), (tx) =>
+        sql<{ status: number; left_date: string | null; outcome: number | null }>`
+          select status, left_date::text, outcome from student_enrolments where student_id = ${id}`.execute(
+          tx,
+        ),
+      )
+    ).rows[0]!;
+  const openPlacements = async (id: string) =>
+    (
+      await database.transaction(tenant(), (tx) =>
+        sql<{ n: number }>`
+          select count(*)::int as n from student_section_placements p
+          join student_enrolments e on e.id = p.student_enrolment_id
+          where e.student_id = ${id} and p.end_date is null`.execute(tx),
+      )
+    ).rows[0]!.n;
+  const move = (id: string, fields: object, token = owner.token) =>
+    api('patch', `/v1/students/${id}/placement`, token, fields);
+  const placements = async (id: string) =>
+    (
+      await database.transaction(tenant(), (tx) =>
+        sql<{
+          section_id: string;
+          roll_number: string;
+          start_date: string;
+          end_date: string | null;
+        }>`
+          select p.section_id, p.roll_number, p.start_date::text, p.end_date::text
+          from student_section_placements p join student_enrolments e on e.id = p.student_enrolment_id
+          where e.student_id = ${id} order by p.start_date`.execute(tx),
+      )
+    ).rows;
+  /** In 9-A, roll 7, since 1 May: the test clock says it is 1 June. */
+  const sinceMay = () => added({ admissionDate: '2026-05-01', ...roll('7') });
+  const patch = (id: string, fields: object, token = owner.token) =>
+    api('patch', `/v1/students/${id}`, token, fields);
+  const deactivate = (id: string, reason: number | undefined = 1, token = owner.token) =>
+    api('delete', `/v1/students/${id}`, token, reason === undefined ? {} : { reason });
   const audit = (id: string) =>
     readAuditRows<{
       action: string;
@@ -575,6 +618,412 @@ describe('students: add, read and list', () => {
         expect((await api('get', `/v1/students/${id}`, token)).status).toBe(404);
       }
       expect((await api('get', '/v1/students/not-a-uuid', owner.token)).status).toBe(404);
+    });
+  });
+
+  describe('STU-04 edit', () => {
+    it('changes the personal and contact fields by version, stamps the author and audits the change', async () => {
+      const student = await added({ admissionNo: 'GVS-4' });
+      const res = await patch(student.id, {
+        version: 1,
+        firstName: 'Diyaa',
+        lastName: 'Rao',
+        gender: 2,
+        dateOfBirth: '2014-03-09',
+        bloodGroup: 'O+',
+        nationality: 'Indian',
+        admissionNo: 'GVS-40',
+        contactEmail: 'Diya.Own@Example.com',
+        mobile: { countryCode: '91', number: '9000000001' },
+        alternateNumber: '9000000002',
+        address: { line1: '12 Lake Road', ...place },
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.data).toMatchObject({
+        id: student.id,
+        firstName: 'Diyaa',
+        lastName: 'Rao',
+        gender: 2,
+        dateOfBirth: '2014-03-09',
+        bloodGroup: 'O+',
+        nationality: 'Indian',
+        admissionNo: 'GVS-40',
+        contactEmail: 'diya.own@example.com',
+        mobile: { countryCode: '91', number: '9000000001' },
+        address: { line1: '12 Lake Road', ...place },
+        version: 2,
+        placement: { sectionId: sectionA, rollNumber: student.placement.rollNumber },
+      });
+      const entries = (await audit(student.id)).filter((e) => e.action === 'student.updated');
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toMatchObject({
+        actor_user_id: owner.person,
+        institution_id: first,
+        old_values: expect.objectContaining({ firstName: 'Diya' }),
+        new_values: expect.objectContaining({ firstName: 'Diyaa', mobile: '******0001' }),
+      });
+      const text = JSON.stringify(entries[0]);
+      for (const secret of ['diya.own@example.com', '12 Lake Road', '9000000001']) {
+        expect(text).not.toContain(secret);
+      }
+    });
+
+    it('clears optional fields with null, and leaves what it is not sent', async () => {
+      const student = await added({
+        lastName: 'Shetty',
+        nationality: 'Indian',
+        contactEmail: 'a@example.com',
+      });
+      const res = await patch(student.id, { version: 1, lastName: null, contactEmail: null });
+      expect(res.body.data).toMatchObject({
+        lastName: null,
+        contactEmail: null,
+        nationality: 'Indian',
+        version: 2,
+      });
+    });
+
+    it('writes nothing, and no audit entry, for a request that changes nothing', async () => {
+      const student = await added({ lastName: 'Shetty' });
+      const res = await patch(student.id, { version: 1, lastName: 'Shetty', firstName: 'Diya' });
+      expect(res.status).toBe(200);
+      expect(res.body.data).toMatchObject({ version: 1 });
+      expect((await audit(student.id)).filter((e) => e.action === 'student.updated')).toEqual([]);
+    });
+
+    it('answers 409 VERSION_CONFLICT for a stale version, before the body is looked at', async () => {
+      const student = await added();
+      await patch(student.id, { version: 1, lastName: 'Rao' });
+      const stale = await patch(student.id, { version: 1, dateOfBirth: '2999-01-01' });
+      expect([stale.status, stale.body.code]).toEqual([409, 'VERSION_CONFLICT']);
+    });
+
+    it('refuses the dates as they will stand, and a name of only spaces', async () => {
+      const student = await added({ dateOfBirth: '2014-03-09' });
+      for (const [fields, field, code] of [
+        [{ dateOfBirth: '2999-01-01' }, 'dateOfBirth', 'INVALID_VALUE'],
+        [{ admissionDate: '2010-01-01' }, 'admissionDate', 'INVALID_VALUE'],
+        [{ firstName: '   ' }, 'firstName', 'INVALID_FORMAT'],
+        [{ firstName: null }, 'firstName', 'TOO_SHORT'],
+        [{ institutionId: first }, 'institutionId', 'FIELD_NOT_ALLOWED'],
+        [{ guardians: [] }, 'guardians', 'FIELD_NOT_ALLOWED'],
+      ] as const) {
+        const res = await patch(student.id, { version: 1, ...fields });
+        expect([res.status, fieldCodes(res)]).toEqual([400, [{ field, code }]]);
+      }
+    });
+
+    it('keeps the Admission ID once among active students, and frees it when a student is deactivated', async () => {
+      const one = await added({ admissionNo: 'GVS-5' });
+      const two = await added({ admissionNo: 'GVS-6', ...roll('2') });
+      const taken = await patch(two.id, { version: 1, admissionNo: 'gvs-5' });
+      expect([taken.status, taken.body.code]).toEqual([409, 'ADMISSION_NO_TAKEN']);
+      expect(
+        (await api('delete', `/v1/students/${one.id}`, owner.token, { reason: 1 })).status,
+      ).toBe(200);
+      expect((await patch(two.id, { version: 1, admissionNo: 'GVS-5' })).status).toBe(200);
+    });
+
+    it('takes a Ready photo of purpose 3 once, and checks a new place against the masters', async () => {
+      const student = await added();
+      const photo = await readyPhoto();
+      const ok = await patch(student.id, { version: 1, photoFileId: photo });
+      expect(ok.body.data).toMatchObject({ photoFileId: photo, version: 2 });
+      const other = await added({ ...roll('2') });
+      const again = await patch(other.id, { version: 1, photoFileId: photo });
+      expect([again.status, again.body.errors?.[0]?.field]).toEqual([400, 'photoFileId']);
+      const wrong = await patch(other.id, { version: 1, photoFileId: await readyPhoto(first, 4) });
+      expect([wrong.status, wrong.body.errors?.[0]?.field]).toEqual([400, 'photoFileId']);
+      const city = await patch(other.id, { version: 1, address: { stateId: place.stateId } });
+      expect(city.status).toBe(400);
+      expect(city.body.errors?.[0]?.field).toContain('address');
+    });
+
+    it('is 404 for another Society, an Institution the caller does not reach, no such student and a deactivated one', async () => {
+      const student = await added();
+      const elsewhere = await fixtures.institutionAdmin(societyA, [second]);
+      for (const [token, id] of [
+        [otherOwner.token, student.id],
+        [elsewhere.token, student.id],
+        [owner.token, missing],
+      ] as const) {
+        expect((await patch(id, { version: 1, lastName: 'X' }, token)).status).toBe(404);
+      }
+      await api('delete', `/v1/students/${student.id}`, owner.token, { reason: 3 });
+      expect((await patch(student.id, { version: 2, lastName: 'X' })).status).toBe(404);
+    });
+
+    it('lets an Institution Admin edit', async () => {
+      const student = await added();
+      const res = await patch(student.id, { version: 1, lastName: 'Rao' }, institutionAdmin.token);
+      expect(res.status).toBe(200);
+    });
+  });
+
+  describe('STU-05 deactivate', () => {
+    it('deactivates with a reason, ends the placement today, and closes the enrolment as left', async () => {
+      const student = await added({ admissionNo: 'GVS-7' });
+      const res = await deactivate(student.id, 1);
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual({ id: student.id, status: 0 });
+      const today = t.clock.todayIst();
+      expect(await enrolmentOf(student.id)).toEqual({ status: 1, left_date: today, outcome: 3 });
+      expect(await openPlacements(student.id)).toBe(0);
+      const row = (
+        await database.transaction(tenant(), (tx) =>
+          sql<{ status: number; inactive_reason: number; inactive_at: Date }>`
+            select status, inactive_reason, inactive_at from students where id = ${student.id}`.execute(
+            tx,
+          ),
+        )
+      ).rows[0]!;
+      expect([row.status, row.inactive_reason]).toEqual([0, 1]);
+      expect(row.inactive_at).toBeInstanceOf(Date);
+      const entries = (await audit(student.id)).filter((e) => e.action === 'student.deactivated');
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toMatchObject({
+        actor_user_id: owner.person,
+        old_values: expect.objectContaining({ status: 1 }),
+        new_values: expect.objectContaining({ status: 0, inactiveReason: 1 }),
+      });
+    });
+
+    it('cancels the enrolment of a record made by mistake', async () => {
+      const student = await added();
+      expect((await deactivate(student.id, 2)).status).toBe(200);
+      expect(await enrolmentOf(student.id)).toMatchObject({ status: 0, outcome: null });
+    });
+
+    it('frees the Admission ID and the roll number, and leaves the record readable and listed as inactive', async () => {
+      const student = await added({ admissionNo: 'GVS-8', ...roll('21') });
+      await deactivate(student.id, 3);
+      const again = await add({ admissionNo: 'GVS-8', ...roll('21') });
+      expect(again.status).toBe(201);
+      const profile = await api('get', `/v1/students/${student.id}`, owner.token);
+      expect(profile.body.data).toMatchObject({
+        status: 0,
+        placement: { sectionId: sectionA, rollNumber: '21' },
+      });
+      const listed = await api('get', '/v1/students?status=0', owner.token);
+      expect((listed.body.data as unknown as { id: string }[]).map((s) => s.id)).toContain(
+        student.id,
+      );
+      const active = await api('get', '/v1/students', owner.token);
+      expect((active.body.data as unknown as { id: string }[]).map((s) => s.id)).not.toContain(
+        student.id,
+      );
+    });
+
+    it('is 404 the second time, and for a student the caller does not reach', async () => {
+      const student = await added();
+      expect((await deactivate(student.id)).status).toBe(200);
+      expect((await deactivate(student.id)).status).toBe(404);
+      const other = await added(roll('2'));
+      const elsewhere = await fixtures.institutionAdmin(societyA, [second]);
+      for (const [token, id] of [
+        [otherOwner.token, other.id],
+        [elsewhere.token, other.id],
+        [owner.token, missing],
+      ] as const) {
+        expect((await deactivate(id, 1, token)).status).toBe(404);
+      }
+    });
+
+    it('needs a reason of 1, 2 or 3', async () => {
+      const student = await added();
+      for (const reason of [undefined, 0, 4, '1']) {
+        const res = await api(
+          'delete',
+          `/v1/students/${student.id}`,
+          owner.token,
+          reason === undefined ? {} : { reason },
+        );
+        expect(res.status).toBe(400);
+        expect(res.body.errors?.[0]?.field).toBe('reason');
+      }
+      expect((await api('get', `/v1/students/${student.id}`, owner.token)).body.data).toMatchObject(
+        { status: 1 },
+      );
+    });
+
+    it('stops a parent’s section blocks for a child who is gone, but not for a sibling who stays', async () => {
+      const parent = guardian();
+      const gone = await added({ guardians: [parent] });
+      const stays = await added({ ...roll('2'), guardians: [{ ...parent }] });
+      const userId = (await usersWith(parent.email))[0]!.id;
+      await blocks.setBlock(ownerDb, societyA, first, 3, true);
+      expect(await blocksOf(userId)).toEqual([{ section: 3, institution_id: first }]);
+      await deactivate(gone.id);
+      expect(await blocksOf(userId)).toEqual([{ section: 3, institution_id: first }]);
+      await deactivate(stays.id);
+      expect(await blocksOf(userId)).toEqual([]);
+    });
+
+    it('is refused by the database for a deactivated record without a reason, and an active one with one', async () => {
+      const student = await added();
+      await expect(
+        refused(sql`update students set status = 0 where id = ${student.id}`),
+      ).rejects.toThrow(/ck_students_inactive/);
+      await expect(
+        refused(sql`update students set inactive_reason = 1 where id = ${student.id}`),
+      ).rejects.toThrow(/ck_students_inactive/);
+      await expect(
+        refused(
+          sql`update students set status = 0, inactive_reason = 4, inactive_at = now() where id = ${student.id}`,
+        ),
+      ).rejects.toThrow(/ck_students_inactive/);
+    });
+  });
+
+  describe('STU-08 move', () => {
+    it('closes the placement the day before and opens the next, with the new section and roll number', async () => {
+      const student = await sinceMay();
+      const res = await move(student.id, {
+        sectionId: sectionB,
+        rollNumber: '3',
+        effectiveDate: '2026-05-20',
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.meta).toBeNull();
+      expect(res.body.data).toMatchObject({
+        placement: { sectionId: sectionB, rollNumber: '3', startDate: '2026-05-20' },
+      });
+      expect(await placements(student.id)).toEqual([
+        {
+          section_id: sectionA,
+          roll_number: '7',
+          start_date: '2026-05-01',
+          end_date: '2026-05-19',
+        },
+        { section_id: sectionB, roll_number: '3', start_date: '2026-05-20', end_date: null },
+      ]);
+      const entries = (await audit(student.id)).filter(
+        (e) => e.action === 'student.placement_changed',
+      );
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toMatchObject({
+        actor_user_id: owner.person,
+        old_values: expect.objectContaining({ sectionId: sectionA, rollNumber: '7' }),
+        new_values: expect.objectContaining({ sectionId: sectionB, rollNumber: '3' }),
+      });
+    });
+
+    it('takes today as the day, and keeps the section or the roll number it is not sent', async () => {
+      const student = await sinceMay();
+      const res = await move(student.id, { rollNumber: '8' });
+      expect(res.body.data).toMatchObject({
+        placement: { sectionId: sectionA, rollNumber: '8', startDate: t.clock.todayIst() },
+      });
+      expect((await placements(student.id)).map((p) => [p.roll_number, p.end_date])).toEqual([
+        ['7', '2026-05-31'],
+        ['8', null],
+      ]);
+      const section = await move(student.id, { sectionId: sectionB });
+      expect(section.body.data).toMatchObject({
+        placement: { sectionId: sectionB, rollNumber: '8' },
+      });
+    });
+
+    it('corrects the placement in place on the day it began', async () => {
+      const student = await added(roll('7'));
+      const res = await move(student.id, { rollNumber: '70' });
+      expect(res.status).toBe(200);
+      expect(await placements(student.id)).toEqual([
+        {
+          section_id: sectionA,
+          roll_number: '70',
+          start_date: t.clock.todayIst(),
+          end_date: null,
+        },
+      ]);
+    });
+
+    it('writes nothing, and no audit entry, for a request that changes nothing', async () => {
+      const student = await sinceMay();
+      for (const fields of [
+        {},
+        { sectionId: sectionA, rollNumber: '7', effectiveDate: '2026-05-10' },
+      ]) {
+        const res = await move(student.id, fields);
+        expect(res.status).toBe(200);
+        expect(res.body.data).toMatchObject({
+          placement: { sectionId: sectionA, rollNumber: '7' },
+        });
+      }
+      expect(await placements(student.id)).toHaveLength(1);
+      expect(
+        (await audit(student.id)).filter((e) => e.action === 'student.placement_changed'),
+      ).toEqual([]);
+    });
+
+    it('refuses a day in the future or before the placement began', async () => {
+      const student = await sinceMay();
+      for (const effectiveDate of ['2026-06-02', '2026-04-30']) {
+        const res = await move(student.id, { rollNumber: '8', effectiveDate });
+        expect([res.status, fieldCodes(res)]).toEqual([
+          400,
+          [{ field: 'effectiveDate', code: 'INVALID_VALUE' }],
+        ]);
+      }
+    });
+
+    it('is 409 ROLL_NUMBER_TAKEN for a roll number in use in the section, and lets a freed one be taken', async () => {
+      const one = await added(roll('1'));
+      const two = await sinceMay();
+      const taken = await move(two.id, { rollNumber: '1' });
+      expect([taken.status, taken.body.code]).toEqual([409, 'ROLL_NUMBER_TAKEN']);
+      expect(await placements(two.id)).toHaveLength(1);
+      await api('delete', `/v1/students/${one.id}`, owner.token, { reason: 1 });
+      expect((await move(two.id, { rollNumber: '1' })).status).toBe(200);
+    });
+
+    it('is 422 for a section of another class, 404 for a section of another Institution, and 422 for a closed section', async () => {
+      const student = await sinceMay();
+      const otherClass = await move(student.id, { sectionId: sectionTen });
+      expect([otherClass.status, otherClass.body.code]).toEqual([422, 'SECTION_NOT_IN_CLASS']);
+      const abroad = await move(student.id, { sectionId: missing });
+      expect(abroad.status).toBe(404);
+      const closed = await kit.section(
+        owner.token,
+        classNine,
+        (await masters('predefined-sections')).find((c) => c.code === 'C')!.id,
+      );
+      await api('delete', `/v1/sections/${closed}`, owner.token);
+      const inactive = await move(student.id, { sectionId: closed });
+      expect([inactive.status, inactive.body.code]).toEqual([422, 'INACTIVE_SECTION']);
+      expect(await placements(student.id)).toHaveLength(1);
+    });
+
+    it('warns, and still moves, when the new section is over its capacity', async () => {
+      const set = await api('patch', `/v1/sections/${sectionB}`, owner.token, {
+        version: 1,
+        capacity: 1,
+      });
+      expect(set.status).toBe(200);
+      await added(roll('1', { ...where(), sectionId: sectionB }));
+      const student = await sinceMay();
+      const res = await move(student.id, { sectionId: sectionB, rollNumber: '2' });
+      expect(res.status).toBe(200);
+      expect(res.body.meta).toEqual({ warnings: ['SECTION_OVER_CAPACITY'] });
+    });
+
+    it('is 404 for another Society, an Institution the caller does not reach, no such student and a deactivated one, and 400 for an unknown field', async () => {
+      const student = await sinceMay();
+      const elsewhere = await fixtures.institutionAdmin(societyA, [second]);
+      for (const [token, id] of [
+        [otherOwner.token, student.id],
+        [elsewhere.token, student.id],
+        [owner.token, missing],
+      ] as const) {
+        expect((await move(id, { rollNumber: '9' }, token)).status).toBe(404);
+      }
+      const unknown = await move(student.id, { classId: classTen });
+      expect([unknown.status, fieldCodes(unknown)]).toEqual([
+        400,
+        [{ field: 'classId', code: 'FIELD_NOT_ALLOWED' }],
+      ]);
+      await api('delete', `/v1/students/${student.id}`, owner.token, { reason: 1 });
+      expect((await move(student.id, { rollNumber: '9' })).status).toBe(404);
     });
   });
 
