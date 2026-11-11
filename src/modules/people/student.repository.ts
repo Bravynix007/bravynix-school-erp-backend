@@ -70,8 +70,8 @@ const STUDENT_NAME = sql`lower(concat_ws(' ', students.first_name, students.last
 const SORT_COLUMN = {
   name: STUDENT_NAME,
   admissionNo: sql`lower(students.admission_no)`,
-  // Numbers in numeric order, then the rest in text order: "9" before "10", "A1" after both.
-  rollNumber: sql`(pl.roll_number !~ '^[0-9]+$')::int::text || lpad(pl.roll_number, 20, '0')`,
+  // Numbers in numeric order, then the rest in text order, ignoring letter case: "9" before "10", "A1" after both.
+  rollNumber: sql`case when pl.roll_number ~ '^[0-9]+$' then '0' || lpad(pl.roll_number, 20, '0') else '1' || lower(pl.roll_number) end`,
   createdAt: sql`students.created_at`,
 } as const;
 
