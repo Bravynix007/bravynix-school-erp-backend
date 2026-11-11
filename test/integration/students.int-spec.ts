@@ -569,6 +569,19 @@ describe('students: add, read and list', () => {
       expect((await add({}, token)).status).toBe(403);
     });
 
+    it('refuses to make a guardian a Super Admin: the platform team and the parents are kept apart both ways', async () => {
+      const parent = guardian();
+      await added({ guardians: [parent] });
+      const refusedAdmin = await api('post', '/v1/platform/super-admins', admin, {
+        email: parent.email,
+      });
+      expect([refusedAdmin.status, refusedAdmin.body.code]).toEqual([409, 'ROLE_CONFLICT']);
+      const holds = await sql<{ n: number }>`
+        select count(*)::int as n from role_assignments g join users u on u.id = g.user_id
+        where u.email = ${parent.email}`.execute(ownerDb);
+      expect(holds.rows[0]!.n).toBe(0);
+    });
+
     it('refuses a guardian email that belongs to a Super Admin, and links a teacher', async () => {
       const res = await add({ guardians: [guardian({ email: superAdmin.email })] });
       expect([res.status, res.body.code]).toEqual([409, 'ROLE_CONFLICT']);

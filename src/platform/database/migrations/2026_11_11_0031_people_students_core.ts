@@ -271,6 +271,42 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   `.execute(db);
 
   await replaceBlockFunctions(db, true);
+
+  // A Super Admin is never a guardian, in either direction (owner decision, 11 Nov 2026). Making a person Super Admin
+  // asks whether they already guard a child anywhere; a Super Admin's tenant sees no Society's student rows, so the
+  // one boolean comes from a definer function, as for staff (migration 0026). Dormant access counts: an ended or
+  // deactivated child's row still stands until the guardian is removed.
+  await sql`
+    create function app_is_guardian(person uuid) returns boolean
+    language plpgsql volatile security definer
+    set search_path = pg_catalog, public, pg_temp
+    as $$
+    declare
+      caller_role text := current_setting('app.role_code', true);
+      caller_person text := current_setting('app.person_id', true);
+      found boolean;
+    begin
+      perform set_config('app.role_code', '1', true);
+      perform set_config('app.person_id', person::text, true);
+      select exists (
+        select 1 from student_guardians g where g.user_id = person and g.status = 1
+      ) into found;
+      perform set_config('app.role_code', coalesce(caller_role, ''), true);
+      perform set_config('app.person_id', coalesce(caller_person, ''), true);
+      return found;
+    end;
+    $$
+  `.execute(db);
+  await sql`revoke all on function app_is_guardian(uuid) from public`.execute(db);
+  await sql`
+    do $$
+    begin
+      if exists (select 1 from pg_roles where rolname = 'erp_app') then
+        grant execute on function app_is_guardian(uuid) to erp_app;
+      end if;
+    end;
+    $$
+  `.execute(db);
 }
 
 /**
@@ -362,6 +398,7 @@ export async function down(db: Kysely<unknown>): Promise<void> {
   if (process.env.NODE_ENV === 'production') {
     throw new Error('Refusing to drop students in production: later tables refer to them');
   }
+  await sql`drop function if exists app_is_guardian(uuid)`.execute(db);
   await replaceBlockFunctions(db, false);
   await sql`drop table if exists student_section_placements`.execute(db);
   await sql`drop table if exists student_enrolments`.execute(db);

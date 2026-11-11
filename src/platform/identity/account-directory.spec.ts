@@ -28,6 +28,9 @@ function build(existing?: AccountRow, taken: number[] = []) {
     .fn<AccountRepository['holdsGrantOrRestorable']>()
     .mockResolvedValue(false);
   const holdsStaffRecord = vi.fn<SessionRepository['holdsStaffRecord']>().mockResolvedValue(false);
+  const holdsGuardianRecord = vi
+    .fn<SessionRepository['holdsGuardianRecord']>()
+    .mockResolvedValue(false);
   const findByEmail = vi.fn<AccountRepository['findByEmail']>().mockResolvedValue(existing);
   const insertPending = vi
     .fn<AccountRepository['insertPending']>()
@@ -52,7 +55,7 @@ function build(existing?: AccountRow, taken: number[] = []) {
       revokeGrant,
       endRoleSessions,
     } as unknown as AccountRepository,
-    { holdsStaffRecord } as unknown as SessionRepository,
+    { holdsStaffRecord, holdsGuardianRecord } as unknown as SessionRepository,
     {} as MfaRepository,
     { send } as unknown as BackgroundMailer,
   );
@@ -63,6 +66,7 @@ function build(existing?: AccountRow, taken: number[] = []) {
     holdsActiveGrant,
     holdsGrantOrRestorable,
     holdsStaffRecord,
+    holdsGuardianRecord,
     findByEmail,
     insertPending,
     activeGrant,
@@ -135,6 +139,7 @@ describe('AccountDirectory.grant', () => {
   it.each([
     ['an Institution Admin, active or dormant', 'holdsGrantOrRestorable'],
     ['staff, in any Society, active or dormant', 'holdsStaffRecord'],
+    ['a guardian of a student, in any Society', 'holdsGuardianRecord'],
   ] as const)(
     'refuses %s as Super Admin: the platform team holds no school role',
     async (_name, which) => {

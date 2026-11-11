@@ -579,7 +579,9 @@ export class AccountDirectory {
         userId,
         [RoleCode.InstitutionAdmin],
         RESTORABLE_REVOKE_REASONS,
-      )) || (await this.sessions.holdsStaffRecord(tx, userId))
+      )) ||
+      (await this.sessions.holdsStaffRecord(tx, userId)) ||
+      (await this.sessions.holdsGuardianRecord(tx, userId))
     );
   }
 
