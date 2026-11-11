@@ -217,7 +217,12 @@ function build(found: StudentRow | null = row()) {
     } as unknown as PersonDirectory,
     { requirePlace } as unknown as MasterReferences,
     { requireReady } as unknown as FileDirectory,
-    { openIn } as unknown as AcademicYearDirectory,
+    {
+      openIn,
+      spanOf: vi
+        .fn<AcademicYearDirectory['spanOf']>()
+        .mockResolvedValue({ startDate: '2026-06-01', endDate: '2027-03-31' }),
+    } as unknown as AcademicYearDirectory,
     { placeOf } as unknown as SectionDirectory,
     {
       names: vi.fn<InstitutionDirectory['names']>().mockResolvedValue(

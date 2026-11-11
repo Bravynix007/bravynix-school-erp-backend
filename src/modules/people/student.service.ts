@@ -115,7 +115,12 @@ export class StudentService {
     const created = await this.database
       .transaction(context.tenant, async (tx) => {
         await this.requireReferences(tx, body, context.institutionId);
-        const capacity = await this.requirePlace(tx, body.enrolment, context.institutionId);
+        const {
+          capacity,
+          startDate: yearStart,
+          endDate: yearEnd,
+        } = await this.requirePlace(tx, body.enrolment, context.institutionId);
+        const start = placementStart(body.admissionDate ?? null, today, yearStart, yearEnd);
         const guardians = [];
         for (const guardian of body.guardians) {
           const person =
@@ -162,7 +167,6 @@ export class StudentService {
           city_id: body.address?.cityId ?? null,
           pincode: body.address?.pincode ?? null,
         });
-        const start = body.admissionDate ?? today;
         const enrolment = await this.students.insertEnrolment(tx, {
           ...base,
           academic_year_id: body.enrolment.academicYearId,
@@ -446,7 +450,7 @@ export class StudentService {
         }
         const effective = body.effectiveDate ?? today;
         requireValidMoveDate(effective, open.start_date, today);
-        const capacity = await this.requirePlace(
+        const { capacity } = await this.requirePlace(
           tx,
           { academicYearId: open.academic_year_id, classId: open.class_id, sectionId },
           context.institutionId,
@@ -549,7 +553,7 @@ export class StudentService {
     tx: Tx,
     enrolment: Pick<StudentEnrolmentDto, 'academicYearId' | 'classId' | 'sectionId'>,
     institutionId: string,
-  ): Promise<number | null> {
+  ): Promise<{ capacity: number | null; startDate: string; endDate: string }> {
     const open = await this.years.openIn(tx, enrolment.academicYearId, institutionId);
     if (open === undefined) throw AppException.notFound();
     if (!open) throw AppException.businessRule(ErrorCode.YEAR_NOT_ACTIVE);
@@ -559,7 +563,9 @@ export class StudentService {
       throw AppException.businessRule(ErrorCode.SECTION_NOT_IN_CLASS);
     }
     if (!section.active) throw AppException.businessRule(ErrorCode.INACTIVE_SECTION);
-    return section.capacity;
+    const span = await this.years.spanOf(tx, enrolment.academicYearId);
+    if (!span) throw AppException.notFound();
+    return { capacity: section.capacity, ...span };
   }
 
   /** Does the section now hold more students than its capacity? A section with no capacity never does. */
@@ -582,3 +588,22 @@ export class StudentService {
 const later = (a: string, b: string): string => (a > b ? a : b);
 
 const warnings = (...codes: string[]): WarningMeta => ({ warnings: codes });
+
+/**
+ * The first day of the enrolment and placement: inside the year (DATABASE_DESIGN, `enrolled_date` is the first day in
+ * this class this year). An admission date before the year starts the year; one after it ends is 400 on
+ * `admissionDate`. Without one, today, or the first day of a year that has not begun yet.
+ */
+export function placementStart(
+  admissionDate: string | null,
+  today: string,
+  yearStart: string,
+  yearEnd: string,
+): string {
+  if (admissionDate !== null && admissionDate > yearEnd) {
+    throw AppException.validation([fieldError('admissionDate', FieldErrorCode.INVALID_VALUE)]);
+  }
+  const day = admissionDate ?? today;
+  if (day < yearStart) return yearStart;
+  return day > yearEnd ? yearEnd : day;
+}

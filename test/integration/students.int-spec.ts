@@ -140,12 +140,27 @@ describe('students: add, read and list', () => {
           where e.student_id = ${id} order by p.start_date`.execute(tx),
       )
     ).rows;
-  /** In 9-A, roll 7, since 1 May: the test clock says it is 1 June. */
-  const sinceMay = () => added({ admissionDate: '2026-05-01', ...roll('7') });
+  /** In 9-A, roll 7, since 1 May: the test clock says it is 1 June, so the placement is backdated by hand. */
+  const sinceMay = async () => {
+    const student = await added(roll('7'));
+    await refused(
+      sql`update student_section_placements set start_date = '2026-05-01'
+        where student_enrolment_id = ${student.placement.enrolmentId}`,
+    );
+    return student;
+  };
   const patch = (id: string, fields: object, token = owner.token) =>
     api('patch', `/v1/students/${id}`, token, fields);
   const deactivate = (id: string, reason: number | undefined = 1, token = owner.token) =>
     api('delete', `/v1/students/${id}`, token, reason === undefined ? {} : { reason });
+  const studentsSeenBy = (personId: string) =>
+    database.transaction({ societyId: otherOwner.contexts[0]!.societyId!, personId }, (tx) =>
+      tx.selectFrom('students').select('id').execute(),
+    );
+  const deactivateRow = (id: string) =>
+    refused(
+      sql`update students set status = 0, inactive_reason = 3, inactive_at = now() where id = ${id}`,
+    );
   const audit = (id: string) =>
     readAuditRows<{
       action: string;
@@ -481,6 +496,21 @@ describe('students: add, read and list', () => {
       expect(over.body.meta).toEqual({ warnings: ['SECTION_OVER_CAPACITY'] });
     });
 
+    it('starts the placement inside the year: an admission date before it starts the year, one after it is refused', async () => {
+      const early = await add({ admissionDate: '2020-01-01' });
+      expect(early.status).toBe(201);
+      expect(early.body.data).toMatchObject({
+        admissionDate: '2020-01-01',
+        placement: { enrolledDate: '2026-06-01', startDate: '2026-06-01' },
+      });
+      const late = await add({ admissionDate: '2027-09-01', ...roll('2') });
+      expect([late.status, late.body.errors?.[0]?.field, late.body.errors?.[0]?.code]).toEqual([
+        400,
+        'admissionDate',
+        'INVALID_VALUE',
+      ]);
+    });
+
     it('wants exactly one primary guardian, and one login for each email', async () => {
       for (const guardians of [[guardian({ isPrimary: false })], [guardian(), guardian()]]) {
         const res = await add({ guardians });
@@ -703,8 +733,8 @@ describe('students: add, read and list', () => {
       for (const [fields, field, code] of [
         [{ dateOfBirth: '2999-01-01' }, 'dateOfBirth', 'INVALID_VALUE'],
         [{ admissionDate: '2010-01-01' }, 'admissionDate', 'INVALID_VALUE'],
-        [{ firstName: '   ' }, 'firstName', 'INVALID_FORMAT'],
-        [{ firstName: null }, 'firstName', 'TOO_SHORT'],
+        [{ firstName: '   ' }, 'firstName', 'TOO_SHORT'],
+        [{ firstName: null }, 'firstName', 'INVALID_TYPE'],
         [{ institutionId: first }, 'institutionId', 'FIELD_NOT_ALLOWED'],
         [{ guardians: [] }, 'guardians', 'FIELD_NOT_ALLOWED'],
       ] as const) {
@@ -1256,6 +1286,15 @@ describe('students: add, read and list', () => {
       );
       expect(asStranger).toEqual([]);
     });
+
+    it('show a guardian the child they are a guardian of, and no other child', async () => {
+      const parent = guardian();
+      const child = await added({ guardians: [parent] });
+      await added({ ...roll('2') });
+      const userId = (await usersWith(parent.email))[0]!.id;
+      expect(await studentsSeenBy(userId)).toEqual([{ id: child.id }]);
+      expect(await studentsSeenBy(newId())).toEqual([]);
+    });
   });
 
   describe('the section blocks for a guardian', () => {
@@ -1271,6 +1310,18 @@ describe('students: add, read and list', () => {
       // Another Society's blocks, and a person who is nobody's guardian here, are not shown.
       expect(await blocksOf(userId, otherOwner.contexts[0]!.societyId!)).toEqual([]);
       expect(await blocksOf(newId())).toEqual([]);
+    });
+
+    it('stop answering once every child of the guardian is deactivated, but not while one stays', async () => {
+      const parent = guardian();
+      const gone = await added({ guardians: [parent] });
+      const stays = await added({ ...roll('2'), guardians: [{ ...parent }] });
+      const userId = (await usersWith(parent.email))[0]!.id;
+      await blocks.setBlock(ownerDb, societyA, first, 3, true);
+      await deactivateRow(gone.id);
+      expect(await blocksOf(userId)).toEqual([{ section: 3, institution_id: first }]);
+      await deactivateRow(stays.id);
+      expect(await blocksOf(userId)).toEqual([]);
     });
   });
 });

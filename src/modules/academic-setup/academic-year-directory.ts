@@ -30,6 +30,15 @@ export class AcademicYearDirectory {
     return year?.institution_id === institutionId ? year.status === 1 : undefined;
   }
 
+  /** The first and last day of a year the caller can see, or `undefined`. */
+  async spanOf(
+    tx: Tx,
+    yearId: string,
+  ): Promise<{ startDate: string; endDate: string } | undefined> {
+    const year = await this.years.find(tx, yearId);
+    return year ? { startDate: year.start_date, endDate: year.end_date } : undefined;
+  }
+
   /** The current academic year of the Institution, or `null` when none is set. */
   async currentId(tx: Tx, institutionId: string): Promise<string | null> {
     return (await this.years.currentOf(tx, institutionId))?.id ?? null;
