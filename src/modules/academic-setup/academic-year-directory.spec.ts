@@ -17,6 +17,25 @@ const build = (found?: AcademicYearRow) => {
 };
 
 describe('AcademicYearDirectory', () => {
+  describe('openIn', () => {
+    it('says whether a year of the Institution is active', async () => {
+      await expect(build(year()).directory.openIn(tx, 'year-1', 'institution-1')).resolves.toBe(
+        true,
+      );
+      await expect(
+        build(year({ status: 0 })).directory.openIn(tx, 'year-1', 'institution-1'),
+      ).resolves.toBe(false);
+    });
+
+    it('is undefined for a year that is not there, and for one of another Institution', async () => {
+      for (const found of [undefined, year({ institution_id: 'institution-2' })]) {
+        await expect(
+          build(found).directory.openIn(tx, 'year-1', 'institution-1'),
+        ).resolves.toBeUndefined();
+      }
+    });
+  });
+
   describe('requireActive', () => {
     it('passes for an active year of the Institution', async () => {
       const t = build(year());

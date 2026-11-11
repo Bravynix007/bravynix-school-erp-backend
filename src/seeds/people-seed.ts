@@ -1,6 +1,6 @@
 import { sql, type Kysely } from 'kysely';
 import { classes, clearScope, scopeTo, seededYearId } from './academic-seed.js';
-import { institutions, personas } from './two-worlds.js';
+import { children, institutions, personas } from './two-worlds.js';
 
 const seedId = (n: number): string => `00000000-0000-7000-8000-${n.toString().padStart(12, '0')}`;
 
@@ -131,6 +131,93 @@ async function writeIn(tx: Kysely<unknown>): Promise<void> {
         ${`9000001${(100 + index).toString()}`}, true)
       on conflict (id) do nothing
     `.execute(tx);
+  }
+  await clearScope(tx);
+}
+
+/**
+ * The students of the two worlds: every child of the list, each placed in a section of its own Institution, counted
+ * from the first: the child at place `n` there takes the `n`-th section of the Institution (round and round), with the
+ * next roll number of that section. The `classSection` label of a child names no seeded class, so it is not used.
+ * The guardians are the parent personas that name the child.
+ */
+export const seededStudents = (() => {
+  const atHome = new Map<string, number>();
+  const inSection = new Map<string, number>();
+  return children.map((child, index) => {
+    const home = institutions.find((institution) => institution.key === child.institution);
+    if (!home) throw new Error(`Seeded child ${child.key} names an unknown Institution`);
+    const sections = classes
+      .filter((entry) => entry.institutionId === home.id)
+      .flatMap((entry) =>
+        entry.sections.map((section) => ({ classId: entry.id, sectionId: section.id })),
+      );
+    const place = atHome.get(home.id) ?? 0;
+    atHome.set(home.id, place + 1);
+    const sat = sections[place % Math.max(sections.length, 1)];
+    if (!sat) throw new Error(`Seeded child ${child.key} has no section to sit in`);
+    const roll = (inSection.get(sat.sectionId) ?? 0) + 1;
+    inSection.set(sat.sectionId, roll);
+    const guardians = personas.filter((persona) =>
+      persona.grants.some((grant) => grant.role === 5 && grant.children?.includes(child.key)),
+    );
+    return { child, home, ...sat, rollNumber: String(roll), guardians, index };
+  });
+})();
+
+/** The seeded student of a child, so a test can find its record. */
+export const seededStudentId = (childKey: string): string => {
+  const found = seededStudents.find((student) => student.child.key === childKey);
+  if (!found) throw new Error(`Seeded child ${childKey} has no student record`);
+  return found.child.id;
+};
+
+/**
+ * A student record for each two-worlds child, with its enrolment and placement in the current year of its
+ * Institution and a guardian for each parent persona that names it, linked to that persona's login. Safe to run twice:
+ * rows are keyed by their fixed IDs. The names and numbers are made up (the 900000 range).
+ */
+export async function writeStudentSeed(db: Kysely<unknown>): Promise<void> {
+  if (db.isTransaction) return writeStudentsIn(db);
+  await db.transaction().execute(writeStudentsIn);
+}
+
+async function writeStudentsIn(tx: Kysely<unknown>): Promise<void> {
+  for (const { child, home, classId, sectionId, rollNumber, guardians, index } of seededStudents) {
+    const societyId = await scopeTo(tx, home.id, 'student');
+    const yearId = seededYearId(home.key);
+    const [firstName, ...rest] = child.displayName.split(' ');
+    await sql`
+      insert into students
+        (id, society_id, institution_id, admission_no, first_name, last_name, admission_date, country_code, mobile_number)
+      values (${child.id}, ${societyId}, ${home.id}, ${`ADM-${child.key}`}, ${firstName ?? child.key},
+        ${rest.join(' ') || null}, '2026-06-01', '91', ${`9000003${(100 + index).toString()}`})
+      on conflict (id) do nothing
+    `.execute(tx);
+    await sql`
+      insert into student_enrolments (id, society_id, institution_id, academic_year_id, student_id, class_id, enrolled_date)
+      values (${seedId(4101 + index)}, ${societyId}, ${home.id}, ${yearId}, ${child.id}, ${classId}, '2026-06-01')
+      on conflict (id) do nothing
+    `.execute(tx);
+    await sql`
+      insert into student_section_placements
+        (id, society_id, institution_id, academic_year_id, student_enrolment_id, class_id, section_id, roll_number, start_date)
+      values (${seedId(4201 + index)}, ${societyId}, ${home.id}, ${yearId}, ${seedId(4101 + index)}, ${classId},
+        ${sectionId}, ${rollNumber}, '2026-06-01')
+      on conflict (id) do nothing
+    `.execute(tx);
+    for (const [position, parent] of guardians.entries()) {
+      const [parentFirst, ...parentRest] = parent.displayName.split(' ');
+      await sql`
+        insert into student_guardians
+          (id, society_id, institution_id, student_id, user_id, first_name, last_name, relation, country_code,
+           phone_number, email, is_primary, is_emergency_contact)
+        values (${seedId(4301 + index * 10 + position)}, ${societyId}, ${home.id}, ${child.id}, ${parent.id},
+          ${parentFirst ?? parent.key}, ${parentRest.join(' ') || null}, 3, '91',
+          ${`9000004${(100 + index).toString()}`}, ${parent.email}, ${position === 0}, ${position === 0})
+        on conflict (id) do nothing
+      `.execute(tx);
+    }
   }
   await clearScope(tx);
 }

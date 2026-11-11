@@ -95,6 +95,13 @@ const en: Catalogue = {
   CLASS_NOT_OFFERED: 'This Institution does not offer the category of this class',
   STREAM_NOT_ALLOWED: 'Only Pre-University classes have a stream',
   CATEGORY_IN_USE: 'A class of this category exists, so the Institution must keep offering it',
+  // Students (API design 10.6)
+  ADMISSION_NO_TAKEN: 'Another active student of this Institution has this Admission ID',
+  ROLL_NUMBER_TAKEN: 'Another student of this section has this roll number',
+  SECTION_NOT_IN_CLASS: 'This section does not belong to the class',
+  YEAR_NOT_ACTIVE: 'This academic year is not active',
+  INACTIVE_SECTION: 'This section is deactivated',
+  PRIMARY_GUARDIAN_REQUIRED: 'Exactly one guardian must be the primary guardian',
   // Files (API design 15)
   ALREADY_CONFIRMED: 'This file has already been confirmed',
   FILE_TOO_LARGE: 'The file is larger than 5 MB',

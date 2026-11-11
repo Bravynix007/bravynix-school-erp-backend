@@ -1,5 +1,5 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
-import { ApiResult, type ListMeta } from '../../common/http/api-result.js';
+import { ApiResult, type ResultMeta } from '../../common/http/api-result.js';
 import { AppException, type FieldError } from '../../common/http/app-exception.js';
 import { ErrorCode } from '../../common/http/error-codes.js';
 import { Clock } from '../../common/time/clock.js';
@@ -38,7 +38,7 @@ interface StoredSuccess {
   code?: string;
   message?: string;
   data: unknown;
-  meta?: ListMeta | null;
+  meta?: ResultMeta | null;
 }
 
 interface StoredRefusal {

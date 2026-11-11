@@ -24,6 +24,24 @@ export interface SchoolStaff {
   person: { id: string; email: string };
 }
 
+/** A student as STU-02 answers; enough to find them and see where they sit. */
+export interface SchoolStudent {
+  id: string;
+  institutionId: string;
+  admissionNo: string | null;
+  firstName: string;
+  version: number;
+  placement: { academicYearId: string; classId: string; sectionId: string; rollNumber: string };
+  guardians: { id: string; email: string | null; hasLogin: boolean; isPrimary: boolean }[];
+}
+
+/** Where a new student sits, and what the body needs besides. */
+export interface StudentPlace {
+  academicYearId: string;
+  classId: string;
+  sectionId: string;
+}
+
 /**
  * Builds the school a test needs through the API: a Society, its Institutions, years, classes, sections, subjects and
  * staff, all as the token it is given. Everything made is removed by `cleanup`.
@@ -106,6 +124,36 @@ export class SchoolKit {
     return staff;
   }
 
+  /** The body of STU-02 for a student placed in `place`, with one primary guardian; `fields` replace its parts. */
+  studentBody(institutionId: string, place: StudentPlace, fields: object = {}) {
+    return {
+      institutionId,
+      firstName: 'Diya',
+      lastName: 'Shetty',
+      mobile: { countryCode: '91', number: '9876501234' },
+      enrolment: { ...place, rollNumber: `R${newId().slice(-8)}` },
+      guardians: [
+        {
+          firstName: 'Ravi',
+          lastName: 'Shetty',
+          relation: 1,
+          phone: { countryCode: '91', number: '9845012345' },
+          email: `${newId()}@parent.test`,
+          isPrimary: true,
+          isEmergencyContact: true,
+        },
+      ],
+      ...fields,
+    };
+  }
+
+  /** Adds a student through STU-02 as `token`. */
+  async student(token: string, institutionId: string, place: StudentPlace, fields: object = {}) {
+    const body = this.studentBody(institutionId, place, fields);
+    const res = succeeded(await this.api('post', '/v1/students', token, body), 201, 'student');
+    return res.body.data as unknown as SchoolStudent;
+  }
+
   /** Signs the person in (from `ip`, when sign-ins must not share an address) and chooses the context; returns the token that acts in it. */
   async actingAs(email: string, roleCode: number, societyId: string, ip?: string) {
     const login = await signInMobile(this.t, email, ip);
@@ -117,9 +165,11 @@ export class SchoolKit {
     return chosen.body.data.accessToken as string;
   }
 
-  /** Removes the Societies made, then the people made for staff and their grants. */
+  /** Removes the Societies made, then the people made for staff and as parents, and their grants. */
   async cleanup(db: Kysely<unknown>) {
     await removeScratchSocieties(db, this.societies.splice(0));
+    // The parents' logins the students made, which `studentBody` gives this domain; their guardian rows went above.
+    await sql`delete from users where email like '%@parent.test'`.execute(db);
     for (const id of this.staffUsers.splice(0)) {
       await sql`delete from role_assignments where user_id = ${id}`.execute(db);
       await sql`delete from users where id = ${id}`.execute(db);

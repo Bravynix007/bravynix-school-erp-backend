@@ -16,6 +16,13 @@ export interface CursorMeta {
 
 export type ListMeta = PageMeta | CursorMeta;
 
+/** What a write that went through but needs a second look says besides its data, such as an over-full section. */
+export interface WarningMeta {
+  warnings: string[];
+}
+
+export type ResultMeta = ListMeta | WarningMeta;
+
 /** The response envelope every endpoint returns (API design 7.1). */
 export interface ApiEnvelope<T = unknown> {
   success: boolean;
@@ -23,7 +30,7 @@ export interface ApiEnvelope<T = unknown> {
   code: string;
   message: string;
   data: T | null;
-  meta: ListMeta | null;
+  meta: ResultMeta | null;
   errors?: { field: string; code: string; message: string; params?: Record<string, unknown> }[];
   requestId: string;
   [extra: string]: unknown;
@@ -57,7 +64,7 @@ export class ApiResult<T> {
       status?: HttpStatus;
       code?: string;
       message?: string;
-      meta?: ListMeta | null;
+      meta?: ResultMeta | null;
       /** Extra response headers, for example `Idempotent-Replayed`. */
       headers?: Readonly<Record<string, string>>;
     } = {},

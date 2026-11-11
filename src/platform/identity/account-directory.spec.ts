@@ -363,6 +363,60 @@ describe('AccountDirectory.linkStaff', () => {
   });
 });
 
+describe('AccountDirectory.linkGuardian', () => {
+  it('makes a Pending account for a new email, taking no seat', async () => {
+    const t = build(undefined);
+    const linked = await t.directory.linkGuardian(
+      tx,
+      { email: 'Parent@Example.com', firstName: 'Ravi', lastName: 'Shetty' },
+      'admin-1',
+    );
+    expect(t.insertPending).toHaveBeenCalledWith(
+      tx,
+      { email: 'parent@example.com', firstName: 'Ravi', lastName: 'Shetty' },
+      'admin-1',
+    );
+    expect(linked).toMatchObject({ id: 'new-1', created: true });
+    expect(t.lockSeats).not.toHaveBeenCalled();
+    expect(t.insertGrant).not.toHaveBeenCalled();
+  });
+
+  it('links the person an email already belongs to, so one parent has several children', async () => {
+    const t = build(user());
+    const linked = await t.directory.linkGuardian(tx, { email: 'asha@example.com' }, 'admin-1');
+    expect(linked).toMatchObject({ id: 'user-1', created: false });
+    expect(t.insertPending).not.toHaveBeenCalled();
+  });
+
+  it('refuses a Super Admin, under the separation lock', async () => {
+    const t = build(user());
+    t.holdsActiveGrant.mockResolvedValue(true);
+    await expect(
+      t.directory.linkGuardian(tx, { email: 'asha@example.com' }, 'admin-1'),
+    ).rejects.toMatchObject({ status: 409, code: 'ROLE_CONFLICT' });
+    expect(t.lockRoleSeparation).toHaveBeenCalled();
+    expect(t.holdsActiveGrant).toHaveBeenCalledWith(tx, 'user-1', [1]);
+  });
+
+  it.each([
+    [2, 'ACCOUNT_BLOCKED'],
+    [0, 'INVALID_STATE'],
+  ])('refuses a person whose account status is %s with 409 %s', async (status, code) => {
+    const t = build(user({ account_status: status }));
+    await expect(
+      t.directory.linkGuardian(tx, { email: 'asha@example.com' }, 'admin-1'),
+    ).rejects.toMatchObject({ status: 409, code });
+  });
+
+  it('sends the welcome as Parent', () => {
+    const t = build();
+    t.directory.welcomeAs({ email: 'asha@example.com' }, 5, 'Sunrise Trust');
+    expect(t.send.mock.calls[0]![0]).toMatchObject({
+      variables: { role: 'Parent', society: 'Sunrise Trust' },
+    });
+  });
+});
+
 const request = (overrides: Partial<Parameters<AccountDirectory['changeStaffEmail']>[1]> = {}) => ({
   staffMemberId: 'staff-1',
   userId: 'user-1',

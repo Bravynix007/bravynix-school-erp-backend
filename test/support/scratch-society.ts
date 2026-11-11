@@ -37,6 +37,10 @@ export async function removeScratchSocieties(
     await sql`alter table staff_subjects no force row level security`.execute(tx);
     await sql`alter table staff_identities no force row level security`.execute(tx);
     await sql`alter table documents no force row level security`.execute(tx);
+    await sql`alter table students no force row level security`.execute(tx);
+    await sql`alter table student_guardians no force row level security`.execute(tx);
+    await sql`alter table student_enrolments no force row level security`.execute(tx);
+    await sql`alter table student_section_placements no force row level security`.execute(tx);
     await sql`alter table teaching_assignments no force row level security`.execute(tx);
     await sql`alter table class_teacher_assignments no force row level security`.execute(tx);
     await sql`
@@ -49,6 +53,12 @@ export async function removeScratchSocieties(
     await sql`delete from institution_price_rates where society_id in (${sql.join(ids)})`.execute(
       tx,
     );
+    await sql`delete from student_section_placements where society_id in (${sql.join(ids)})`.execute(
+      tx,
+    );
+    await sql`delete from student_enrolments where society_id in (${sql.join(ids)})`.execute(tx);
+    await sql`delete from student_guardians where society_id in (${sql.join(ids)})`.execute(tx);
+    await sql`delete from students where society_id in (${sql.join(ids)})`.execute(tx);
     await sql`delete from documents where society_id in (${sql.join(ids)})`.execute(tx);
     await sql`delete from staff_identities where society_id in (${sql.join(ids)})`.execute(tx);
     await sql`delete from teaching_assignments where society_id in (${sql.join(ids)})`.execute(tx);
@@ -80,6 +90,10 @@ export async function removeScratchSocieties(
     await sql`alter table staff_subjects force row level security`.execute(tx);
     await sql`alter table staff_identities force row level security`.execute(tx);
     await sql`alter table documents force row level security`.execute(tx);
+    await sql`alter table students force row level security`.execute(tx);
+    await sql`alter table student_guardians force row level security`.execute(tx);
+    await sql`alter table student_enrolments force row level security`.execute(tx);
+    await sql`alter table student_section_placements force row level security`.execute(tx);
     await sql`alter table teaching_assignments force row level security`.execute(tx);
     await sql`alter table class_teacher_assignments force row level security`.execute(tx);
     await sql`alter table access_blocks force row level security`.execute(tx);
