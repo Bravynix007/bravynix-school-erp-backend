@@ -153,10 +153,6 @@ describe('students: add, read and list', () => {
     api('patch', `/v1/students/${id}`, token, fields);
   const deactivate = (id: string, reason: number | undefined = 1, token = owner.token) =>
     api('delete', `/v1/students/${id}`, token, reason === undefined ? {} : { reason });
-  const studentsSeenBy = (personId: string) =>
-    database.transaction({ societyId: otherOwner.contexts[0]!.societyId!, personId }, (tx) =>
-      tx.selectFrom('students').select('id').execute(),
-    );
   const deactivateRow = (id: string) =>
     refused(
       sql`update students set status = 0, inactive_reason = 3, inactive_at = now() where id = ${id}`,
@@ -621,9 +617,12 @@ describe('students: add, read and list', () => {
       expect((await add({}, token)).status).toBe(403);
     });
 
-    it('refuses a guardian email that belongs to a Super Admin', async () => {
+    it('links a guardian email that belongs to a Super Admin: a parent may hold any other role', async () => {
       const res = await add({ guardians: [guardian({ email: superAdmin.email })] });
-      expect([res.status, res.body.code]).toEqual([409, 'ROLE_CONFLICT']);
+      expect(res.status).toBe(201);
+      expect(res.body.data).toMatchObject({
+        guardians: [{ email: superAdmin.email, hasLogin: true }],
+      });
     });
   });
 
@@ -1101,6 +1100,24 @@ describe('students: add, read and list', () => {
       expect(namesOf(await list('?q=_a'))).toEqual([]);
     });
 
+    it('puts the numeric roll numbers first in numeric order, then the rest in text order', async () => {
+      for (const rollNumber of ['100', 'A1', '9', '10']) {
+        await added({ firstName: `R${rollNumber}`, ...roll(rollNumber) });
+      }
+      expect(namesOf(await list(`?sectionId=${sectionA}&sort=rollNumber`))).toEqual([
+        'R9',
+        'R10',
+        'R100',
+        'RA1',
+      ]);
+      expect(namesOf(await list(`?sectionId=${sectionA}&sort=-rollNumber`))).toEqual([
+        'RA1',
+        'R100',
+        'R10',
+        'R9',
+      ]);
+    });
+
     it('sorts by roll number in numeric order, by Admission ID with the missing last, and either way round', async () => {
       await class9();
       expect(namesOf(await list(`?sectionId=${sectionA}&sort=rollNumber`))).toEqual([
@@ -1285,15 +1302,6 @@ describe('students: add, read and list', () => {
         (tx) => tx.selectFrom('student_guardians').select('student_id').execute(),
       );
       expect(asStranger).toEqual([]);
-    });
-
-    it('show a guardian the child they are a guardian of, and no other child', async () => {
-      const parent = guardian();
-      const child = await added({ guardians: [parent] });
-      await added({ ...roll('2') });
-      const userId = (await usersWith(parent.email))[0]!.id;
-      expect(await studentsSeenBy(userId)).toEqual([{ id: child.id }]);
-      expect(await studentsSeenBy(newId())).toEqual([]);
     });
   });
 

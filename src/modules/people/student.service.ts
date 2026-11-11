@@ -105,7 +105,7 @@ export class StudentService {
    * guardian's email links the person it belongs to (one email can be several children's, PRD decision 12) or makes
    * a Pending account; the welcome mails go after the commit. The placement starts on `admissionDate`, or today.
    * 409 `ADMISSION_NO_TAKEN`, 409 `ROLL_NUMBER_TAKEN`; 422 `YEAR_NOT_ACTIVE`, `INACTIVE_SECTION`,
-   * `SECTION_NOT_IN_CLASS`, `PRIMARY_GUARDIAN_REQUIRED`; 409 `ROLE_CONFLICT` and `ACCOUNT_BLOCKED` for a guardian
+   * `SECTION_NOT_IN_CLASS`, `PRIMARY_GUARDIAN_REQUIRED`; 409 `ACCOUNT_BLOCKED` for a guardian
    * email that cannot be linked. A section over its capacity is a warning, not a stop.
    */
   async create(principal: Principal, body: CreateStudentDto): Promise<ApiResult<StudentResource>> {
@@ -554,18 +554,16 @@ export class StudentService {
     enrolment: Pick<StudentEnrolmentDto, 'academicYearId' | 'classId' | 'sectionId'>,
     institutionId: string,
   ): Promise<{ capacity: number | null; startDate: string; endDate: string }> {
-    const open = await this.years.openIn(tx, enrolment.academicYearId, institutionId);
-    if (open === undefined) throw AppException.notFound();
-    if (!open) throw AppException.businessRule(ErrorCode.YEAR_NOT_ACTIVE);
+    const year = await this.years.openYear(tx, enrolment.academicYearId, institutionId);
+    if (year === undefined) throw AppException.notFound();
+    if (!year.open) throw AppException.businessRule(ErrorCode.YEAR_NOT_ACTIVE);
     const section = await this.sections.placeOf(tx, enrolment.sectionId);
     if (section?.institutionId !== institutionId) throw AppException.notFound();
     if (section.classId !== enrolment.classId) {
       throw AppException.businessRule(ErrorCode.SECTION_NOT_IN_CLASS);
     }
     if (!section.active) throw AppException.businessRule(ErrorCode.INACTIVE_SECTION);
-    const span = await this.years.spanOf(tx, enrolment.academicYearId);
-    if (!span) throw AppException.notFound();
-    return { capacity: section.capacity, ...span };
+    return { capacity: section.capacity, startDate: year.startDate, endDate: year.endDate };
   }
 
   /** Does the section now hold more students than its capacity? A section with no capacity never does. */

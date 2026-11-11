@@ -18,13 +18,13 @@ import type { StudentSortField } from './student.dto.js';
 
 export type StudentRow = Selectable<StudentsTable>;
 export type NewStudent = Insertable<StudentsTable>;
-export type StudentChanges = Updateable<StudentsTable>;
 export type GuardianRow = Selectable<StudentGuardiansTable>;
 export type NewGuardian = Insertable<StudentGuardiansTable>;
 export type EnrolmentRow = Selectable<StudentEnrolmentsTable>;
 export type NewEnrolment = Insertable<StudentEnrolmentsTable>;
 export type PlacementRow = Selectable<StudentSectionPlacementsTable>;
 export type NewPlacement = Insertable<StudentSectionPlacementsTable>;
+export type StudentChanges = Updateable<StudentsTable>;
 export type PlacementChanges = Updateable<StudentSectionPlacementsTable>;
 export type EnrolmentChanges = Updateable<StudentEnrolmentsTable>;
 
@@ -70,8 +70,8 @@ const STUDENT_NAME = sql`lower(concat_ws(' ', students.first_name, students.last
 const SORT_COLUMN = {
   name: STUDENT_NAME,
   admissionNo: sql`lower(students.admission_no)`,
-  // Numbers in numeric order, then the rest: "9" before "10", "A1" after both.
-  rollNumber: sql`lpad(pl.roll_number, 20, '0')`,
+  // Numbers in numeric order, then the rest in text order: "9" before "10", "A1" after both.
+  rollNumber: sql`(pl.roll_number !~ '^[0-9]+$')::int::text || lpad(pl.roll_number, 20, '0')`,
   createdAt: sql`students.created_at`,
 } as const;
 

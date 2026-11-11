@@ -17,33 +17,27 @@ const build = (found?: AcademicYearRow) => {
 };
 
 describe('AcademicYearDirectory', () => {
-  describe('openIn', () => {
-    it('says whether a year of the Institution is active', async () => {
-      await expect(build(year()).directory.openIn(tx, 'year-1', 'institution-1')).resolves.toBe(
-        true,
+  describe('openYear', () => {
+    it('says whether a year of the Institution is open, and when it starts and ends', async () => {
+      const found = year({ start_date: '2026-06-01', end_date: '2027-03-31' });
+      await expect(build(found).directory.openYear(tx, 'year-1', 'institution-1')).resolves.toEqual(
+        {
+          open: true,
+          startDate: '2026-06-01',
+          endDate: '2027-03-31',
+        },
       );
       await expect(
-        build(year({ status: 0 })).directory.openIn(tx, 'year-1', 'institution-1'),
-      ).resolves.toBe(false);
+        build({ ...found, status: 0 }).directory.openYear(tx, 'year-1', 'institution-1'),
+      ).resolves.toMatchObject({ open: false });
     });
 
     it('is undefined for a year that is not there, and for one of another Institution', async () => {
       for (const found of [undefined, year({ institution_id: 'institution-2' })]) {
         await expect(
-          build(found).directory.openIn(tx, 'year-1', 'institution-1'),
+          build(found).directory.openYear(tx, 'year-1', 'institution-1'),
         ).resolves.toBeUndefined();
       }
-    });
-  });
-
-  describe('spanOf', () => {
-    it('gives the first and last day of a year, and undefined for one the caller cannot see', async () => {
-      const found = year({ start_date: '2026-06-01', end_date: '2027-03-31' });
-      await expect(build(found).directory.spanOf(tx, 'year-1')).resolves.toEqual({
-        startDate: '2026-06-01',
-        endDate: '2027-03-31',
-      });
-      await expect(build().directory.spanOf(tx, 'year-1')).resolves.toBeUndefined();
     });
   });
 

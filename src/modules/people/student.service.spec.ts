@@ -162,7 +162,11 @@ function build(found: StudentRow | null = row()) {
     .mockResolvedValue({ rows: [{ ...row(), ...placedRow }], total: 41 });
   const requirePlace = vi.fn<MasterReferences['requirePlace']>().mockResolvedValue(undefined);
   const requireReady = vi.fn<FileDirectory['requireReady']>().mockResolvedValue(undefined);
-  const openIn = vi.fn<AcademicYearDirectory['openIn']>().mockResolvedValue(true);
+  const openYear = vi.fn<AcademicYearDirectory['openYear']>().mockResolvedValue({
+    open: true,
+    startDate: '2026-06-01',
+    endDate: '2027-03-31',
+  });
   const placeOf = vi.fn<SectionDirectory['placeOf']>().mockResolvedValue({
     classId: 'class-1',
     institutionId: 'institution-1',
@@ -217,12 +221,7 @@ function build(found: StudentRow | null = row()) {
     } as unknown as PersonDirectory,
     { requirePlace } as unknown as MasterReferences,
     { requireReady } as unknown as FileDirectory,
-    {
-      openIn,
-      spanOf: vi
-        .fn<AcademicYearDirectory['spanOf']>()
-        .mockResolvedValue({ startDate: '2026-06-01', endDate: '2027-03-31' }),
-    } as unknown as AcademicYearDirectory,
+    { openYear } as unknown as AcademicYearDirectory,
     { placeOf } as unknown as SectionDirectory,
     {
       names: vi.fn<InstitutionDirectory['names']>().mockResolvedValue(
@@ -261,7 +260,7 @@ function build(found: StudentRow | null = row()) {
     page,
     requirePlace,
     requireReady,
-    openIn,
+    openYear,
     placeOf,
     requireInstitution,
     forPrincipal,
@@ -426,7 +425,7 @@ describe('StudentService', () => {
 
     it('is 404 for a year or section that is not this Institution’s, before any account is made', async () => {
       const t = build();
-      t.openIn.mockResolvedValueOnce(undefined);
+      t.openYear.mockResolvedValueOnce(undefined);
       expect((await fail(t.service.create(owner, body()))).status).toBe(404);
       t.placeOf.mockResolvedValueOnce(undefined);
       expect((await fail(t.service.create(owner, body()))).status).toBe(404);
@@ -443,7 +442,11 @@ describe('StudentService', () => {
 
     it('is 422 for a year that is closed, a section of another class and a section that is closed, in that order', async () => {
       const t = build();
-      t.openIn.mockResolvedValueOnce(false);
+      t.openYear.mockResolvedValueOnce({
+        open: false,
+        startDate: '2026-06-01',
+        endDate: '2027-03-31',
+      });
       expect(await fail(t.service.create(owner, body()))).toMatchObject({
         status: 422,
         code: 'YEAR_NOT_ACTIVE',
@@ -528,10 +531,10 @@ describe('StudentService', () => {
 
     it('passes a refusal to link a guardian on, and mails nobody', async () => {
       const t = build();
-      t.linkGuardian.mockRejectedValueOnce(AppException.conflict('ROLE_CONFLICT'));
+      t.linkGuardian.mockRejectedValueOnce(AppException.conflict('ACCOUNT_BLOCKED'));
       expect(await fail(t.service.create(owner, body()))).toMatchObject({
         status: 409,
-        code: 'ROLE_CONFLICT',
+        code: 'ACCOUNT_BLOCKED',
       });
       expect(t.welcomeAs).not.toHaveBeenCalled();
     });
@@ -929,7 +932,11 @@ describe('StudentService', () => {
       expect((await fail(t.service.move(owner, 'student-1', move({ sectionId: 'x' })))).code).toBe(
         'INACTIVE_SECTION',
       );
-      t.openIn.mockResolvedValueOnce(false);
+      t.openYear.mockResolvedValueOnce({
+        open: false,
+        startDate: '2026-06-01',
+        endDate: '2027-03-31',
+      });
       expect((await fail(t.service.move(owner, 'student-1', move({ sectionId: 'x' })))).code).toBe(
         'YEAR_NOT_ACTIVE',
       );
