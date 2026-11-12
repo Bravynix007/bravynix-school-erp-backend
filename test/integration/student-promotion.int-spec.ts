@@ -424,6 +424,23 @@ describe('promotion', () => {
       expect([res.status, res.body.code]).toEqual([413, 'BATCH_TOO_LARGE']);
     });
 
+    it('is 422 SECTION_NOT_IN_CLASS for a source section of another class, and writes nothing', async () => {
+      const res = await promote(fromNineA({ fromSectionId: tenA.sectionId }));
+      expect([res.status, res.body.code]).toEqual([422, 'SECTION_NOT_IN_CLASS']);
+      expect((await history(diya)).length).toBe(1);
+      expect((await profile(diya)).placement.academicYearId).toBe(year1);
+      expect(await audits()).toEqual([]);
+    });
+
+    it('is 404 for a source year the caller cannot see, another Institution’s or unknown, and writes nothing', async () => {
+      for (const fromAcademicYearId of [abroadPlace.academicYearId, randomUUID()]) {
+        const res = await promote(fromNineA({ fromAcademicYearId }));
+        expect([res.status, res.body.code]).toEqual([404, 'NOT_FOUND']);
+      }
+      expect((await history(diya)).length).toBe(1);
+      expect(await audits()).toEqual([]);
+    });
+
     it('is 400 REQUIRED for a target part, a source section or a student list that is left out or empty', async () => {
       for (const field of ['toAcademicYearId', 'toClassId', 'toSectionId', 'fromSectionId']) {
         const res = await promote(fromNineA({ [field]: undefined }));
