@@ -8,7 +8,7 @@ import { ApiResult } from '../../common/http/api-result.js';
 import { UuidParamPipe } from '../../common/http/uuid-param.pipe.js';
 import {
   CreateStudentDto,
-  DeactivateStudentDto,
+  DeactivateStudentQueryDto,
   ListStudentsQueryDto,
   MoveStudentDto,
   UpdateStudentDto,
@@ -90,15 +90,15 @@ export class StudentController {
     roles: ADMINS,
     scope: 'institution',
     operationId: 'STU-05',
-    rule: 'Deactivates a student with a reason (left, mistake, other); the Admission ID and the roll number are free again and the guardians lose the child',
+    rule: 'Deactivates a student with a reason in the query (left, mistake, other); the Admission ID and the roll number are free again and the guardians lose the child',
   })
   @Delete(':studentId')
   deactivate(
     @CurrentPrincipal() principal: Principal,
     @Param('studentId', UuidParamPipe) studentId: string,
-    @Body() body: DeactivateStudentDto,
+    @Query() query: DeactivateStudentQueryDto,
   ): Promise<{ id: string; status: 0 }> {
-    return this.students.deactivate(principal, studentId, body);
+    return this.students.deactivate(principal, studentId, query);
   }
 
   @Policy({

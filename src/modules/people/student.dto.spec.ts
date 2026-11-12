@@ -1,7 +1,7 @@
 import { body, problems } from '../../../test/support/dto-validation.js';
 import {
   CreateStudentDto,
-  DeactivateStudentDto,
+  DeactivateStudentQueryDto,
   ListStudentsQueryDto,
   MoveStudentDto,
   UpdateStudentDto,
@@ -204,18 +204,21 @@ describe('UpdateStudentDto', () => {
   });
 });
 
-describe('DeactivateStudentDto', () => {
-  it.each([1, 2, 3])('takes reason %i', async (reason) => {
-    expect(await problems(body(DeactivateStudentDto, { reason }))).toEqual([]);
+describe('DeactivateStudentQueryDto', () => {
+  it.each(['1', '2', '3'])('takes the reason %s, which arrives as a string', async (reason) => {
+    expect(await problems(body(DeactivateStudentQueryDto, { reason }))).toEqual([]);
   });
 
   it.each([
     [{}, 'INVALID_TYPE'],
-    [{ reason: 0 }, 'INVALID_CODE'],
-    [{ reason: 4 }, 'INVALID_CODE'],
-    [{ reason: '1' }, 'INVALID_TYPE'],
+    [{ reason: '0' }, 'INVALID_CODE'],
+    [{ reason: '4' }, 'INVALID_CODE'],
+    [{ reason: 'left' }, 'INVALID_TYPE'],
+    [{ reason: '' }, 'INVALID_CODE'],
   ])('refuses %j', async (value, code) => {
-    expect(await problems(body(DeactivateStudentDto, value))).toEqual([{ field: 'reason', code }]);
+    expect(await problems(body(DeactivateStudentQueryDto, value))).toEqual([
+      { field: 'reason', code },
+    ]);
   });
 });
 

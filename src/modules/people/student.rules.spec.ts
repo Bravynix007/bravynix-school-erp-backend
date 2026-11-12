@@ -1,6 +1,7 @@
 import { AppException } from '../../common/http/app-exception.js';
 import type { GuardianRow, PlacedRow, StudentRow } from './student.repository.js';
 import {
+  enrolmentAuditView,
   latestMoveDate,
   requireValidDates,
   requireValidMoveDate,
@@ -177,6 +178,7 @@ describe('studentAuditView', () => {
       classId: 'class-1',
       sectionId: 'section-1',
       rollNumber: '14',
+      placementStartDate: '2026-06-01',
       guardians: [
         {
           firstName: 'Ravi',
@@ -268,6 +270,66 @@ describe('requireValidDates', () => {
         requireValidDates({ dateOfBirth: '2014-03-09', admissionDate: '2014-03-08' }, '2026-11-11'),
       )?.fields,
     ).toEqual([{ field: 'admissionDate', code: 'INVALID_VALUE' }]);
+  });
+});
+
+const admittedOn = (admissionDate: string) =>
+  refused(() => requireValidDates({ admissionDate, enrolledDate: '2026-06-01' }, '2026-11-11'));
+
+describe('requireValidDates and the day the enrolment began', () => {
+  it('takes an admission on or before the first day in the class, and refuses one after it', () => {
+    expect(admittedOn('2026-06-01')).toBeNull();
+    expect(admittedOn('2026-05-20')).toBeNull();
+    expect(admittedOn('2026-06-02')?.fields).toEqual([
+      { field: 'admissionDate', code: 'INVALID_VALUE' },
+    ]);
+    expect(admittedOn('2099-01-01')?.fields).toEqual([
+      { field: 'admissionDate', code: 'INVALID_VALUE' },
+    ]);
+  });
+
+  it('does not look at the enrolment when there is none or no admission date', () => {
+    expect(
+      refused(() => requireValidDates({ admissionDate: '2099-01-01' }, '2026-11-11')),
+    ).toBeNull();
+    expect(
+      refused(() =>
+        requireValidDates({ admissionDate: null, enrolledDate: '2026-06-01' }, '2026-11-11'),
+      ),
+    ).toBeNull();
+  });
+
+  it('reports the admission once when it is before the birth and after the enrolment', () => {
+    expect(
+      refused(() =>
+        requireValidDates(
+          { dateOfBirth: '2014-03-09', admissionDate: '2014-03-08', enrolledDate: '2013-01-01' },
+          '2026-11-11',
+        ),
+      )?.fields,
+    ).toEqual([{ field: 'admissionDate', code: 'INVALID_VALUE' }]);
+  });
+});
+
+describe('enrolmentAuditView', () => {
+  it('shows an open, active enrolment before the deactivation and the ending after it', () => {
+    expect(enrolmentAuditView(undefined)).toEqual({
+      placementEndDate: null,
+      enrolmentStatus: 1,
+      enrolmentLeftDate: null,
+      enrolmentOutcome: null,
+    });
+    expect(
+      enrolmentAuditView({ placementEnd: '2026-11-11', status: 1, left: '2026-11-11', outcome: 3 }),
+    ).toEqual({
+      placementEndDate: '2026-11-11',
+      enrolmentStatus: 1,
+      enrolmentLeftDate: '2026-11-11',
+      enrolmentOutcome: 3,
+    });
+    expect(
+      enrolmentAuditView({ placementEnd: '2026-11-11', status: 0, left: null, outcome: null }),
+    ).toMatchObject({ enrolmentStatus: 0, enrolmentLeftDate: null });
   });
 });
 

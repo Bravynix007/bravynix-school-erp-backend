@@ -209,12 +209,16 @@ export class StudentDetailsDto {
   @Matches(PHONE_NUMBER)
   alternateNumber?: string | null;
 
-  @ApiPropertyOptional({ type: StudentAddressDto })
+  @ApiPropertyOptional({
+    type: StudentAddressDto,
+    nullable: true,
+    description: 'On an edit, `null` clears the whole address and a missing field stays as it is',
+  })
   @IsOptional()
   @IsObject()
   @ValidateNested()
   @Type(() => StudentAddressDto)
-  address?: StudentAddressDto;
+  address?: StudentAddressDto | null;
 }
 
 /** STU-02 body (API design 10.6). */
@@ -283,12 +287,16 @@ export class UpdateStudentDto extends IntersectionType(
 /** Why a student is deactivated: 1 Left the Institution, 2 Created by mistake, 3 Other (DDD 9.6). */
 export const INACTIVE_REASONS = [1, 2, 3] as const;
 
-/** STU-05 body. */
-export class DeactivateStudentDto {
+/**
+ * STU-05 query: the reason travels in the query, as a DELETE has no body that clients generated from the OpenAPI
+ * document would send. Query values arrive as strings, so `reason` converts them.
+ */
+export class DeactivateStudentQueryDto {
   @ApiProperty({
     enum: INACTIVE_REASONS,
     description: '1 Left the Institution, 2 Created by mistake, 3 Other',
   })
+  @Type(() => Number)
   @IsInt()
   @IsIn(INACTIVE_REASONS)
   reason!: number;

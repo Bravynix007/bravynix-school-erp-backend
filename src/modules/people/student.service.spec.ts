@@ -707,6 +707,44 @@ describe('StudentService', () => {
       expect(t.update.mock.calls[0]![2]).toMatchObject({ last_name: null, contact_email: null });
     });
 
+    it('clears the whole address with null, and leaves it alone when it is not sent', async () => {
+      const t = build(
+        row({
+          address_line_1: '12 Lake Road',
+          address_line_2: null,
+          country_id: null,
+          state_id: null,
+          pincode: '560001',
+          city_id: 'city-1',
+        }),
+      );
+      await t.service.update(owner, 'student-1', change({ address: null }));
+      expect(t.update.mock.calls[0]![2]).toEqual({
+        address_line_1: null,
+        pincode: null,
+        city_id: null,
+        updated_by: 'owner-1',
+      });
+      const untouched = build(row({ address_line_1: '12 Lake Road' }));
+      await untouched.service.update(owner, 'student-1', change({ firstName: 'Diya' }));
+      expect(untouched.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses an admission date after the day the child started in their class, as the add does', async () => {
+      const t = build();
+      t.placedNow.mockResolvedValue({ ...placedRow, enrolled_date: '2026-06-01' });
+      const refused = await fail(
+        t.service.update(owner, 'student-1', change({ admissionDate: '2026-06-02' })),
+      );
+      expect(refused.status).toBe(400);
+      expect(refused.fields).toEqual([expect.objectContaining({ field: 'admissionDate' })]);
+      expect(t.update).not.toHaveBeenCalled();
+      const fine = build();
+      fine.placedNow.mockResolvedValue({ ...placedRow, enrolled_date: '2026-06-01' });
+      await fine.service.update(owner, 'student-1', change({ admissionDate: '2026-06-01' }));
+      expect(fine.update.mock.calls[0]![2]).toMatchObject({ admission_date: '2026-06-01' });
+    });
+
     it('writes nothing for a request that changes nothing, and still answers with the profile', async () => {
       const t = build();
       const student = await t.service.update(owner, 'student-1', change({ firstName: 'Diya' }));
@@ -822,16 +860,79 @@ describe('StudentService', () => {
       });
     });
 
+    it('cancels an enrolment that has not begun, whatever the reason, and ends its placement on its first day', async () => {
+      for (const reason of [1, 2, 3]) {
+        const t = build();
+        t.openPlacement.mockResolvedValueOnce({
+          ...placedRow,
+          start_date: '2026-12-01',
+          enrolled_date: '2026-12-01',
+        });
+        await t.service.deactivate(owner, 'student-1', { reason });
+        expect(t.updatePlacement.mock.calls[0]![2]).toMatchObject({ end_date: '2026-12-01' });
+        expect(t.updateEnrolment).toHaveBeenCalledWith(expect.anything(), 'enrolment-1', {
+          status: 0,
+          updated_by: 'owner-1',
+        });
+        expect(t.update.mock.calls[0]![2]).toMatchObject({ status: 0, inactive_reason: reason });
+      }
+    });
+
     it('never ends a placement or an enrolment before it began', async () => {
       const t = build();
       t.openPlacement.mockResolvedValueOnce({
         ...placedRow,
-        start_date: '2026-12-01',
-        enrolled_date: '2026-12-01',
+        start_date: '2026-11-11',
+        enrolled_date: '2026-11-11',
+      });
+      t.openYear.mockResolvedValueOnce({
+        open: true,
+        startDate: '2026-06-01',
+        endDate: '2027-03-31',
       });
       await t.service.deactivate(owner, 'student-1', { reason: 3 });
-      expect(t.updatePlacement.mock.calls[0]![2]).toMatchObject({ end_date: '2026-12-01' });
-      expect(t.updateEnrolment.mock.calls[0]![2]).toMatchObject({ left_date: '2026-12-01' });
+      expect(t.updatePlacement.mock.calls[0]![2]).toMatchObject({ end_date: '2026-11-11' });
+      expect(t.updateEnrolment.mock.calls[0]![2]).toMatchObject({ left_date: '2026-11-11' });
+    });
+
+    it('ends both on the last day of the year once the year has ended but not been promoted', async () => {
+      const t = build();
+      t.openYear.mockResolvedValueOnce({
+        open: true,
+        startDate: '2026-06-01',
+        endDate: '2026-09-30',
+      });
+      await t.service.deactivate(owner, 'student-1', { reason: 1 });
+      expect(t.openYear).toHaveBeenCalledWith(expect.anything(), 'year-1', 'institution-1');
+      expect(t.updatePlacement.mock.calls[0]![2]).toMatchObject({ end_date: '2026-09-30' });
+      expect(t.updateEnrolment.mock.calls[0]![2]).toMatchObject({
+        left_date: '2026-09-30',
+        outcome: 3,
+      });
+    });
+
+    it('records what became of the enrolment and the placement in the audit entry', async () => {
+      const t = build();
+      await t.service.deactivate(owner, 'student-1', { reason: 1 });
+      expect(t.record.mock.calls[0]![1]).toMatchObject({
+        before: {
+          placementEndDate: null,
+          enrolmentStatus: 1,
+          enrolmentLeftDate: null,
+          enrolmentOutcome: null,
+        },
+        after: {
+          placementEndDate: '2026-11-11',
+          enrolmentStatus: 1,
+          enrolmentLeftDate: '2026-11-11',
+          enrolmentOutcome: 3,
+        },
+      });
+      const mistake = build();
+      await mistake.service.deactivate(owner, 'student-1', { reason: 2 });
+      expect(mistake.record.mock.calls[0]![1]).toMatchObject({
+        after: { enrolmentStatus: 0, enrolmentLeftDate: null, enrolmentOutcome: null },
+      });
     });
 
     it('is 404 when the student is already deactivated, or not at an Institution the caller reaches', async () => {

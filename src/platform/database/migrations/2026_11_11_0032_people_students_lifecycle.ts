@@ -13,7 +13,8 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       add column inactive_at timestamptz,
       add constraint ck_students_inactive check (
         (status = 1 and inactive_reason is null and inactive_at is null)
-        or (status = 0 and inactive_reason between 1 and 3 and inactive_at is not null)
+        or (status = 0 and inactive_reason is not null and inactive_reason between 1 and 3
+          and inactive_at is not null)
       )
   `.execute(db);
 }
