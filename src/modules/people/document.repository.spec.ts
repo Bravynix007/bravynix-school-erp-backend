@@ -13,22 +13,16 @@ describe('DocumentRepository', () => {
     expect(locked.queries[0]!.sql).toMatch(/for update$/);
   });
 
-  it('lists the active documents of a staff member, newest first', async () => {
+  it.each([
+    ['a staff member', 'staff_member_id', 'staff-1'],
+    ['a student', 'student_id', 'student-1'],
+  ] as const)('lists the active documents of %s, newest first', async (_owner, column, id) => {
     const { tx, queries } = sqlRecorder();
-    await repository.ofStaff(tx, 'staff-1');
+    await repository.ofOwner(tx, column, id);
     const { sql, parameters } = queries[0]!;
-    expect(sql).toContain('"staff_member_id" = $1 and "status" = $2');
+    expect(sql).toContain(`"${column}" = $1 and "status" = $2`);
     expect(sql).toContain('order by "created_at" desc, "id" desc');
-    expect(parameters).toEqual(['staff-1', 1]);
-  });
-
-  it('lists the active documents of a student, newest first', async () => {
-    const { tx, queries } = sqlRecorder();
-    await repository.ofStudent(tx, 'student-1');
-    const { sql, parameters } = queries[0]!;
-    expect(sql).toContain('"student_id" = $1 and "status" = $2');
-    expect(sql).toContain('order by "created_at" desc, "id" desc');
-    expect(parameters).toEqual(['student-1', 1]);
+    expect(parameters).toEqual([id, 1]);
   });
 
   it('asks whether a file is that of an active document of the person’s own active record', async () => {

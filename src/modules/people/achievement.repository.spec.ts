@@ -30,7 +30,7 @@ describe('AchievementRepository', () => {
     const locked = sqlRecorder();
     await repository.find(locked.tx, 'star-1', true);
     expect(locked.queries[0]!.sql).toMatch(
-      /from "student_achievements" where "id" = \$1 for update$/,
+      /from "student_achievements" as "a" inner join "student_enrolments" as "e" on "e"."id" = "a"."student_enrolment_id" where "a"."id" = \$1 for update of "a"$/,
     );
   });
 

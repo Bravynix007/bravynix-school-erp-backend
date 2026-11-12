@@ -75,10 +75,11 @@ export class AchievementService {
     const context = await this.context.of(principal, studentId);
     const created = await this.database.transaction(context.tenant, async (tx) => {
       const student = await this.context.lockedActive(tx, studentId);
+      const open = await this.currentPlacement(tx, studentId);
       const placed =
         principal.roleCode === RoleCode.TeacherStaff
-          ? await this.classroom.ownPlacement(tx, principal, context.institutionId, student)
-          : await this.currentPlacement(tx, studentId);
+          ? await this.classroom.requireOwnSection(tx, principal, context.institutionId, open)
+          : open;
       const by =
         principal.roleCode === RoleCode.SocietyOwner
           ? undefined

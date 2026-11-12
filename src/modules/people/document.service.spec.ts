@@ -80,15 +80,20 @@ function build(
   const staffFind = vi.fn<StaffRepository['find']>().mockResolvedValue(current);
   const studentFind = vi.fn<StudentRepository['find']>().mockResolvedValue(child ?? undefined);
   const find = vi.fn<DocumentRepository['find']>().mockResolvedValue(found ?? undefined);
-  const ofStaff = vi.fn<DocumentRepository['ofStaff']>().mockResolvedValue([document()]);
-  const ofStudent = vi.fn<DocumentRepository['ofStudent']>().mockResolvedValue([
+  const staffDocuments = [document()];
+  const studentDocuments = [
     document({
       owner_type: 1,
       staff_member_id: null,
       student_id: 'student-1',
       title: 'Admission form',
     }),
-  ]);
+  ];
+  const ofOwner = vi
+    .fn<DocumentRepository['ofOwner']>()
+    .mockImplementation((_tx, column) =>
+      Promise.resolve(column === 'staff_member_id' ? staffDocuments : studentDocuments),
+    );
   const insert = vi
     .fn<DocumentRepository['insert']>()
     .mockImplementation((_tx, values) => Promise.resolve(document(values as Partial<DocumentRow>)));
@@ -112,7 +117,7 @@ function build(
   const scope = { requireInstitution, forPrincipal } as unknown as ScopeService;
   const service = new DocumentService(
     database,
-    { find, ofStaff, ofStudent, insert, deactivate } as unknown as DocumentRepository,
+    { find, ofOwner, insert, deactivate } as unknown as DocumentRepository,
     new StaffContext(database, repository, scope),
     new StudentContext(database, { find: studentFind } as unknown as StudentRepository, scope),
     scope,
@@ -123,8 +128,7 @@ function build(
   return {
     service,
     find,
-    ofStaff,
-    ofStudent,
+    ofOwner,
     insert,
     deactivate,
     requireReady,
@@ -154,7 +158,7 @@ describe('DocumentService.list (STF-14)', () => {
 
   it('is an empty list, with no file read, when there is no document', async () => {
     const t = build();
-    t.ofStaff.mockResolvedValue([]);
+    t.ofOwner.mockResolvedValue([]);
     expect((await t.service.list(admin, 'staff-1')).data).toEqual([]);
     expect(t.briefs).not.toHaveBeenCalled();
   });
@@ -235,12 +239,12 @@ describe('DocumentService.listOfStudent (DOC-01)', () => {
     expect(result.data).toMatchObject([
       { ownerType: 'student', studentId: 'student-1', title: 'Admission form', file: brief },
     ]);
-    expect(t.ofStudent).toHaveBeenCalledWith(expect.anything(), 'student-1');
+    expect(t.ofOwner).toHaveBeenCalledWith(expect.anything(), 'student_id', 'student-1');
   });
 
   it('is an empty list, with no file read, when there is no document', async () => {
     const t = build();
-    t.ofStudent.mockResolvedValue([]);
+    t.ofOwner.mockResolvedValue([]);
     expect((await t.service.listOfStudent(admin, 'student-1')).data).toEqual([]);
     expect(t.briefs).not.toHaveBeenCalled();
   });

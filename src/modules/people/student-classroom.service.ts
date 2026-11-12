@@ -94,9 +94,9 @@ export class StudentClassroomService {
   }
 
   /**
-   * The current placement of a student the caller leads or teaches this year, for anything a teacher may do for a
-   * student of their own sections (the classroom view, a star). 403 `NOT_ASSIGNED` for a deactivated student, one
-   * with no open placement, one in another section and one placed in another year than the current.
+   * The current placement of a student the caller leads or teaches this year, for the classroom view. 403
+   * `NOT_ASSIGNED` for a deactivated student, one with no placement, one in another section and one placed in another
+   * year than the current.
    */
   async ownPlacement(
     tx: Tx,
@@ -105,6 +105,19 @@ export class StudentClassroomService {
     row: StudentRow,
   ): Promise<PlacedRow> {
     const placed = row.status === 1 ? await this.students.placedNow(tx, row.id) : undefined;
+    return this.requireOwnSection(tx, principal, institutionId, placed);
+  }
+
+  /**
+   * The placement must be in a section the caller leads or teaches, in the Institution's current year (a star is given
+   * for the placement the caller chose, not the latest one); 403 `NOT_ASSIGNED` otherwise.
+   */
+  async requireOwnSection(
+    tx: Tx,
+    principal: Principal,
+    institutionId: string,
+    placed: PlacedRow | undefined,
+  ): Promise<PlacedRow> {
     const own = await this.teaching.ownSectionIds(tx, principal.personId, institutionId);
     const current = await this.years.currentId(tx, institutionId);
     if (!placed || !own.has(placed.section_id) || placed.academic_year_id !== current) {

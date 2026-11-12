@@ -111,12 +111,13 @@ describe('a student’s achievements', () => {
         tier: 1,
         description: 'Quiz',
         staff: null,
+        status: 1,
         ...fields,
       };
       await sql`insert into student_achievements (society_id, institution_id, academic_year_id,
-          student_enrolment_id, tier, description, awarded_by_staff_member_id)
+          student_enrolment_id, tier, description, awarded_by_staff_member_id, status)
         values (${values.society}, ${values.institution}, ${values.year}, ${values.enrolment},
-          ${values.tier}, ${values.description}, ${values.staff})`.execute(tx);
+          ${values.tier}, ${values.description}, ${values.staff}, ${values.status})`.execute(tx);
     }, institutionIds);
   const seen = (institutionIds: string[]) =>
     read(
@@ -325,6 +326,23 @@ describe('a student’s achievements', () => {
       expect((await tab(diya)).stars.total).toBe(1);
     });
 
+    it('is 422 NO_CURRENT_PLACEMENT for the Owner and for the class teacher when the placement has ended, and stores nothing', async () => {
+      await ownerDb.transaction().execute(async (tx) => {
+        await sql`alter table student_section_placements no force row level security`.execute(tx);
+        await sql`alter table student_enrolments no force row level security`.execute(tx);
+        await sql`update student_section_placements set end_date = '2026-07-01'
+          where student_enrolment_id in
+            (select id from student_enrolments where student_id = ${diya.id})`.execute(tx);
+        await sql`alter table student_enrolments force row level security`.execute(tx);
+        await sql`alter table student_section_placements force row level security`.execute(tx);
+      });
+      for (const token of [owner.token, await asTeacher(meera)]) {
+        const res = await give(diya, star, token);
+        expect([res.status, res.body.code]).toEqual([422, 'NO_CURRENT_PLACEMENT']);
+      }
+      expect((await tab(diya)).stars.total).toBe(0);
+    });
+
     it('is 404 for a deactivated student, who keeps the stars for the admins who read them', async () => {
       const made = await give(diya, star);
       await api('delete', `/v1/students/${diya.id}?reason=1`, owner.token);
@@ -404,6 +422,7 @@ describe('a student’s achievements', () => {
       ['a tier of 0', { tier: 0 }, 'ck_student_achievements_tier'],
       ['a tier of 4', { tier: 4 }, 'ck_student_achievements_tier'],
       ['a blank description', { description: '  ' }, 'ck_student_achievements_description'],
+      ['a status of 2', { status: 2 }, 'ck_student_achievements_status'],
     ])('refuses %s', async (_name, fields, constraint) => {
       await expect(insert(fields)).rejects.toMatchObject({ code: '23514', constraint });
     });
@@ -417,6 +436,23 @@ describe('a student’s achievements', () => {
         code: '23503',
         constraint: 'fk_student_achievements_enrolment',
       });
+    });
+
+    it('keeps the giver in the Society: a staff member of another Society is refused', async () => {
+      const categoryId = (await kit.masters(admin, 'class-categories')).find(
+        (c) => c.code === 'HIGH_SCHOOL',
+      )!.id;
+      const strangers = await fixtures.owner(await kit.society(admin));
+      const abroad = await kit.staff(
+        strangers.token,
+        await kit.institution(strangers.token, categoryId),
+        categoryId,
+      );
+      await expect(insert({ staff: abroad.id })).rejects.toMatchObject({
+        code: '23503',
+        constraint: 'fk_student_achievements_staff',
+      });
+      await expect(insert({ staff: meera.id })).resolves.toBeUndefined();
     });
 
     it('refuses a star for an Institution the session does not reach', async () => {

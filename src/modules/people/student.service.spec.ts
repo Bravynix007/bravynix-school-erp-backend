@@ -1288,7 +1288,11 @@ describe('StudentService', () => {
       expect(t.update).toHaveBeenCalledWith(
         expect.anything(),
         'student-1',
-        expect.objectContaining({ access_blocked_at: blockedAt, access_blocked_by: 'owner-1' }),
+        expect.objectContaining({
+          access_blocked_at: blockedAt,
+          access_blocked_by: 'owner-1',
+          updated_by: 'owner-1',
+        }),
       );
       expect(t.record.mock.calls[0]![1]).toMatchObject({
         action: 'student.blocked',
@@ -1307,7 +1311,11 @@ describe('StudentService', () => {
       expect(t.update).toHaveBeenCalledWith(
         expect.anything(),
         'student-1',
-        expect.objectContaining({ access_blocked_at: null, access_blocked_by: null }),
+        expect.objectContaining({
+          access_blocked_at: null,
+          access_blocked_by: null,
+          updated_by: 'owner-1',
+        }),
       );
       expect(t.record.mock.calls[0]![1]).toMatchObject({
         action: 'student.unblocked',

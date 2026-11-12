@@ -85,6 +85,11 @@ function build(options: { student?: StudentRow | null; placement?: PlacedRow | n
     .fn<StaffRepository['activeOfUser']>()
     .mockResolvedValue({ id: 'staff-1' } as StaffRow);
   const ownPlacement = vi.fn<StudentClassroomService['ownPlacement']>().mockResolvedValue(placed);
+  const requireOwnSection = vi
+    .fn<StudentClassroomService['requireOwnSection']>()
+    .mockImplementation((_tx, _principal, _institutionId, open) =>
+      open ? Promise.resolve(open) : Promise.reject(AppException.forbidden('NOT_ASSIGNED')),
+    );
   const describe = vi.fn<PersonDirectory['describe']>().mockResolvedValue(new Map());
   const record = vi.fn<AuditService['record']>().mockResolvedValue('audit-1');
   const requireInstitution = vi.fn<ScopeService['requireInstitution']>().mockResolvedValue({
@@ -105,7 +110,7 @@ function build(options: { student?: StudentRow | null; placement?: PlacedRow | n
     { ofStudent, find, insert, remove } as unknown as AchievementRepository,
     new StudentContext(database, students, scope),
     students,
-    { ownPlacement } as unknown as StudentClassroomService,
+    { ownPlacement, requireOwnSection } as unknown as StudentClassroomService,
     { activeOfUser } as unknown as StaffRepository,
     scope,
     { describe } as unknown as PersonDirectory,
@@ -121,6 +126,7 @@ function build(options: { student?: StudentRow | null; placement?: PlacedRow | n
     remove,
     activeOfUser,
     ownPlacement,
+    requireOwnSection,
     record,
     requireInstitution,
   };
@@ -206,22 +212,39 @@ describe('AchievementService.add (ACH-02)', () => {
     expect(t.insert.mock.calls[0]![1]).toMatchObject({ awarded_by_staff_member_id: null });
   });
 
-  it('puts a teacher’s star on the placement of their own section, and refuses a student who is not', async () => {
+  it('puts a teacher’s star on the open placement when it is in their own section, and refuses one that is not', async () => {
     const t = build();
     await t.service.add(teacher, 'student-1', body);
-    expect(t.ownPlacement).toHaveBeenCalledTimes(1);
-    expect(t.openPlacement).not.toHaveBeenCalled();
+    expect(t.requireOwnSection).toHaveBeenCalledWith(
+      expect.anything(),
+      teacher,
+      'institution-1',
+      placed,
+    );
+    expect(t.ownPlacement).not.toHaveBeenCalled();
     expect(t.insert.mock.calls[0]![1]).toMatchObject({
       created_by: 'teacher-1',
       awarded_by_staff_member_id: 'staff-1',
+      student_enrolment_id: 'enrolment-1',
     });
     const other = build();
-    other.ownPlacement.mockRejectedValueOnce(AppException.forbidden('NOT_ASSIGNED'));
+    other.requireOwnSection.mockRejectedValueOnce(AppException.forbidden('NOT_ASSIGNED'));
     expect(await refusal(other.service.add(teacher, 'student-1', body))).toMatchObject({
       status: 403,
       code: 'NOT_ASSIGNED',
     });
     expect(other.insert).not.toHaveBeenCalled();
+  });
+
+  it('is 422 for a teacher too when the student has no open placement, whatever the latest placement says', async () => {
+    const t = build({ placement: null });
+    expect(await refusal(t.service.add(teacher, 'student-1', body))).toEqual({
+      status: 422,
+      code: 'NO_CURRENT_PLACEMENT',
+    });
+    expect(t.requireOwnSection).not.toHaveBeenCalled();
+    expect(t.ownPlacement).not.toHaveBeenCalled();
+    expect(t.insert).not.toHaveBeenCalled();
   });
 
   it('is 422 NO_CURRENT_PLACEMENT for a student who is in no class this year, and 404 for a deactivated one', async () => {
