@@ -279,6 +279,38 @@ describe('students: the section count, HAS_STUDENTS and the classroom view', () 
       expect(res.body).toMatchObject({ code: 'INACTIVE_SECTION' });
     });
 
+    it('counts a placement made while SEC-04 waited for the section', async () => {
+      const diya = await admit(nineB);
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      let locked!: () => void;
+      const held = new Promise<void>((resolve) => (locked = resolve));
+      // A placement under way: it holds 9A as placeOf does and moves Diya's open placement into it, uncommitted.
+      const placing = database.transaction(tenant(), async (tx) => {
+        await sql`select id from sections where id = ${nineA} for key share`.execute(tx);
+        await sql`update student_section_placements p set section_id = ${nineA}
+          from student_enrolments e
+          where e.id = p.student_enrolment_id and e.student_id = ${diya.id} and p.end_date is null`.execute(
+          tx,
+        );
+        locked();
+        await gate;
+      });
+      await held;
+      let settled = false;
+      const deactivating = api('delete', `/v1/sections/${nineA}`, owner.token).then((res) => {
+        settled = true;
+        return res;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      expect(settled).toBe(false);
+      release();
+      await placing;
+      const res = await deactivating;
+      expect(res.status).toBe(409);
+      expect(res.body).toMatchObject({ code: 'HAS_STUDENTS' });
+    });
+
     it('makes a student wait for a deactivation under way, then refuses the section', async () => {
       // SEC-04 locks the section row first; here the lock is held by hand, and the section is then deactivated.
       let release!: () => void;
