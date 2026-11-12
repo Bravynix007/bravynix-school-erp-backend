@@ -6,7 +6,13 @@ import { createPool } from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
 import { writeAcademicSeed } from '../../src/seeds/academic-seed.js';
 import { writeFilesSeed } from '../../src/seeds/files-seed.js';
-import { seededStaffId, writeStaffSeed } from '../../src/seeds/people-seed.js';
+import {
+  seededStaffId,
+  seededStudentId,
+  seededStudents,
+  writeStaffSeed,
+  writeStudentSeed,
+} from '../../src/seeds/people-seed.js';
 import { seededRateId, writeBillingSeed } from '../../src/seeds/billing-seed.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { institutions, personaByKey, societies } from '../../src/seeds/two-worlds.js';
@@ -117,6 +123,12 @@ const strip = ({ body }: { body: Record<string, unknown> }) => ({
   requestId: undefined,
 });
 
+const studentsOf = (...keys: string[]) =>
+  seededStudents
+    .filter((s) => keys.includes(s.home.key))
+    .map((s) => s.child.id)
+    .toSorted();
+
 describe('tenant isolation', () => {
   beforeAll(async () => {
     await runMigrations(migrationUrl, 'latest');
@@ -128,6 +140,7 @@ describe('tenant isolation', () => {
     await writeAcademicSeed(ownerDb);
     await writeFilesSeed(ownerDb);
     await writeStaffSeed(ownerDb);
+    await writeStudentSeed(ownerDb);
     await clearLoginState(ownerDb);
     // Role 3 grants need a staff record, which arrives with the People module.
     for (const caller of Object.values(callers)) {
@@ -200,6 +213,10 @@ describe('tenant isolation', () => {
         'staff_institutions',
         'staff_members',
         'staff_subjects',
+        'student_enrolments',
+        'student_guardians',
+        'student_section_placements',
+        'students',
         'subjects',
         'teaching_assignments',
       ]);
@@ -419,6 +436,37 @@ describe('tenant isolation', () => {
       const res = await get(`/v1/staff/${seededStaffId(persona)}`, key);
       expect(res.status).toBe(expected);
       if (expected === 200) expect(res.body.data).toMatchObject({ id: seededStaffId(persona) });
+    });
+
+    it.each([
+      ['ownerA', 'C-A1-one', 200],
+      ['ownerA', 'C-cross-B1', 404],
+      ['ownerB', 'C-B1-one', 200],
+      ['ownerB', 'C-A1-one', 404],
+      ['adminA1', 'C-A1-sib1', 200],
+      ['adminA1', 'C-B1-one', 404],
+      ['adminB1', 'C-A1-one', 404],
+      ['adminB1', 'C-cross-B1', 200],
+      ['teacherA1', 'C-A1-one', 403],
+    ] as const)('%s reading the student record of %s: %s', async (key, child, expected) => {
+      const res = await get(`/v1/students/${seededStudentId(child)}`, key);
+      expect(res.status).toBe(expected);
+      if (expected === 200) expect(res.body.data).toMatchObject({ id: seededStudentId(child) });
+    });
+
+    it('answers a foreign student exactly as it answers one that does not exist, and lists only the caller’s own', async () => {
+      const absent = strip(await get(`/v1/students/${missing}`, 'adminA1'));
+      const foreign = await get(`/v1/students/${seededStudentId('C-B1-one')}`, 'adminA1');
+      expect(foreign.status).toBe(404);
+      expect(strip(foreign)).toEqual(absent);
+      const listed = async (key: CallerKey) =>
+        ((await get('/v1/students?limit=100', key)).body.data as { id: string }[])
+          .map((s) => s.id)
+          .toSorted();
+      expect(await listed('ownerA')).toEqual(studentsOf('A1', 'A2'));
+      expect(await listed('adminA1')).toEqual(studentsOf('A1'));
+      expect(await listed('adminB1')).toEqual(studentsOf('B1'));
+      expect(await listed('ownerB')).toEqual(studentsOf('B1'));
     });
 
     it('answers a teacher asking for a record of the other world, or a colleague’s, exactly as for one that does not exist', async () => {

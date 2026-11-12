@@ -10,6 +10,15 @@ export interface SectionName {
   className: string;
 }
 
+/** Where a student can be placed: the section's class and Institution, whether it is open, and its capacity. */
+export interface SectionPlace {
+  classId: string;
+  institutionId: string;
+  active: boolean;
+  /** Empty when the section has no limit. */
+  capacity: number | null;
+}
+
 /**
  * What the Academic setup module tells other modules about sections. The `sections` and `classes` tables stay
  * private to it (SDD 9.3 rule 1). It reads under the caller's row-level security, so a section of an Institution
@@ -24,6 +33,19 @@ export class SectionDirectory {
     const section = await this.sections.find(tx, id);
     if (!section) throw AppException.notFound();
     if (section.status === 0) throw AppException.referenceInactive(field);
+  }
+
+  /** The section as a placement sees it, or `undefined` when the caller cannot see it. */
+  async placeOf(tx: Tx, id: string): Promise<SectionPlace | undefined> {
+    const section = await this.sections.find(tx, id);
+    return (
+      section && {
+        classId: section.class_id,
+        institutionId: section.institution_id,
+        active: section.status === 1,
+        capacity: section.capacity,
+      }
+    );
   }
 
   /** The names of these sections and of their classes, by section ID. */

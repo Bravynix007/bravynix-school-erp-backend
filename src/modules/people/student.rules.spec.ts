@@ -1,0 +1,224 @@
+import { AppException } from '../../common/http/app-exception.js';
+import type { GuardianRow, PlacedRow, StudentRow } from './student.repository.js';
+import { requireValidStudent, studentAuditView } from './student.rules.js';
+
+const primary = { isPrimary: true, email: null };
+const other = { isPrimary: false, email: null };
+
+const refusal = (input: Parameters<typeof requireValidStudent>[0]) => {
+  try {
+    requireValidStudent(input, '2026-11-11');
+  } catch (error) {
+    if (error instanceof AppException) {
+      return {
+        status: error.status as number,
+        code: error.code,
+        fields: (error.options.errors ?? []).map(({ field, code }) => ({ field, code })),
+      };
+    }
+    throw error;
+  }
+  return null;
+};
+
+describe('requireValidStudent', () => {
+  it('passes a student with no dates and one primary guardian', () => {
+    expect(refusal({ guardians: [primary] })).toBeNull();
+    expect(
+      refusal({ dateOfBirth: null, admissionDate: null, guardians: [primary, other] }),
+    ).toBeNull();
+  });
+
+  it('wants the date of birth from 1900 and before today', () => {
+    expect(refusal({ dateOfBirth: '2026-11-10', guardians: [primary] })).toBeNull();
+    expect(refusal({ dateOfBirth: '1900-01-01', guardians: [primary] })).toBeNull();
+    for (const day of ['1899-12-31', '2026-11-11', '2027-01-01']) {
+      expect(refusal({ dateOfBirth: day, guardians: [primary] })).toMatchObject({
+        status: 400,
+        fields: [{ field: 'dateOfBirth', code: 'INVALID_VALUE' }],
+      });
+    }
+  });
+
+  it('lets the admission fall on the date of birth but not before it, and only when both are known', () => {
+    const input = { guardians: [primary] };
+    expect(
+      refusal({ ...input, dateOfBirth: '2014-03-09', admissionDate: '2014-03-09' }),
+    ).toBeNull();
+    expect(refusal({ ...input, admissionDate: '1990-01-01' })).toBeNull();
+    expect(
+      refusal({ ...input, dateOfBirth: '2014-03-09', admissionDate: '2014-03-08' }),
+    ).toMatchObject({
+      fields: [{ field: 'admissionDate', code: 'INVALID_VALUE' }],
+    });
+  });
+
+  it('names every date that breaks a rule, in the order of the form', () => {
+    expect(
+      refusal({ dateOfBirth: '2027-01-01', admissionDate: '2000-01-01', guardians: [primary] })
+        ?.fields,
+    ).toEqual([
+      { field: 'dateOfBirth', code: 'INVALID_VALUE' },
+      { field: 'admissionDate', code: 'INVALID_VALUE' },
+    ]);
+  });
+
+  it('refuses a second guardian with the same email, in any letter case, on that guardian', () => {
+    const guardians = [
+      { isPrimary: true, email: 'ravi@example.com' },
+      { isPrimary: false, email: 'lata@example.com' },
+      { isPrimary: false, email: 'RAVI@example.com' },
+      { isPrimary: false, email: null },
+      { isPrimary: false, email: null },
+    ];
+    expect(refusal({ guardians })).toMatchObject({
+      status: 400,
+      fields: [{ field: 'guardians[2].email', code: 'INVALID_VALUE' }],
+    });
+  });
+
+  it.each([[[]], [[other]], [[primary, primary]], [[primary, other, primary]]])(
+    'wants exactly one primary guardian: 422 PRIMARY_GUARDIAN_REQUIRED for %j',
+    (guardians) => {
+      expect(refusal({ guardians })).toMatchObject({
+        status: 422,
+        code: 'PRIMARY_GUARDIAN_REQUIRED',
+      });
+    },
+  );
+
+  it('answers the dates before the guardians', () => {
+    expect(refusal({ dateOfBirth: '2027-01-01', guardians: [other] })?.status).toBe(400);
+  });
+});
+
+const student = (overrides: Partial<StudentRow> = {}): StudentRow =>
+  ({
+    id: 'student-1',
+    institution_id: 'institution-1',
+    admission_no: 'GVS-1',
+    first_name: 'Diya',
+    last_name: 'Shetty',
+    gender: 2,
+    date_of_birth: '2014-03-09',
+    blood_group: 'O+',
+    nationality: 'Indian',
+    photo_file_id: null,
+    admission_date: '2026-06-01',
+    contact_email: 'diya@example.com',
+    country_code: '91',
+    mobile_number: '9876501234',
+    alternate_number: '9876501235',
+    address_line_1: '4 Temple Street',
+    address_line_2: null,
+    country_id: 'country-1',
+    state_id: null,
+    city_id: null,
+    pincode: '560001',
+    status: 1,
+    ...overrides,
+  }) as StudentRow;
+
+const placed: PlacedRow = {
+  placement_id: 'placement-1',
+  enrolment_id: 'enrolment-1',
+  academic_year_id: 'year-1',
+  class_id: 'class-1',
+  section_id: 'section-1',
+  roll_number: '14',
+  start_date: '2026-06-01',
+  enrolled_date: '2026-06-01',
+};
+
+const guardian = (overrides: Partial<GuardianRow> = {}): GuardianRow =>
+  ({
+    id: 'guardian-1',
+    user_id: 'user-1',
+    first_name: 'Ravi',
+    last_name: 'Shetty',
+    relation: 1,
+    country_code: '91',
+    phone_number: '9845012345',
+    alternate_phone: '9845012346',
+    email: 'ravi@example.com',
+    occupation: 'Engineer',
+    is_primary: true,
+    is_emergency_contact: false,
+    ...overrides,
+  }) as GuardianRow;
+
+describe('studentAuditView', () => {
+  it('keeps names, codes, dates and where the child sits, and the guardians by name and relation', () => {
+    expect(studentAuditView(student(), placed, [guardian()])).toEqual({
+      admissionNo: 'GVS-1',
+      firstName: 'Diya',
+      lastName: 'Shetty',
+      gender: 2,
+      dateOfBirth: '2014-03-09',
+      bloodGroup: 'O+',
+      nationality: 'Indian',
+      photoFileId: null,
+      admissionDate: '2026-06-01',
+      mobile: '******1234',
+      alternateNumber: '******1235',
+      addressLines: 1,
+      countryId: 'country-1',
+      stateId: null,
+      cityId: null,
+      pincode: '560001',
+      academicYearId: 'year-1',
+      classId: 'class-1',
+      sectionId: 'section-1',
+      rollNumber: '14',
+      guardians: [
+        {
+          firstName: 'Ravi',
+          lastName: 'Shetty',
+          relation: 1,
+          phone: '******2345',
+          hasLogin: true,
+          isPrimary: true,
+          isEmergencyContact: false,
+        },
+      ],
+      status: 1,
+    });
+  });
+
+  it('leaves out every email, address line and whole number', () => {
+    const text = JSON.stringify(studentAuditView(student(), placed, [guardian()]));
+    for (const secret of [
+      'diya@example.com',
+      'ravi@example.com',
+      '4 Temple Street',
+      '9876501234',
+      '9845012345',
+      '9845012346',
+    ]) {
+      expect(text).not.toContain(secret);
+    }
+  });
+
+  it('shows no mobile or alternate number as null, a guardian without a login, and no placement as empty', () => {
+    const view = studentAuditView(
+      student({
+        country_code: null,
+        mobile_number: null,
+        alternate_number: null,
+        address_line_1: null,
+      }),
+      undefined,
+      [guardian({ user_id: null, email: null })],
+    );
+    expect(view).toMatchObject({
+      mobile: null,
+      alternateNumber: null,
+      addressLines: 0,
+      academicYearId: null,
+      classId: null,
+      sectionId: null,
+      rollNumber: null,
+      guardians: [expect.objectContaining({ hasLogin: false })],
+    });
+  });
+});

@@ -46,6 +46,30 @@ describe('SectionDirectory', () => {
     });
   });
 
+  describe('placeOf', () => {
+    it('gives the class, the Institution, whether it is open and its capacity', async () => {
+      const t = build(section({ class_id: 'class-1', capacity: 40 }));
+      await expect(t.directory.placeOf(tx, 'section-1')).resolves.toEqual({
+        classId: 'class-1',
+        institutionId: 'institution-1',
+        active: true,
+        capacity: 40,
+      });
+    });
+
+    it('says a deactivated section is not active', async () => {
+      const t = build(section({ status: 0, class_id: 'class-1', capacity: null }));
+      await expect(t.directory.placeOf(tx, 'section-1')).resolves.toMatchObject({
+        active: false,
+        capacity: null,
+      });
+    });
+
+    it('is undefined for a section the caller cannot see', async () => {
+      await expect(build().directory.placeOf(tx, 'section-1')).resolves.toBeUndefined();
+    });
+  });
+
   it('names sections and their classes through the repository', async () => {
     const t = build();
     expect((await t.directory.names(tx, ['section-1'])).get('section-1')).toEqual({

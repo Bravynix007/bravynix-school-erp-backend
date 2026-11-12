@@ -17,6 +17,30 @@ const build = (found?: AcademicYearRow) => {
 };
 
 describe('AcademicYearDirectory', () => {
+  describe('openYear', () => {
+    it('says whether a year of the Institution is open, and when it starts and ends', async () => {
+      const found = year({ start_date: '2026-06-01', end_date: '2027-03-31' });
+      await expect(build(found).directory.openYear(tx, 'year-1', 'institution-1')).resolves.toEqual(
+        {
+          open: true,
+          startDate: '2026-06-01',
+          endDate: '2027-03-31',
+        },
+      );
+      await expect(
+        build({ ...found, status: 0 }).directory.openYear(tx, 'year-1', 'institution-1'),
+      ).resolves.toMatchObject({ open: false });
+    });
+
+    it('is undefined for a year that is not there, and for one of another Institution', async () => {
+      for (const found of [undefined, year({ institution_id: 'institution-2' })]) {
+        await expect(
+          build(found).directory.openYear(tx, 'year-1', 'institution-1'),
+        ).resolves.toBeUndefined();
+      }
+    });
+  });
+
   describe('requireActive', () => {
     it('passes for an active year of the Institution', async () => {
       const t = build(year());

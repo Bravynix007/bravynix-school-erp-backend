@@ -28,6 +28,9 @@ function build(existing?: AccountRow, taken: number[] = []) {
     .fn<AccountRepository['holdsGrantOrRestorable']>()
     .mockResolvedValue(false);
   const holdsStaffRecord = vi.fn<SessionRepository['holdsStaffRecord']>().mockResolvedValue(false);
+  const holdsGuardianRecord = vi
+    .fn<SessionRepository['holdsGuardianRecord']>()
+    .mockResolvedValue(false);
   const findByEmail = vi.fn<AccountRepository['findByEmail']>().mockResolvedValue(existing);
   const insertPending = vi
     .fn<AccountRepository['insertPending']>()
@@ -52,7 +55,7 @@ function build(existing?: AccountRow, taken: number[] = []) {
       revokeGrant,
       endRoleSessions,
     } as unknown as AccountRepository,
-    { holdsStaffRecord } as unknown as SessionRepository,
+    { holdsStaffRecord, holdsGuardianRecord } as unknown as SessionRepository,
     {} as MfaRepository,
     { send } as unknown as BackgroundMailer,
   );
@@ -63,6 +66,7 @@ function build(existing?: AccountRow, taken: number[] = []) {
     holdsActiveGrant,
     holdsGrantOrRestorable,
     holdsStaffRecord,
+    holdsGuardianRecord,
     findByEmail,
     insertPending,
     activeGrant,
@@ -135,6 +139,7 @@ describe('AccountDirectory.grant', () => {
   it.each([
     ['an Institution Admin, active or dormant', 'holdsGrantOrRestorable'],
     ['staff, in any Society, active or dormant', 'holdsStaffRecord'],
+    ['a guardian of a student, in any Society', 'holdsGuardianRecord'],
   ] as const)(
     'refuses %s as Super Admin: the platform team holds no school role',
     async (_name, which) => {
@@ -359,6 +364,67 @@ describe('AccountDirectory.linkStaff', () => {
       to: 'asha@example.com',
       template: 'welcome',
       variables: { role: 'Teacher', society: 'Sunrise Trust' },
+    });
+  });
+});
+
+describe('AccountDirectory.linkGuardian', () => {
+  it('makes a Pending account for a new email, taking no seat', async () => {
+    const t = build(undefined);
+    const linked = await t.directory.linkGuardian(
+      tx,
+      { email: 'Parent@Example.com', firstName: 'Ravi', lastName: 'Shetty' },
+      'admin-1',
+    );
+    expect(t.insertPending).toHaveBeenCalledWith(
+      tx,
+      { email: 'parent@example.com', firstName: 'Ravi', lastName: 'Shetty' },
+      'admin-1',
+    );
+    expect(linked).toMatchObject({ id: 'new-1', created: true });
+    expect(t.lockSeats).not.toHaveBeenCalled();
+    expect(t.insertGrant).not.toHaveBeenCalled();
+  });
+
+  it('links the person an email already belongs to, so one parent has several children', async () => {
+    const t = build(user());
+    const linked = await t.directory.linkGuardian(tx, { email: 'asha@example.com' }, 'admin-1');
+    expect(linked).toMatchObject({ id: 'user-1', created: false });
+    expect(t.insertPending).not.toHaveBeenCalled();
+  });
+
+  it('refuses a Super Admin, under the separation lock', async () => {
+    const t = build(user());
+    t.holdsActiveGrant.mockResolvedValue(true);
+    await expect(
+      t.directory.linkGuardian(tx, { email: 'asha@example.com' }, 'admin-1'),
+    ).rejects.toMatchObject({ status: 409, code: 'ROLE_CONFLICT' });
+    expect(t.lockRoleSeparation).toHaveBeenCalled();
+    expect(t.holdsActiveGrant).toHaveBeenCalledWith(tx, 'user-1', [1]);
+  });
+
+  it('links a teacher or an Owner: a parent may hold any role but Super Admin', async () => {
+    const t = build(user());
+    t.holdsStaffRecord.mockResolvedValue(true);
+    const linked = await t.directory.linkGuardian(tx, { email: 'asha@example.com' }, 'admin-1');
+    expect(linked).toMatchObject({ id: 'user-1', created: false });
+  });
+
+  it.each([
+    [2, 'ACCOUNT_BLOCKED'],
+    [0, 'INVALID_STATE'],
+  ])('refuses a person whose account status is %s with 409 %s', async (status, code) => {
+    const t = build(user({ account_status: status }));
+    await expect(
+      t.directory.linkGuardian(tx, { email: 'asha@example.com' }, 'admin-1'),
+    ).rejects.toMatchObject({ status: 409, code });
+  });
+
+  it('sends the welcome as Parent', () => {
+    const t = build();
+    t.directory.welcomeAs({ email: 'asha@example.com' }, 5, 'Sunrise Trust');
+    expect(t.send.mock.calls[0]![0]).toMatchObject({
+      variables: { role: 'Parent', society: 'Sunrise Trust' },
     });
   });
 });

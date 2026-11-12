@@ -19,6 +19,10 @@ import { StaffContext } from './staff-context.js';
 import { StaffController } from './staff.controller.js';
 import { StaffRepository } from './staff.repository.js';
 import { StaffService } from './staff.service.js';
+import { StudentContext } from './student-context.js';
+import { StudentController } from './student.controller.js';
+import { StudentRepository } from './student.repository.js';
+import { StudentService } from './student.service.js';
 import { TeachingAssignmentController } from './teaching-assignment.controller.js';
 
 /**
@@ -35,6 +39,7 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
     DocumentController,
     InstitutionAdminController,
     TeachingAssignmentController,
+    StudentController,
   ],
   providers: [
     StaffRepository,
@@ -47,6 +52,9 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
     StaffIdentityService,
     DocumentRepository,
     DocumentService,
+    StudentRepository,
+    StudentContext,
+    StudentService,
     PeopleTeachingStaff,
     { provide: TeachingStaff, useExisting: PeopleTeachingStaff },
     PeopleFileReaders,
