@@ -932,7 +932,7 @@ describe('students: add, read and list', () => {
       ).rejects.toThrow(/ck_students_inactive/);
       await expect(
         refused(
-          sql`update students set status = 0, inactive_reason = 4, inactive_at = now() where id = ${student.id}`,
+          sql`update students set status = 0, inactive_reason = 5, inactive_at = now() where id = ${student.id}`,
         ),
       ).rejects.toThrow(/ck_students_inactive/);
     });

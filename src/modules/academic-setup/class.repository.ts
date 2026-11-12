@@ -105,6 +105,25 @@ export class ClassRepository {
       : { institutionId: row.institution_id, isLast: Boolean(row.is_last) };
   }
 
+  /**
+   * The place of each class in the order of the predefined classes, with the Institution it belongs to; a class the
+   * caller cannot see is left out.
+   */
+  async orders(
+    tx: Tx,
+    ids: readonly string[],
+  ): Promise<Map<string, { institutionId: string; order: number }>> {
+    const rows = await tx
+      .selectFrom('classes as c')
+      .innerJoin('predefined_classes as p', 'p.id', 'c.predefined_class_id')
+      .select(['c.id', 'c.institution_id', 'p.display_order'])
+      .where('c.id', 'in', ids)
+      .execute();
+    return new Map(
+      rows.map((row) => [row.id, { institutionId: row.institution_id, order: row.display_order }]),
+    );
+  }
+
   /** The classes with these IDs, with their names, in the order of the lists. */
   views(tx: Tx, ids: readonly string[]): Promise<ClassView[]> {
     return this.view(tx)

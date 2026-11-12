@@ -3,6 +3,9 @@ export const OUTCOME_PROMOTED = 1;
 export const OUTCOME_REPEATING = 2;
 export const OUTCOME_COMPLETED = 4;
 
+/** Why a student who completed the final class is deactivated: `inactive_reason` 4, Completed (DDD 9.6). */
+export const INACTIVE_COMPLETED = 4;
+
 /** The most students one promotion takes (API design 10.7). */
 export const MAX_PROMOTED_AT_ONCE = 500;
 
