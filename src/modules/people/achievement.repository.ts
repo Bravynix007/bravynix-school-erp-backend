@@ -25,16 +25,14 @@ export class AchievementRepository {
   }
 
   /** The star with its student; `lock` takes the star's own row for the change and leaves the enrolment alone. */
-  async find(tx: Tx, id: string, lock = false): Promise<AchievementRow | undefined> {
-    const own = tx.selectFrom('student_achievements').selectAll().where('id', '=', id);
-    const row = await (lock ? own.forUpdate() : own).executeTakeFirst();
-    if (!row) return undefined;
-    const enrolment = await tx
-      .selectFrom('student_enrolments')
-      .select('student_id')
-      .where('id', '=', row.student_enrolment_id)
-      .executeTakeFirstOrThrow();
-    return { ...row, student_id: enrolment.student_id };
+  find(tx: Tx, id: string, lock = false): Promise<AchievementRow | undefined> {
+    const query = tx
+      .selectFrom('student_achievements as a')
+      .innerJoin('student_enrolments as e', 'e.id', 'a.student_enrolment_id')
+      .selectAll('a')
+      .select('e.student_id')
+      .where('a.id', '=', id);
+    return (lock ? query.forUpdate(['a']) : query).executeTakeFirst();
   }
 
   async insert(tx: Tx, values: NewAchievement): Promise<Selectable<StudentAchievementsTable>> {

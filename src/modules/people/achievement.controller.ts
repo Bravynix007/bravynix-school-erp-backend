@@ -37,7 +37,7 @@ export class AchievementController {
     roles: GIVERS,
     scope: 'institution',
     operationId: 'ACH-02',
-    rule: 'Gives a Silver, Gold or Platinum star to an active student who is in a class this year; a Teacher or Staff member only for a student of their own sections',
+    rule: 'Gives a Silver, Gold or Platinum star to an active student who has an open placement (422 NO_CURRENT_PLACEMENT otherwise); a Teacher or Staff member only for a student of their own sections',
   })
   @Post('students/:studentId/achievements')
   async add(
