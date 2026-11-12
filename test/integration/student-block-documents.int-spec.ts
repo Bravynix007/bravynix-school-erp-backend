@@ -3,6 +3,10 @@ import request from 'supertest';
 import { DatabaseService } from '../../src/platform/database/index.js';
 import { createPool } from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
+import {
+  down,
+  up,
+} from '../../src/platform/database/migrations/2026_11_12_0035_people_student_block_documents.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { personaByKey } from '../../src/seeds/two-worlds.js';
 import { apiCaller } from '../support/api.js';
@@ -246,6 +250,16 @@ describe('a student’s block and documents', () => {
       );
     });
 
+    it('stamps the Institution Admin who blocks as the one who updated the student', async () => {
+      expect((await block(diya, institutionAdmin.token)).status).toBe(200);
+      expect(await stored(diya)).toMatchObject({
+        access_blocked_by: institutionAdmin.person,
+        updated_by: institutionAdmin.person,
+      });
+      expect((await unblock(diya, owner.token)).status).toBe(200);
+      expect(await stored(diya)).toMatchObject({ updated_by: owner.person });
+    });
+
     it('stops that child only: the sibling, the guardians and the list keep working', async () => {
       await block(diya);
       expect((await profile(ravi)).isBlocked).toBe(false);
@@ -454,7 +468,7 @@ describe('a student’s block and documents', () => {
       );
       const teacher = await kit.staff(owner.token, first, categoryId, { firstName: 'Ana' });
       const asTeacher = await kit.actingAs(teacher.person.email, TEACHER, societyId);
-      expect((await open(fileId, asTeacher)).status).toBeGreaterThanOrEqual(403);
+      expect((await open(fileId, asTeacher)).status).toBe(404);
     });
 
     it('deactivates a document of a student: it leaves the list, nothing is deleted, and a second call is 404', async () => {
@@ -512,6 +526,27 @@ describe('a student’s block and documents', () => {
           [first],
         ),
       ).rejects.toThrow(/row-level security/);
+    });
+
+    it('runs the migration down with student documents on file: they go, the staff documents stay, and up brings the columns back', async () => {
+      await attach(diya, { title: 'Form', fileId: await readyFile() });
+      const teacher = await kit.staff(owner.token, first, categoryId, { firstName: 'Ana' });
+      const letter = await api('post', `/v1/staff/${teacher.id}/documents`, owner.token, {
+        title: 'Letter',
+        fileId: await readyFile({ purpose: 6 }),
+      });
+      expect(letter.status).toBe(201);
+      await ownerDb.transaction().execute(async (tx) => {
+        await down(tx);
+        await up(tx);
+      });
+      expect(await listed(diya)).toEqual([]);
+      const kept = await api('get', `/v1/staff/${teacher.id}/documents`, owner.token);
+      expect((kept.body.data as unknown as { id: string }[]).map((d) => d.id)).toEqual([
+        letter.body.data.id,
+      ]);
+      const again = await attach(diya, { title: 'Form again', fileId: await readyFile() });
+      expect(again.status).toBe(201);
     });
 
     it('lets the application change only the status of a document, and never delete one', async () => {

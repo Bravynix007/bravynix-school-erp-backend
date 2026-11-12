@@ -43,7 +43,11 @@ export async function down(db: Kysely<unknown>): Promise<void> {
     throw new Error('Refusing to drop the student block and documents in production');
   }
   await sql`drop index if exists ix_documents_student`.execute(db);
+  // The table forces row-level security and has no DELETE policy, so even its owner sees no row to delete: lift the
+  // force for these two statements, inside this migration's own transaction.
+  await sql`alter table documents no force row level security`.execute(db);
   await sql`delete from documents where owner_type = 1`.execute(db);
+  await sql`alter table documents force row level security`.execute(db);
   await sql`
     alter table documents
       drop constraint ck_documents_owner,
