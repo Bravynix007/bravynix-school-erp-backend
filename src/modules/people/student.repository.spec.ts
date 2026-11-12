@@ -174,4 +174,55 @@ describe('StudentRepository', () => {
     expect(await repository.sectionCounts(none.tx, [])).toEqual(new Map());
     expect(none.queries).toEqual([]);
   });
+
+  describe('promotion', () => {
+    const source = { academicYearId: 'year-1', classId: 'class-1', sectionId: null };
+
+    it('locks the active students with an open placement in the class first, and reads their placements after', async () => {
+      const { tx, queries } = recorder();
+      expect(await repository.promotable(tx, source)).toEqual([]);
+      // Nobody is locked, so there is nothing to read.
+      expect(queries).toHaveLength(1);
+      const { sql, parameters } = queries[0]!;
+      expect(sql).toContain('"s"."status" = $1 and "e"."status" = $2 and "p"."end_date" is null');
+      expect(sql).toContain('"p"."academic_year_id" = $3 and "p"."class_id" = $4');
+      expect(sql).not.toContain('"p"."section_id" =');
+      expect(sql).toMatch(/for update of "s"$/);
+      expect(parameters).toEqual([1, 1, 'year-1', 'class-1']);
+    });
+
+    it('narrows to a section and to the students named', async () => {
+      const { tx, queries } = recorder();
+      await repository.promotable(tx, {
+        ...source,
+        sectionId: 'section-1',
+        studentIds: ['a', 'b'],
+      });
+      const { sql, parameters } = queries[0]!;
+      expect(sql).toContain('"p"."section_id" = $5');
+      expect(sql).toContain('"s"."id" in ($6, $7)');
+      expect(parameters).toEqual([1, 1, 'year-1', 'class-1', 'section-1', 'a', 'b']);
+    });
+
+    it('asks which students hold an active enrolment in the year, and nothing for nobody', async () => {
+      const { tx, queries } = recorder();
+      expect(await repository.enrolledIn(tx, 'year-2', ['a', 'b'])).toEqual(new Set());
+      expect(queries[0]!.sql).toContain(
+        '"status" = $1 and "academic_year_id" = $2 and "student_id" in ($3, $4)',
+      );
+      expect(queries[0]!.parameters).toEqual([1, 'year-2', 'a', 'b']);
+      const none = recorder();
+      expect(await repository.enrolledIn(none.tx, 'year-2', [])).toEqual(new Set());
+      expect(none.queries).toEqual([]);
+    });
+
+    it('reads the roll numbers of the open placements of a section in a year', async () => {
+      const { tx, queries } = recorder();
+      expect(await repository.rollNumbersIn(tx, 'year-2', 'section-2')).toEqual([]);
+      expect(queries[0]!.sql).toContain(
+        '"academic_year_id" = $1 and "section_id" = $2 and "end_date" is null',
+      );
+      expect(queries[0]!.parameters).toEqual(['year-2', 'section-2']);
+    });
+  });
 });

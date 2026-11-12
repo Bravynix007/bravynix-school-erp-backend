@@ -24,6 +24,8 @@ import {
   MoveStudentDto,
   UpdateStudentDto,
 } from './student.dto.js';
+import { PromoteStudentDto } from './promotion.dto.js';
+import { PromotionService } from './promotion.service.js';
 import type {
   StudentClassroomResource,
   StudentResource,
@@ -34,11 +36,14 @@ import { StudentService } from './student.service.js';
 const ADMINS = [RoleCode.SocietyOwner, RoleCode.InstitutionAdmin];
 const READERS = [...ADMINS, RoleCode.TeacherStaff];
 
-/** STU-01 to STU-05 and STU-08 (API design 9.6): the students of an Institution. */
+/** STU-01 to STU-09 (API design 9.6): the students of an Institution. */
 @ApiTags('Students')
 @Controller('students')
 export class StudentController {
-  constructor(private readonly students: StudentService) {}
+  constructor(
+    private readonly students: StudentService,
+    private readonly promotion: PromotionService,
+  ) {}
 
   @Policy({
     roles: READERS,
@@ -155,5 +160,21 @@ export class StudentController {
     @Param('studentId', UuidParamPipe) studentId: string,
   ): Promise<StudentResource> {
     return this.students.unblock(principal, studentId);
+  }
+
+  @Policy({
+    roles: ADMINS,
+    scope: 'institution',
+    operationId: 'STU-09',
+    rule: 'Promotes one active student of an Institution the caller reaches to a class and section of the next academic year, or completes the final class; the old placement ends on the old year’s last day and the student is 409 ALREADY_ENROLLED when already in the new year',
+  })
+  @Post(':studentId/promote')
+  @HttpCode(HttpStatus.OK)
+  promote(
+    @CurrentPrincipal() principal: Principal,
+    @Param('studentId', UuidParamPipe) studentId: string,
+    @Body() body: PromoteStudentDto,
+  ): Promise<ApiResult<StudentResource>> {
+    return this.promotion.promoteStudent(principal, studentId, body);
   }
 }

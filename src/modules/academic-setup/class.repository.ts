@@ -70,6 +70,41 @@ export class ClassRepository {
     return (lock ? query.forUpdate() : query).executeTakeFirst();
   }
 
+  /**
+   * Whether the class is the last of its Institution: no active class of the Institution comes after it in the order
+   * of the predefined classes (the order of the lists), with the Institution it belongs to. `undefined` for a class the
+   * caller cannot see.
+   */
+  async isLast(
+    tx: Tx,
+    id: string,
+  ): Promise<{ institutionId: string; isLast: boolean } | undefined> {
+    const row = await tx
+      .selectFrom('classes as c')
+      .innerJoin('predefined_classes as p', 'p.id', 'c.predefined_class_id')
+      .select((eb) =>
+        eb
+          .not(
+            eb.exists(
+              eb
+                .selectFrom('classes as later')
+                .innerJoin('predefined_classes as q', 'q.id', 'later.predefined_class_id')
+                .select('later.id')
+                .whereRef('later.institution_id', '=', 'c.institution_id')
+                .where('later.status', '=', 1)
+                .whereRef('q.display_order', '>', 'p.display_order'),
+            ),
+          )
+          .as('is_last'),
+      )
+      .select('c.institution_id')
+      .where('c.id', '=', id)
+      .executeTakeFirst();
+    return row === undefined
+      ? undefined
+      : { institutionId: row.institution_id, isLast: Boolean(row.is_last) };
+  }
+
   /** The classes with these IDs, with their names, in the order of the lists. */
   views(tx: Tx, ids: readonly string[]): Promise<ClassView[]> {
     return this.view(tx)

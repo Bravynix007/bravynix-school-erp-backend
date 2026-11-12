@@ -4,6 +4,7 @@ import { AcademicYearDirectory } from './academic-year-directory.js';
 import { AcademicYearController } from './academic-year.controller.js';
 import { AcademicYearRepository } from './academic-year.repository.js';
 import { AcademicYearService } from './academic-year.service.js';
+import { ClassDirectory } from './class-directory.js';
 import { ClassController, SectionController } from './class.controller.js';
 import { ClassRepository } from './class.repository.js';
 import { ClassService } from './class.service.js';
@@ -31,7 +32,8 @@ import { SubjectService } from './subject.service.js';
     SectionService,
     AcademicYearDirectory,
     SectionDirectory,
+    ClassDirectory,
   ],
-  exports: [SubjectDirectory, AcademicYearDirectory, SectionDirectory],
+  exports: [SubjectDirectory, AcademicYearDirectory, SectionDirectory, ClassDirectory],
 })
 export class AcademicSetupModule {}

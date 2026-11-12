@@ -56,6 +56,28 @@ export interface StudentFilter {
   searchNameAndRollOnly?: boolean;
 }
 
+/** What PRM-01 and STU-09 promote from: the students placed in a class (and a section) in a year. */
+export interface PromotionSource {
+  academicYearId: string;
+  classId: string;
+  /** `null` is every section of the class. */
+  sectionId: string | null;
+  /** Only these students; every student placed there without it. */
+  studentIds?: readonly string[];
+}
+
+/** A student at the placement a promotion closes. */
+export interface PromotableRow {
+  student_id: string;
+  institution_id: string;
+  society_id: string;
+  enrolment_id: string;
+  placement_id: string;
+  section_id: string;
+  roll_number: string;
+  start_date: string;
+}
+
 /** A student with the placement a list shows. */
 export type StudentListRow = StudentRow & PlacedRow;
 
@@ -173,6 +195,82 @@ export class StudentRepository {
       .where('e.status', '=', 1)
       .where('p.end_date', 'is', null)
       .executeTakeFirst();
+  }
+
+  /** The students of the source whose placement is open, with every filter of a promotion applied. */
+  private inSource(tx: Tx, source: PromotionSource) {
+    let query = tx
+      .selectFrom('student_section_placements as p')
+      .innerJoin('student_enrolments as e', 'e.id', 'p.student_enrolment_id')
+      .innerJoin('students as s', 's.id', 'e.student_id')
+      .where('s.status', '=', 1)
+      .where('e.status', '=', 1)
+      .where('p.end_date', 'is', null)
+      .where('p.academic_year_id', '=', source.academicYearId)
+      .where('p.class_id', '=', source.classId);
+    if (source.sectionId !== null) query = query.where('p.section_id', '=', source.sectionId);
+    if (source.studentIds !== undefined) query = query.where('s.id', 'in', source.studentIds);
+    return query;
+  }
+
+  /**
+   * The active students whose open placement is in the source class (and section) of the year, their rows locked until
+   * the transaction ends, so two promotions of the same students run one after the other.
+   *
+   * The students are locked first and the placements read after, in a statement of their own: after a lock wait
+   * Postgres checks again only the rows it locked, so a placement read in the same statement could have been closed
+   * or moved by the change that held the lock. Every writer of placements (STU-05, STU-08, STU-09, PRM-01) locks the
+   * student first, so what is read under the lock stands.
+   */
+  async promotable(tx: Tx, source: PromotionSource): Promise<PromotableRow[]> {
+    const candidates = await this.inSource(tx, source)
+      .select('s.id')
+      .orderBy('s.id')
+      .forUpdate(['s'])
+      .execute();
+    if (candidates.length === 0) return [];
+    return this.inSource(tx, { ...source, studentIds: candidates.map((row) => row.id) })
+      .select([
+        's.id as student_id',
+        's.institution_id',
+        's.society_id',
+        'e.id as enrolment_id',
+        'p.id as placement_id',
+        'p.section_id',
+        'p.roll_number',
+        'p.start_date',
+      ])
+      .orderBy('s.id')
+      .execute();
+  }
+
+  /** Which of these students already hold an active enrolment in the year. */
+  async enrolledIn(
+    tx: Tx,
+    academicYearId: string,
+    studentIds: readonly string[],
+  ): Promise<Set<string>> {
+    if (studentIds.length === 0) return new Set();
+    const rows = await tx
+      .selectFrom('student_enrolments')
+      .select('student_id')
+      .where('status', '=', 1)
+      .where('academic_year_id', '=', academicYearId)
+      .where('student_id', 'in', studentIds)
+      .execute();
+    return new Set(rows.map((row) => row.student_id));
+  }
+
+  /** The roll numbers now held in the section in the year: the open placements. */
+  async rollNumbersIn(tx: Tx, academicYearId: string, sectionId: string): Promise<string[]> {
+    const rows = await tx
+      .selectFrom('student_section_placements')
+      .select('roll_number')
+      .where('academic_year_id', '=', academicYearId)
+      .where('section_id', '=', sectionId)
+      .where('end_date', 'is', null)
+      .execute();
+    return rows.map((row) => row.roll_number);
   }
 
   /** How many students sit in the section now, in the year: the count a capacity warning compares. */
