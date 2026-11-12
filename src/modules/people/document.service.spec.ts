@@ -9,6 +9,8 @@ import type { DocumentRepository, DocumentRow } from './document.repository.js';
 import { DocumentService } from './document.service.js';
 import { StaffContext } from './staff-context.js';
 import type { StaffRepository, StaffRow } from './staff.repository.js';
+import { StudentContext } from './student-context.js';
+import type { StudentRepository, StudentRow } from './student.repository.js';
 
 const at = new Date('2026-11-10T04:30:00.000Z');
 const admin = { personId: 'admin-1', roleCode: 3, societyId: 'society-1' } as unknown as Principal;
@@ -24,6 +26,15 @@ const staff = (overrides: Partial<StaffRow> = {}): StaffRow =>
     ...overrides,
   }) as StaffRow;
 
+const student = (overrides: Partial<StudentRow> = {}): StudentRow =>
+  ({
+    id: 'student-1',
+    society_id: 'society-1',
+    institution_id: 'institution-1',
+    status: 1,
+    ...overrides,
+  }) as StudentRow;
+
 const document = (overrides: Partial<DocumentRow> = {}): DocumentRow =>
   ({
     id: 'doc-1',
@@ -36,6 +47,7 @@ const document = (overrides: Partial<DocumentRow> = {}): DocumentRow =>
     institution_id: 'institution-1',
     owner_type: 2,
     staff_member_id: 'staff-1',
+    student_id: null,
     title: 'Appointment letter',
     file_id: 'file-1',
     ...overrides,
@@ -58,12 +70,25 @@ const refusal = async (work: Promise<unknown>) => {
   throw new Error('expected a refusal');
 };
 
-function build(current: StaffRow | undefined = staff(), found: DocumentRow | null = document()) {
+function build(
+  current: StaffRow | undefined = staff(),
+  found: DocumentRow | null = document(),
+  child: StudentRow | null = student(),
+) {
   const tx = {} as Tx;
   const transaction = vi.fn<DatabaseService['transaction']>((_tenant, work) => work(tx));
   const staffFind = vi.fn<StaffRepository['find']>().mockResolvedValue(current);
+  const studentFind = vi.fn<StudentRepository['find']>().mockResolvedValue(child ?? undefined);
   const find = vi.fn<DocumentRepository['find']>().mockResolvedValue(found ?? undefined);
   const ofStaff = vi.fn<DocumentRepository['ofStaff']>().mockResolvedValue([document()]);
+  const ofStudent = vi.fn<DocumentRepository['ofStudent']>().mockResolvedValue([
+    document({
+      owner_type: 1,
+      staff_member_id: null,
+      student_id: 'student-1',
+      title: 'Admission form',
+    }),
+  ]);
   const insert = vi
     .fn<DocumentRepository['insert']>()
     .mockImplementation((_tx, values) => Promise.resolve(document(values as Partial<DocumentRow>)));
@@ -87,8 +112,9 @@ function build(current: StaffRow | undefined = staff(), found: DocumentRow | nul
   const scope = { requireInstitution, forPrincipal } as unknown as ScopeService;
   const service = new DocumentService(
     database,
-    { find, ofStaff, insert, deactivate } as unknown as DocumentRepository,
+    { find, ofStaff, ofStudent, insert, deactivate } as unknown as DocumentRepository,
     new StaffContext(database, repository, scope),
+    new StudentContext(database, { find: studentFind } as unknown as StudentRepository, scope),
     scope,
     { requireReady, briefs } as unknown as FileDirectory,
     { describe } as unknown as PersonDirectory,
@@ -98,6 +124,7 @@ function build(current: StaffRow | undefined = staff(), found: DocumentRow | nul
     service,
     find,
     ofStaff,
+    ofStudent,
     insert,
     deactivate,
     requireReady,
@@ -197,6 +224,81 @@ describe('DocumentService.create (STF-15)', () => {
     const t = build();
     t.insert.mockRejectedValueOnce(new Error('boom'));
     await expect(t.service.create(admin, 'staff-1', body)).rejects.toThrow('boom');
+  });
+});
+
+describe('DocumentService.listOfStudent (DOC-01)', () => {
+  it('lists the active documents of the student with the owner named', async () => {
+    const t = build();
+    const result = await t.service.listOfStudent(admin, 'student-1');
+    expect(result.options.meta).toBeNull();
+    expect(result.data).toMatchObject([
+      { ownerType: 'student', studentId: 'student-1', title: 'Admission form', file: brief },
+    ]);
+    expect(t.ofStudent).toHaveBeenCalledWith(expect.anything(), 'student-1');
+  });
+
+  it('is an empty list, with no file read, when there is no document', async () => {
+    const t = build();
+    t.ofStudent.mockResolvedValue([]);
+    expect((await t.service.listOfStudent(admin, 'student-1')).data).toEqual([]);
+    expect(t.briefs).not.toHaveBeenCalled();
+  });
+
+  it('answers 404 for a student who is not found, and keeps the documents of a deactivated one', async () => {
+    expect(
+      await refusal(build(staff(), document(), null).service.listOfStudent(admin, 'student-1')),
+    ).toMatchObject({ status: 404 });
+    const left = build(staff(), document(), student({ status: 0 }));
+    expect((await left.service.listOfStudent(admin, 'student-1')).data).toHaveLength(1);
+  });
+});
+
+describe('DocumentService.createForStudent (DOC-02)', () => {
+  const body = { title: 'Admission form', fileId: 'file-1' };
+
+  it('attaches a Ready purpose 5 file of the student’s Institution and audits it', async () => {
+    const t = build();
+    const created = await t.service.createForStudent(admin, 'student-1', body);
+    expect(t.requireReady).toHaveBeenCalledWith(
+      expect.anything(),
+      'file-1',
+      { purpose: 5, institutionId: 'institution-1' },
+      'fileId',
+    );
+    expect(t.insert.mock.calls[0]![1]).toMatchObject({
+      society_id: 'society-1',
+      institution_id: 'institution-1',
+      owner_type: 1,
+      student_id: 'student-1',
+      title: 'Admission form',
+      file_id: 'file-1',
+      created_by: 'admin-1',
+    });
+    expect(t.insert.mock.calls[0]![1]).not.toHaveProperty('staff_member_id');
+    expect(t.record.mock.calls[0]![1]).toMatchObject({
+      action: 'document.created',
+      institutionId: 'institution-1',
+      entityType: 'document',
+      after: { studentId: 'student-1', title: 'Admission form', fileId: 'file-1' },
+    });
+    expect(created).toMatchObject({ file: brief });
+  });
+
+  it('answers 404 for a deactivated student before it looks at the file, and 409 for a file attached already', async () => {
+    const gone = build(staff(), document(), student({ status: 0 }));
+    expect(await refusal(gone.service.createForStudent(admin, 'student-1', body))).toMatchObject({
+      status: 404,
+    });
+    expect(gone.requireReady).not.toHaveBeenCalled();
+    const t = build();
+    t.insert.mockRejectedValueOnce(
+      Object.assign(new Error('unique'), { code: '23505', constraint: 'uq_documents_file' }),
+    );
+    expect(await refusal(t.service.createForStudent(admin, 'student-1', body))).toEqual({
+      status: 409,
+      code: 'DUPLICATE',
+    });
   });
 });
 

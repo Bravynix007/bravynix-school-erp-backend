@@ -165,11 +165,12 @@ export interface DocumentsTable {
   /** 1 active, 0 deactivated. */
   status: Generated<number>;
   society_id: string;
-  /** The staff member's home Institution. */
+  /** The owner's Institution: the staff member's home one, or the student's. */
   institution_id: string;
-  /** 2 staff member; 1 student arrives with the students table. */
+  /** 1 student, 2 staff member; exactly the matching owner column is set. */
   owner_type: number;
   staff_member_id: string | null;
+  student_id: string | null;
   title: string;
   file_id: string;
 }
@@ -214,6 +215,9 @@ export interface StudentsTable extends StudentOwned {
   /** Why a deactivated student left: 1 Left the Institution, 2 Created by mistake, 3 Other. Empty while active. */
   inactive_reason: number | null;
   inactive_at: Date | null;
+  /** Set with `access_blocked_by` when the guardians' access to this child is blocked (STU-06); both empty otherwise. */
+  access_blocked_at: Date | null;
+  access_blocked_by: string | null;
   /** Name and Admission ID, lower case: the database keeps it, behind the search index. */
   search_text: ColumnType<string, never, never>;
 }

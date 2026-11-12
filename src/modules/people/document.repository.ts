@@ -26,6 +26,18 @@ export class DocumentRepository {
       .execute();
   }
 
+  /** The active documents of a student, newest first. */
+  ofStudent(tx: Tx, studentId: string): Promise<DocumentRow[]> {
+    return tx
+      .selectFrom('documents')
+      .selectAll()
+      .where('student_id', '=', studentId)
+      .where('status', '=', 1)
+      .orderBy('created_at', 'desc')
+      .orderBy('id', 'desc')
+      .execute();
+  }
+
   /** Is this file that of an active document of the person's own active staff record? (FIL-03 for a teacher) */
   async isOwnFile(tx: Tx, fileId: string, personId: string): Promise<boolean> {
     const row = await tx

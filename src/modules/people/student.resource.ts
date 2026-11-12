@@ -67,6 +67,9 @@ export interface StudentResource extends AuthorStamps {
   guardians: GuardianResource[];
   /** The Aadhaar number masked and the birth certificate number; `null` for each that is not set. */
   identity: StudentIdentityResource;
+  /** The guardians' access to this child is blocked (STU-06); siblings are not affected. */
+  isBlocked: boolean;
+  blockedAt: string | null;
   status: number;
   version: number;
 }
@@ -80,6 +83,7 @@ export interface StudentSummary {
   lastName: string | null;
   photoFileId: string | null;
   placement: StudentPlacementResource;
+  isBlocked: boolean;
   status: number;
   version: number;
 }
@@ -134,6 +138,7 @@ export function studentSummary(row: StudentListRow): StudentSummary {
     lastName: row.last_name,
     photoFileId: row.photo_file_id,
     placement: placementResource(row),
+    isBlocked: row.access_blocked_at !== null,
     status: row.status,
     version: row.version,
   };
@@ -175,6 +180,8 @@ export function studentResource(
     placement: placed ? placementResource(placed) : null,
     guardians: guardians.map(guardianResource),
     identity: studentIdentityResource(identity),
+    isBlocked: row.access_blocked_at !== null,
+    blockedAt: row.access_blocked_at?.toISOString() ?? null,
     status: row.status,
     version: row.version,
     ...authorStamps(row, people),

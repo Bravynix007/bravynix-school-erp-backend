@@ -22,6 +22,15 @@ describe('DocumentRepository', () => {
     expect(parameters).toEqual(['staff-1', 1]);
   });
 
+  it('lists the active documents of a student, newest first', async () => {
+    const { tx, queries } = sqlRecorder();
+    await repository.ofStudent(tx, 'student-1');
+    const { sql, parameters } = queries[0]!;
+    expect(sql).toContain('"student_id" = $1 and "status" = $2');
+    expect(sql).toContain('order by "created_at" desc, "id" desc');
+    expect(parameters).toEqual(['student-1', 1]);
+  });
+
   it('asks whether a file is that of an active document of the person’s own active record', async () => {
     const { tx, queries } = sqlRecorder();
     expect(await repository.isOwnFile(tx, 'file-1', 'user-1')).toBe(false);
