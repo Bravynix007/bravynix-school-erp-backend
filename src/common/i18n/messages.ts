@@ -12,6 +12,7 @@ const en: Catalogue = {
   OK: 'OK',
   CREATED: 'Created',
   ACCEPTED: 'Accepted',
+  PROMOTED: 'Promoted',
   MALFORMED_JSON: 'The request body is not valid JSON',
   VALIDATION_FAILED: 'Please correct the highlighted fields',
   IDEMPOTENCY_KEY_REQUIRED: 'An Idempotency-Key header is required for this request',
@@ -33,6 +34,7 @@ const en: Catalogue = {
   IDEMPOTENCY_IN_PROGRESS: 'This request is already being processed',
   RESOURCE_BUSY: 'Someone else is changing this right now, please try again',
   PAYLOAD_TOO_LARGE: 'The request is too large',
+  BATCH_TOO_LARGE: 'At most 500 students can be promoted at once',
   UNSUPPORTED_MEDIA_TYPE: 'Unsupported content type',
   IDEMPOTENCY_KEY_REUSED: 'This request key was already used for a different request',
   REFERENCE_INACTIVE: 'This choice is no longer available',
@@ -99,6 +101,7 @@ const en: Catalogue = {
   // Students (API design 10.6)
   ADMISSION_NO_TAKEN: 'Another active student of this Institution has this Admission ID',
   ROLL_NUMBER_TAKEN: 'Another student of this section has this roll number',
+  ALREADY_ENROLLED: 'The student is already in a class in that academic year',
   HAS_STUDENTS: 'Students are placed here, so it cannot be deactivated',
   SECTION_NOT_IN_CLASS: 'This section does not belong to the class',
   YEAR_NOT_ACTIVE: 'This academic year is not active',
@@ -107,6 +110,8 @@ const en: Catalogue = {
   GUARDIAN_LIMIT_REACHED: 'A student can have at most five guardians',
   LAST_GUARDIAN: 'A student must keep at least one guardian',
   NO_CURRENT_PLACEMENT: 'The student is not in a class this year',
+  TARGET_YEAR_NOT_AFTER_SOURCE: 'The new academic year must begin after the current one',
+  NOT_FINAL_CLASS: 'Only the last class of the Institution can be completed',
   // Files (API design 15)
   ALREADY_CONFIRMED: 'This file has already been confirmed',
   FILE_TOO_LARGE: 'The file is larger than 5 MB',
