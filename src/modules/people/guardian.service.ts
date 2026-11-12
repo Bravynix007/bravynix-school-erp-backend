@@ -227,14 +227,15 @@ export class GuardianService {
         throw AppException.businessRule(ErrorCode.LAST_GUARDIAN);
       }
       if (current.is_primary) throw AppException.businessRule(ErrorCode.PRIMARY_GUARDIAN_REQUIRED);
-      const row = await this.guardians.update(tx, id, {
-        status: 0,
-        ...updateStamp(principal.personId),
-      });
+      // The link count includes this link until the row changes, so ask before it does (as GDN-03 does).
       const sessionsEnded =
         current.user_id === null
           ? 0
           : await this.accounts.endParentSessionsIfLast(tx, current.user_id, now);
+      const row = await this.guardians.update(tx, id, {
+        status: 0,
+        ...updateStamp(principal.personId),
+      });
       await this.audit.record(tx, {
         action: 'guardian.removed',
         institutionId: row.institution_id,

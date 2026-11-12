@@ -705,6 +705,14 @@ describe('GuardianService.remove (GDN-04)', () => {
     expect(t.findStudent).toHaveBeenCalledWith(expect.anything(), 'student-1', true);
   });
 
+  it('counts the person’s links before the row changes, so a parent of two children is not signed out', async () => {
+    const t = build();
+    await t.service.remove(admin, 'guardian-1');
+    expect(t.endParentSessionsIfLast.mock.invocationCallOrder[0]).toBeLessThan(
+      t.update.mock.invocationCallOrder[0] ?? 0,
+    );
+  });
+
   it('ends no session and sends no mail for a guardian without a login', async () => {
     const t = build({ current: guardian({ user_id: null, email: null }) });
     await t.service.remove(admin, 'guardian-1');

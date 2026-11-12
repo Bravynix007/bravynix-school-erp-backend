@@ -212,45 +212,12 @@ export class AccountDirectory {
    * this Society. Runs in the caller's transaction, with the record locked.
    */
   async changeStaffEmail(tx: Tx, request: StaffEmailChangeRequest): Promise<StaffEmailChange> {
-    const email = request.email.toLowerCase();
-    await this.lockIdentities(tx);
-    const current = await this.accounts.findById(tx, request.userId, true);
-    if (!current) throw AppException.notFound();
-    if (current.email === email) return { kind: 'unchanged', person: linked(current, false) };
-
-    const existing = await this.accounts.findByEmail(tx, email);
-    if (existing) {
-      requireNotSelf(request.by, existing.id);
-      requireCanHoldRole(existing);
-      await request.vet(existing.id);
-      await this.requireSeparateRoles(tx, existing.id, RoleCode.TeacherStaff);
-      return this.moved(tx, request, current, linked(existing, false));
-    }
-    if (await this.holdsOnlyThisRecord(tx, request)) {
-      const { person, sessionsEnded } = await this.changeOwnEmail(
-        tx,
-        request.userId,
-        email,
-        request.by,
-        request.now,
-      );
-      return {
-        kind: 'edited',
-        person: linked(person, false),
-        previousEmail: current.email,
-        sessionsEnded,
-      };
-    }
-    const created = await this.accounts
-      .insertPending(
-        tx,
-        { email, firstName: request.names.firstName, lastName: request.names.lastName },
-        request.by,
-      )
-      .catch((error: unknown) => {
-        throw emailInUse(error);
-      });
-    return this.moved(tx, request, current, linked(created, true));
+    return this.changeLoginEmail(tx, request, {
+      roleCode: RoleCode.TeacherStaff,
+      refuseSelf: true,
+      holdsOnlyThis: () => this.holdsOnlyThisRecord(tx, request),
+      moved: (from, to) => this.moved(tx, request, from, to),
+    });
   }
 
   private async moved(
@@ -291,12 +258,49 @@ export class AccountDirectory {
    * other guardian link, dormant ones included. An email that belongs to a person moves the link to that person, once
    * they may hold a role, `vet` passes them and they are not a Super Admin. When the person holds anything else, a new
    * email makes a new Pending person and the link moves there; their other access stays. A link that moves ends the
-   * old person's parent sessions when it was their last link (`endParentSessionsIfLast`). Runs in the caller's transaction, with the guardian locked.
+   * old person's parent sessions when it was their last link (`endParentSessionsIfLast`). Runs in the caller's
+   * transaction, with the guardian locked.
    */
   async changeGuardianEmail(
     tx: Tx,
     request: GuardianEmailChangeRequest,
   ): Promise<GuardianEmailChange> {
+    return this.changeLoginEmail(tx, request, {
+      roleCode: RoleCode.StudentParent,
+      refuseSelf: false,
+      holdsOnlyThis: () => this.holdsOnlyThisLink(tx, request.userId),
+      moved: (from, to) => this.guardianMoved(tx, request, from, to),
+    });
+  }
+
+  /**
+   * The flow of a login email change that STF-13 and GDN-03 share (API design 6.6), in this order: the identity lock,
+   * the person read under lock, nothing to do for the same email, then the email that belongs to a person (the
+   * caller's `vet`, then the role-separation rule), the person's own email when this record or link is all they hold,
+   * or a new Pending person. What differs is passed in: whether the admin may not move the record to themselves, the
+   * role the person must be able to hold, the "holds only this" rule, and what a move does besides.
+   */
+  private async changeLoginEmail<Moved>(
+    tx: Tx,
+    request: {
+      userId: string;
+      email: string;
+      names: { firstName: string | null; lastName: string | null };
+      by: string;
+      now: Date;
+      vet: (personId: string) => Promise<void>;
+    },
+    rule: {
+      roleCode: RoleCode;
+      refuseSelf: boolean;
+      holdsOnlyThis: () => Promise<boolean>;
+      moved: (from: AccountRow, to: LinkedPerson) => Promise<Moved>;
+    },
+  ): Promise<
+    | { kind: 'unchanged'; person: LinkedPerson }
+    | { kind: 'edited'; person: LinkedPerson; previousEmail: string; sessionsEnded: number }
+    | Moved
+  > {
     const email = request.email.toLowerCase();
     await this.lockIdentities(tx);
     const current = await this.accounts.findById(tx, request.userId, true);
@@ -305,12 +309,13 @@ export class AccountDirectory {
 
     const existing = await this.accounts.findByEmail(tx, email);
     if (existing) {
+      if (rule.refuseSelf) requireNotSelf(request.by, existing.id);
       requireCanHoldRole(existing);
       await request.vet(existing.id);
-      await this.requireSeparateRoles(tx, existing.id, RoleCode.StudentParent);
-      return this.guardianMoved(tx, request, current, linked(existing, false));
+      await this.requireSeparateRoles(tx, existing.id, rule.roleCode);
+      return rule.moved(current, linked(existing, false));
     }
-    if (await this.holdsOnlyThisLink(tx, request.userId)) {
+    if (await rule.holdsOnlyThis()) {
       const { person, sessionsEnded } = await this.changeOwnEmail(
         tx,
         request.userId,
@@ -334,7 +339,7 @@ export class AccountDirectory {
       .catch((error: unknown) => {
         throw emailInUse(error);
       });
-    return this.guardianMoved(tx, request, current, linked(created, true));
+    return rule.moved(current, linked(created, true));
   }
 
   private async guardianMoved(
@@ -447,8 +452,8 @@ export class AccountDirectory {
 
   /**
    * No Super Admin, Owner or Admin grant, no staff record outside this Society and no guardian link: the account is
-   * this record's alone. Dormant access counts as held: a grant revoked for a reason a reactivation restores, and a record in a
-   * Society or Institution that is deactivated, come back with it.
+   * this record's alone. Dormant access counts as held: a grant revoked for a reason a reactivation restores, and a
+   * record in a Society or Institution that is deactivated, come back with it.
    */
   private async holdsOnlyThisRecord(tx: Tx, request: StaffEmailChangeRequest): Promise<boolean> {
     const holdsGrant = await this.accounts.holdsGrantOrRestorable(

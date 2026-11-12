@@ -14,12 +14,10 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { NotBlank } from '../../common/validation/not-blank.js';
-import { PhoneDto } from '../../common/validation/phone.dto.js';
+import { PHONE_NUMBER, PhoneDto } from '../../common/validation/phone.dto.js';
 import { VersionDto } from '../../common/validation/version.dto.js';
 import { WhenPresent } from '../../common/validation/when-present.js';
 import { GUARDIAN_RELATIONS } from './student.dto.js';
-
-const PHONE_NUMBER = /^\d{6,15}$/;
 
 /** The fields of GDN-03 that cannot be cleared: sent, they need a value. */
 class GuardianRequiredChangesDto {

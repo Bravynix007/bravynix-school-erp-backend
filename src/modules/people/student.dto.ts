@@ -22,7 +22,7 @@ import { AddressDto } from '../../common/validation/address.dto.js';
 import { IsCalendarDate } from '../../common/validation/calendar-date.js';
 import { LowerCaseUuid } from '../../common/validation/lower-case-uuid.js';
 import { NotBlank } from '../../common/validation/not-blank.js';
-import { PhoneDto } from '../../common/validation/phone.dto.js';
+import { PHONE_NUMBER, PhoneDto } from '../../common/validation/phone.dto.js';
 import { PlaceDto } from '../../common/validation/place.dto.js';
 import { VersionDto } from '../../common/validation/version.dto.js';
 import { WhenPresent } from '../../common/validation/when-present.js';
@@ -32,8 +32,6 @@ import { StudentIdentityDto } from './student-identity.dto.js';
 export const MAX_GUARDIANS = 5;
 /** 1 Father, 2 Mother, 3 Guardian, 4 Grandparent, 5 Sibling, 6 Other (DDD 9.6). */
 export const GUARDIAN_RELATIONS = [1, 2, 3, 4, 5, 6] as const;
-
-const PHONE_NUMBER = /^\d{6,15}$/;
 
 /** A student's address: the lines and the place from the platform masters (API design 7.3). */
 export class StudentAddressDto extends IntersectionType(AddressDto, PlaceDto) {}

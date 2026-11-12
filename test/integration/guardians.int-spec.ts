@@ -467,6 +467,25 @@ describe('guardians: list, add, edit and remove', () => {
         expect(JSON.stringify(entries)).not.toContain('parent.test');
       });
 
+      it('counts only the active links: a person whose other link was removed has their own email changed', async () => {
+        const meena = (await listed(diya))[1]!;
+        const [person] = await usersWith(meena.email!);
+        const sibling = await admit(place);
+        const other = await add(sibling, guardian({ email: meena.email }));
+        expect(other.status).toBe(201);
+        expect((await remove(other.body.data.id as string)).status).toBe(200);
+        const address = mail();
+        expect((await edit(meena.id, { version: 1, email: address })).status).toBe(200);
+        expect((await usersWith(address)).map((u) => u.id)).toEqual([person!.id]);
+        expect((await rowOf(meena.id)).user_id).toBe(person!.id);
+        expect(await audit(meena.id)).toContainEqual(
+          expect.objectContaining({
+            action: 'guardian.email_changed',
+            after: expect.objectContaining({ outcome: 'edited' }) as unknown,
+          }),
+        );
+      });
+
       it('moves the link to the person the email belongs to, and the old person is told and keeps the account', async () => {
         const meena = (await listed(diya))[1]!;
         const target = await admit(place, { guardians: [primaryOf()] });
@@ -665,19 +684,32 @@ describe('guardians: list, add, edit and remove', () => {
       expect(await listed(diya)).toHaveLength(1);
     });
 
-    it('ends the parent sessions when it was their last child, and leaves a parent who has another child signed in', async () => {
+    it('keeps a parent who still guards another child signed in, and ends the sessions of the last link removed', async () => {
+      // Ravi guards Diya (with Meena as the primary) and her sibling (with a second guardian as the primary).
       const sibling = await admit(place, { guardians: [primaryOf({ email: ravi.email })] });
-      expect(sibling.id).toBeDefined();
+      const [head, meena] = await listed(diya);
+      expect((await edit(meena!.id, { version: 1, isPrimary: true })).status).toBe(200);
+      const second = await add(sibling, guardian({ email: mail(), isPrimary: true }));
+      expect(second.status).toBe(201);
+      const session = await parentSession(ravi.email);
+      const [siblingLink] = (await links(ravi.email)).filter((l) => l.student_id === sibling.id);
+
+      // Removing the link at Diya leaves the one at the sibling: the parent stays signed in.
+      expect((await remove(head!.id)).status).toBe(200);
+      expect(await stillSignedIn(session)).toBe(true);
+      expect((await audit(head!.id)).at(-1)?.after).toMatchObject({ sessionsEnded: 0 });
+
+      // Removing the last link ends the parent sessions.
+      expect((await remove(siblingLink!.id)).status).toBe(200);
+      expect(await stillSignedIn(session)).toBe(false);
+      expect((await audit(siblingLink!.id)).at(-1)?.after).toMatchObject({ sessionsEnded: 1 });
+    });
+
+    it('ends the parent sessions of a guardian who held only this child', async () => {
       const meena = (await listed(diya))[1]!;
       const lone = await parentSession(meena.email!);
-      const busy = await parentSession(ravi.email);
-      await add(diya, guardian({ email: ravi.email.replace('@', '+x@') }));
-      await edit((await listed(diya))[0]!.id, { version: 1, isPrimary: false }).catch(
-        () => undefined,
-      );
       await remove(meena.id);
       expect(await stillSignedIn(lone)).toBe(false);
-      expect(await stillSignedIn(busy)).toBe(true);
     });
 
     it('lets the person be added again later, and counts a removed guardian no more: the platform team may then take the email', async () => {
@@ -740,5 +772,42 @@ describe('guardians: list, add, edit and remove', () => {
       async (tx) => (await sql`select id from student_guardians`.execute(tx)).rows.length,
     );
     expect(seen).toBe(2);
+  });
+
+  describe('app_guardian_link_count', () => {
+    it('counts the active links of a person in any Society, and puts the caller’s settings back', async () => {
+      const [person] = await usersWith(ravi.email);
+      const settings = sql<{ role: string; person: string }>`
+        select current_setting('app.role_code', true) as role,
+          current_setting('app.person_id', true) as person`;
+      const asked = (tenant: Parameters<DatabaseService['transaction']>[0]) =>
+        database.transaction(tenant, async (tx) => {
+          const before = (await settings.execute(tx)).rows[0];
+          const count = (
+            await sql<{
+              n: number;
+            }>`select app_guardian_link_count(${person!.id}::uuid) as n`.execute(tx)
+          ).rows[0]!.n;
+          return { count, back: (await settings.execute(tx)).rows[0], before };
+        });
+      const otherSociety = await kit.society(admin);
+      const own = await asked({
+        personId: owner.person,
+        roleCode: 2,
+        societyId,
+        institutionIds: [first],
+      });
+      expect(own.count).toBe(1);
+      expect(own.back).toEqual(own.before);
+      // Another Society's tenant counts the same links, and the caller's settings are still put back.
+      const abroad = await asked({
+        personId: owner.person,
+        roleCode: 2,
+        societyId: otherSociety,
+        institutionIds: [],
+      });
+      expect(abroad.count).toBe(1);
+      expect(abroad.back).toEqual(abroad.before);
+    });
   });
 });

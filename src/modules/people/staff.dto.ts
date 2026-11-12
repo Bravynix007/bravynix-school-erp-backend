@@ -25,7 +25,7 @@ import { AddressDto } from '../../common/validation/address.dto.js';
 import { BooleanQuery } from '../../common/validation/boolean-query.js';
 import { IsCalendarDate } from '../../common/validation/calendar-date.js';
 import { LowerCaseUuid } from '../../common/validation/lower-case-uuid.js';
-import { PhoneDto } from '../../common/validation/phone.dto.js';
+import { PHONE_NUMBER, PhoneDto } from '../../common/validation/phone.dto.js';
 import { PlaceDto } from '../../common/validation/place.dto.js';
 import { VersionDto } from '../../common/validation/version.dto.js';
 import { WhenPresent } from '../../common/validation/when-present.js';
@@ -40,8 +40,6 @@ export const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'] a
 export const GENDERS = [1, 2, 3] as const;
 /** 1 Full time, 2 Part time, 3 Visiting, 4 Contract (DDD 9.5). */
 export const EMPLOYMENT_TYPES = [1, 2, 3, 4] as const;
-
-const PHONE_NUMBER = /^\d{6,15}$/;
 
 /** A person's address: the lines and the place from the platform masters (API design 7.3). Each part clears with `null`. */
 export class StaffAddressDto extends IntersectionType(AddressDto, PlaceDto) {}

@@ -883,6 +883,7 @@ describe('AccountDirectory.changeGuardianEmail', () => {
   it('takes the identity lock before it reads anyone', async () => {
     const t = change();
     await t.directory.changeGuardianEmail(tx, guardianRequest());
+    expect(t.lockRoleSeparation).toHaveBeenCalledWith(tx);
     const lockedAt = t.lockRoleSeparation.mock.invocationCallOrder[0] ?? 0;
     expect(t.findById).toHaveBeenCalledWith(tx, 'user-1', true);
     expect(lockedAt).toBeLessThan(t.findById.mock.invocationCallOrder[0] ?? 0);
