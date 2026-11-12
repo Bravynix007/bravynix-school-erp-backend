@@ -2,6 +2,9 @@ import { Global, Module } from '@nestjs/common';
 import { AcademicSetupModule, SectionStudents, TeachingStaff } from '../academic-setup/index.js';
 import { FileReaders, FilesModule } from '../../platform/files/index.js';
 import { MastersModule } from '../../platform/masters/index.js';
+import { AchievementController } from './achievement.controller.js';
+import { AchievementRepository } from './achievement.repository.js';
+import { AchievementService } from './achievement.service.js';
 import { AssignmentRepository } from './assignment.repository.js';
 import { AssignmentService } from './assignment.service.js';
 import { DocumentController } from './document.controller.js';
@@ -53,6 +56,7 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
     StudentController,
     StudentIdentityController,
     GuardianController,
+    AchievementController,
   ],
   providers: [
     StaffRepository,
@@ -65,6 +69,8 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
     StaffIdentityService,
     DocumentRepository,
     DocumentService,
+    AchievementRepository,
+    AchievementService,
     StudentRepository,
     StudentContext,
     StudentService,

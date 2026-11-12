@@ -4,12 +4,12 @@ import { ApiResult } from '../../common/http/api-result.js';
 import { AppException } from '../../common/http/app-exception.js';
 import { ErrorCode } from '../../common/http/error-codes.js';
 import { pageMeta, pageOffset, parseSort } from '../../common/pagination/pagination.js';
-import { DatabaseService } from '../../platform/database/index.js';
+import { DatabaseService, type Tx } from '../../platform/database/index.js';
 import { ScopeService } from '../../platform/tenancy/index.js';
 import { AcademicYearDirectory, TeachingStaff } from '../academic-setup/index.js';
 import { StudentContext } from './student-context.js';
 import type { ListStudentsQueryDto } from './student.dto.js';
-import { StudentRepository } from './student.repository.js';
+import { StudentRepository, type PlacedRow, type StudentRow } from './student.repository.js';
 import { studentClassroom, type StudentClassroomResource } from './student.resource.js';
 
 /** A teacher sorts by what the classroom view shows. */
@@ -88,13 +88,41 @@ export class StudentClassroomService {
     return this.database.transaction(context.tenant, async (tx) => {
       const row = await this.students.find(tx, id);
       if (!row) throw AppException.notFound();
-      const placed = row.status === 1 ? await this.students.placedNow(tx, id) : undefined;
-      const own = await this.teaching.ownSectionIds(tx, principal.personId, context.institutionId);
-      const current = await this.years.currentId(tx, context.institutionId);
-      if (!placed || !own.has(placed.section_id) || placed.academic_year_id !== current) {
-        throw AppException.forbidden(ErrorCode.NOT_ASSIGNED);
-      }
+      const placed = await this.ownPlacement(tx, principal, context.institutionId, row);
       return studentClassroom(row, placed);
     });
+  }
+
+  /**
+   * The current placement of a student the caller leads or teaches this year, for the classroom view. 403
+   * `NOT_ASSIGNED` for a deactivated student, one with no placement, one in another section and one placed in another
+   * year than the current.
+   */
+  async ownPlacement(
+    tx: Tx,
+    principal: Principal,
+    institutionId: string,
+    row: StudentRow,
+  ): Promise<PlacedRow> {
+    const placed = row.status === 1 ? await this.students.placedNow(tx, row.id) : undefined;
+    return this.requireOwnSection(tx, principal, institutionId, placed);
+  }
+
+  /**
+   * The placement must be in a section the caller leads or teaches, in the Institution's current year (a star is given
+   * for the placement the caller chose, not the latest one); 403 `NOT_ASSIGNED` otherwise.
+   */
+  async requireOwnSection(
+    tx: Tx,
+    principal: Principal,
+    institutionId: string,
+    placed: PlacedRow | undefined,
+  ): Promise<PlacedRow> {
+    const own = await this.teaching.ownSectionIds(tx, principal.personId, institutionId);
+    const current = await this.years.currentId(tx, institutionId);
+    if (!placed || !own.has(placed.section_id) || placed.academic_year_id !== current) {
+      throw AppException.forbidden(ErrorCode.NOT_ASSIGNED);
+    }
+    return placed;
   }
 }
