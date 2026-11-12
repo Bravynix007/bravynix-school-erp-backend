@@ -8,6 +8,7 @@ import type { InstitutionContext, ScopeService } from '../../platform/tenancy/in
 import type { ClassRepository, ClassRow } from './class.repository.js';
 import type { SectionRepository, SectionRow, SectionView } from './section.repository.js';
 import { SectionService } from './section.service.js';
+import type { SectionStudents } from './section-students.js';
 import type { ClassTeacherRef, TeachingStaff } from './teaching-staff.js';
 
 const owner = {
@@ -118,6 +119,9 @@ function build(current: SectionRow | null = row(), parent: ClassRow | null = cla
   const classTeachers = vi
     .fn<TeachingStaff['classTeachers']>()
     .mockResolvedValue(new Map([['section-1', lead]]));
+  const countsOf = vi
+    .fn<SectionStudents['countsOf']>()
+    .mockResolvedValue(new Map([['section-1', 12]]));
   const record = vi.fn<AuditService['record']>().mockResolvedValue('audit-1');
   const service = new SectionService(
     { transaction } as unknown as DatabaseService,
@@ -129,12 +133,14 @@ function build(current: SectionRow | null = row(), parent: ClassRow | null = cla
       describe: vi.fn<PersonDirectory['describe']>().mockResolvedValue(new Map()),
     } as unknown as PersonDirectory,
     { ownSectionIds, classTeachers } as unknown as TeachingStaff,
+    { countsOf } as unknown as SectionStudents,
     { record } as unknown as AuditService,
   );
   return {
     service,
     ownSectionIds,
     classTeachers,
+    countsOf,
     active,
     insert,
     update,
@@ -152,10 +158,18 @@ describe('SectionService', () => {
       const t = build();
       const result = await t.service.list(owner, 'class-1');
       expect(result.data).toEqual([
-        expect.objectContaining({ id: 'section-1', displayName: 'A', currentStudentCount: null }),
+        expect.objectContaining({ id: 'section-1', displayName: 'A', currentStudentCount: 12 }),
       ]);
       expect(t.active).toHaveBeenCalledWith(expect.anything(), 'class-1', undefined);
       expect(t.ownSectionIds).not.toHaveBeenCalled();
+    });
+
+    it('shows how many students sit in each section, 0 for one with none', async () => {
+      const t = build();
+      t.active.mockResolvedValue([viewOf(row()), viewOf(row({ id: 'section-2' }))]);
+      const result = await t.service.list(owner, 'class-1');
+      expect(result.data.map((section) => section.currentStudentCount)).toEqual([12, 0]);
+      expect(t.countsOf).toHaveBeenCalledWith(expect.anything(), ['section-1', 'section-2']);
     });
 
     it('shows the class teacher of the current year on each section, and null for a section with none', async () => {
@@ -316,12 +330,24 @@ describe('SectionService', () => {
   describe('deactivate (SEC-04)', () => {
     it('deactivates the section and audits it', async () => {
       const t = build();
+      t.countsOf.mockResolvedValue(new Map());
       expect(await t.service.deactivate(owner, 'section-1')).toEqual({
         id: 'section-1',
         status: 0,
       });
       expect(t.update.mock.calls[0]![2]).toMatchObject({ status: 0 });
       expect(t.record.mock.calls[0]![1]).toMatchObject({ action: 'section.deactivated' });
+    });
+
+    it('is refused with 409 HAS_STUDENTS while students sit in it, and writes nothing', async () => {
+      const t = build();
+      expect(await fail(t.service.deactivate(owner, 'section-1'))).toMatchObject({
+        status: 409,
+        code: 'HAS_STUDENTS',
+      });
+      expect(t.countsOf).toHaveBeenCalledWith(expect.anything(), ['section-1']);
+      expect(t.update).not.toHaveBeenCalled();
+      expect(t.record).not.toHaveBeenCalled();
     });
 
     it('is 404 for an unknown or already deactivated section', async () => {

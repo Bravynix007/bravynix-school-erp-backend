@@ -23,6 +23,8 @@ describe('StudentRepository.page', () => {
   it('reads nothing when there is no Institution or no status to look in', async () => {
     expect(await page({ institutionIds: [] })).toEqual([]);
     expect(await page({ statuses: [] })).toEqual([]);
+    expect(await page({ inSectionIds: [] })).toEqual([]);
+    expect(await page({ inYearIds: [] })).toEqual([]);
     const { tx } = recorder();
     expect(await repository.page(tx, filter({ institutionIds: [] }), [], 10, 0)).toEqual({
       rows: [],
@@ -39,6 +41,14 @@ describe('StudentRepository.page', () => {
     }
     expect(list!.sql).toMatch(/limit \$\d+ offset \$\d+$/);
     expect(count!.sql).toContain('count(*) as "total"');
+  });
+
+  it('keeps to the sections given, in the list and in the count', async () => {
+    const [list, count] = await page({ inSectionIds: ['section-1', 'section-2'] });
+    for (const query of [list!, count!]) {
+      expect(query.sql).toContain('"pl"."section_id" in (');
+      expect(query.parameters).toEqual(expect.arrayContaining(['section-1', 'section-2']));
+    }
   });
 
   it('shows the latest placement of the student, or the one of the year asked for', async () => {
@@ -69,6 +79,19 @@ describe('StudentRepository.page', () => {
     expect(list!.sql).toContain('"students"."search_text" like $5');
     expect(list!.sql).toContain('lower(pl.roll_number) like $6');
     expect(list!.parameters.slice(4, 6)).toEqual(['%50\\%\\_x%', '%50\\%\\_x%']);
+  });
+
+  it('searches only the name and roll number for the classroom view, never the Admission ID', async () => {
+    const [list] = await page({ q: 'adm', searchNameAndRollOnly: true });
+    expect(list!.sql).not.toContain('search_text');
+    expect(list!.sql).toContain(
+      "lower(students.first_name || ' ' || coalesce(students.last_name, '')) like $5",
+    );
+  });
+
+  it('keeps the placement to the years given', async () => {
+    const [list] = await page({ inYearIds: ['year-1'] });
+    expect(list!.sql).toContain('"p"."academic_year_id" in ($1)');
   });
 
   it.each([
@@ -139,5 +162,16 @@ describe('StudentRepository', () => {
       '"academic_year_id" = $1 and "section_id" = $2 and "end_date" is null',
     );
     expect(queries[0]!.parameters).toEqual(['year-1', 'section-1']);
+  });
+
+  it('counts the open placements of each section, in any year, and leaves out a section with none', async () => {
+    const { tx, queries } = recorder();
+    await repository.sectionCounts(tx, ['section-1', 'section-2']).catch(() => undefined);
+    expect(queries[0]!.sql).toContain('"section_id" in ($1, $2) and "end_date" is null');
+    expect(queries[0]!.sql).toContain('group by "section_id"');
+    expect(queries[0]!.parameters).toEqual(['section-1', 'section-2']);
+    const none = recorder();
+    expect(await repository.sectionCounts(none.tx, [])).toEqual(new Map());
+    expect(none.queries).toEqual([]);
   });
 });

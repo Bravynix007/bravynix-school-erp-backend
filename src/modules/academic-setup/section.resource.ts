@@ -9,8 +9,7 @@ import type { ClassTeacherRef } from './teaching-staff.js';
 
 /**
  * One section as the API shows it (API design 10.4j). The class teacher is the one of the Institution's current
- * year, or `null`. The student count needs the Students slice (Phase 4): until then it is `null`, so the screens can
- * already read the final shape.
+ * year, or `null`; the student count is how many students sit in the section now.
  */
 export interface SectionResource extends AuthorStamps {
   id: string;
@@ -19,7 +18,7 @@ export interface SectionResource extends AuthorStamps {
   predefinedSection: NamedRef;
   displayName: string;
   capacity: number | null;
-  currentStudentCount: null;
+  currentStudentCount: number;
   classTeacher: ClassTeacherRef | null;
   status: number;
   version: number;
@@ -29,6 +28,7 @@ export function sectionResource(
   row: SectionView,
   people: ReadonlyMap<string, AuthorRef>,
   classTeacher: ClassTeacherRef | null,
+  currentStudentCount: number,
 ): SectionResource {
   return {
     id: row.id,
@@ -41,7 +41,7 @@ export function sectionResource(
     },
     displayName: row.display_name,
     capacity: row.capacity,
-    currentStudentCount: null,
+    currentStudentCount,
     classTeacher,
     status: row.status,
     version: row.version,

@@ -35,9 +35,12 @@ export class SectionDirectory {
     if (section.status === 0) throw AppException.referenceInactive(field);
   }
 
-  /** The section as a placement sees it, or `undefined` when the caller cannot see it. */
+  /**
+   * The section as a placement sees it, or `undefined` when the caller cannot see it. The section is held open until
+   * the transaction ends, so it cannot be deactivated between this check and the placement (SEC-04, CLS-05).
+   */
   async placeOf(tx: Tx, id: string): Promise<SectionPlace | undefined> {
-    const section = await this.sections.find(tx, id);
+    const section = await this.sections.keptOpen(tx, id);
     return (
       section && {
         classId: section.class_id,

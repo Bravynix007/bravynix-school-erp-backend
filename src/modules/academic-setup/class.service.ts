@@ -3,6 +3,7 @@ import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { RoleCode } from '../../common/auth/roles.js';
 import { ApiResult } from '../../common/http/api-result.js';
 import { AppException } from '../../common/http/app-exception.js';
+import { ErrorCode } from '../../common/http/error-codes.js';
 import { authorIdsOf } from '../../common/http/author-stamps.js';
 import { changedColumns } from '../../common/http/changed-columns.js';
 import { newId } from '../../common/ids/ids.js';
@@ -33,6 +34,7 @@ import {
   translateClassError,
 } from './class.rules.js';
 import { SectionRepository } from './section.repository.js';
+import { SectionStudents } from './section-students.js';
 import { TeachingStaff } from './teaching-staff.js';
 import { classAuditView, sectionAuditEntry, sectionAuditView } from './structure.audit.js';
 import { institutionOfActive } from './row-context.js';
@@ -53,6 +55,7 @@ export class ClassService {
     private readonly scope: ScopeService,
     private readonly people: PersonDirectory,
     private readonly teaching: TeachingStaff,
+    private readonly students: SectionStudents,
     private readonly audit: AuditService,
   ) {}
 
@@ -120,13 +123,22 @@ export class ClassService {
 
   /**
    * CLS-05: deactivates the class and, with it, its active sections (a section cannot outlive its class); nothing
-   * is deleted, and the names are free again. Phase 4 refuses it while students are placed (`HAS_STUDENTS`).
+   * is deleted, and the names are free again. 409 `HAS_STUDENTS` while students sit in any of its sections: the
+   * sections are locked first, so nobody can be placed in one of them between the count and the change.
    */
   async deactivate(principal: Principal, id: string): Promise<{ id: string; status: 0 }> {
     const context = await this.contextOf(principal, id);
     await this.database.transaction(context.tenant, async (tx) => {
       const current = await this.lockedActive(tx, id);
-      for (const section of await this.sections.lockedActive(tx, id)) {
+      const open = await this.sections.lockedActive(tx, id);
+      const counts = await this.students.countsOf(
+        tx,
+        open.map((section) => section.id),
+      );
+      if ([...counts.values()].some((count) => count > 0)) {
+        throw AppException.conflict(ErrorCode.HAS_STUDENTS);
+      }
+      for (const section of open) {
         const closed = await this.sections.update(tx, section.id, {
           status: 0,
           ...updateStamp(principal.personId),

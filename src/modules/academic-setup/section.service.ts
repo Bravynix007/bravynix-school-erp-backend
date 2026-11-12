@@ -25,7 +25,14 @@ import { SectionRepository, type SectionRow, type SectionView } from './section.
 import { sectionResource, type SectionResource } from './section.resource.js';
 import { sectionAuditEntry, sectionAuditView } from './structure.audit.js';
 import { institutionOfActive } from './row-context.js';
+import { SectionStudents } from './section-students.js';
 import { TeachingStaff, type ClassTeacherRef } from './teaching-staff.js';
+
+/** What a section list shows besides the rows themselves. */
+interface SectionExtras {
+  classTeachers: ReadonlyMap<string, ClassTeacherRef>;
+  counts: ReadonlyMap<string, number>;
+}
 
 /**
  * SEC-01 to SEC-04 (API design 10.4j): the sections of a class. Who may do what is the same as for classes, and
@@ -42,6 +49,7 @@ export class SectionService {
     private readonly scope: ScopeService,
     private readonly people: PersonDirectory,
     private readonly teaching: TeachingStaff,
+    private readonly students: SectionStudents,
     private readonly audit: AuditService,
   ) {}
 
@@ -52,16 +60,16 @@ export class SectionService {
    */
   async list(principal: Principal, classId: string): Promise<ApiResult<SectionResource[]>> {
     const context = await this.classContext(principal, classId);
-    const { views, classTeachers } = await this.database.transaction(context.tenant, async (tx) => {
+    const { views, extras } = await this.database.transaction(context.tenant, async (tx) => {
       const own =
         principal.roleCode === RoleCode.TeacherStaff
           ? [...(await this.teaching.ownSectionIds(tx, principal.personId, context.institutionId))]
           : undefined;
       const found = own?.length === 0 ? [] : await this.sections.active(tx, classId, own);
       if (own && found.length === 0) throw AppException.forbidden(ErrorCode.NOT_ASSIGNED);
-      return { views: found, classTeachers: await this.classTeachersOf(tx, context, found) };
+      return { views: found, extras: await this.extrasOf(tx, context, found) };
     });
-    return ApiResult.list(await this.resources(views, classTeachers), null);
+    return ApiResult.list(await this.resources(views, extras), null);
   }
 
   /** SEC-02: 409 `DUPLICATE` on `predefinedSectionId` or `displayName` when an active section of the class has it. */
@@ -93,14 +101,14 @@ export class SectionService {
       .catch((error: unknown) => {
         throw translateSectionError(error);
       });
-    // A section that was just made has no class teacher.
-    return (await this.resources([view], new Map()))[0]!;
+    // A section that was just made has no class teacher and no students.
+    return (await this.resources([view], { classTeachers: new Map(), counts: new Map() }))[0]!;
   }
 
   /** SEC-03: `version` first; a request that changes nothing writes nothing. A deactivated section is 404. */
   async update(principal: Principal, id: string, body: UpdateSectionDto): Promise<SectionResource> {
     const context = await this.contextOf(principal, id);
-    const { view, classTeachers } = await this.database
+    const { view, extras } = await this.database
       .transaction(context.tenant, async (tx) => {
         const current = await this.lockedActive(tx, id);
         requireVersion(current, body.version);
@@ -119,19 +127,24 @@ export class SectionService {
           });
         }
         const updated = await this.sections.viewOf(tx, id);
-        return { view: updated, classTeachers: await this.classTeachersOf(tx, context, [updated]) };
+        return { view: updated, extras: await this.extrasOf(tx, context, [updated]) };
       })
       .catch((error: unknown) => {
         throw translateSectionError(error);
       });
-    return (await this.resources([view], classTeachers))[0]!;
+    return (await this.resources([view], extras))[0]!;
   }
 
-  /** SEC-04: deactivates; nothing is deleted, and the name is free again. Phase 4 refuses it while students are placed. */
+  /**
+   * SEC-04: deactivates; nothing is deleted, and the name is free again. 409 `HAS_STUDENTS` while students sit in it:
+   * the section is locked first, so nobody can be placed in it between the count and the change.
+   */
   async deactivate(principal: Principal, id: string): Promise<{ id: string; status: 0 }> {
     const context = await this.contextOf(principal, id);
     await this.database.transaction(context.tenant, async (tx) => {
       const current = await this.lockedActive(tx, id);
+      const counts = await this.students.countsOf(tx, [id]);
+      if ((counts.get(id) ?? 0) > 0) throw AppException.conflict(ErrorCode.HAS_STUDENTS);
       const updated = await this.sections.update(tx, id, {
         status: 0,
         ...updateStamp(principal.personId),
@@ -165,27 +178,33 @@ export class SectionService {
     return found;
   }
 
-  /** Who leads each of these sections in the Institution's current year. */
-  private async classTeachersOf(
+  /** Who leads each of these sections in the Institution's current year, and how many students sit in them. */
+  private async extrasOf(
     tx: Tx,
     context: InstitutionContext,
     views: readonly SectionView[],
-  ): Promise<ReadonlyMap<string, ClassTeacherRef>> {
-    return views.length === 0
-      ? new Map()
-      : this.teaching.classTeachers(
-          tx,
-          context.institutionId,
-          views.map((view) => view.id),
-        );
+  ): Promise<SectionExtras> {
+    const ids = views.map((view) => view.id);
+    if (ids.length === 0) return { classTeachers: new Map(), counts: new Map() };
+    return {
+      classTeachers: await this.teaching.classTeachers(tx, context.institutionId, ids),
+      counts: await this.students.countsOf(tx, ids),
+    };
   }
 
   private async resources(
     views: readonly SectionView[],
-    classTeachers: ReadonlyMap<string, ClassTeacherRef>,
+    extras: SectionExtras,
   ): Promise<SectionResource[]> {
     const people = await this.people.describe(authorIdsOf(views));
-    return views.map((view) => sectionResource(view, people, classTeachers.get(view.id) ?? null));
+    return views.map((view) =>
+      sectionResource(
+        view,
+        people,
+        extras.classTeachers.get(view.id) ?? null,
+        extras.counts.get(view.id) ?? 0,
+      ),
+    );
   }
 
   private record(

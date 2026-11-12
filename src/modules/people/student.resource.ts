@@ -76,6 +76,22 @@ export interface StudentSummary {
   version: number;
 }
 
+/**
+ * A student as a teacher sees them, the classroom view (API design 6.4, D7): the name, photo, roll number, class and
+ * section, gender, date of birth and blood group, and nothing else.
+ */
+export interface StudentClassroomResource {
+  id: string;
+  institutionId: string;
+  firstName: string;
+  lastName: string | null;
+  photoFileId: string | null;
+  gender: number | null;
+  dateOfBirth: string | null;
+  bloodGroup: string | null;
+  placement: { academicYearId: string; classId: string; sectionId: string; rollNumber: string };
+}
+
 const placementResource = (placed: PlacedRow): StudentPlacementResource => ({
   enrolmentId: placed.enrolment_id,
   academicYearId: placed.academic_year_id,
@@ -151,5 +167,24 @@ export function studentResource(
     status: row.status,
     version: row.version,
     ...authorStamps(row, people),
+  };
+}
+
+export function studentClassroom(row: StudentRow, placed: PlacedRow): StudentClassroomResource {
+  return {
+    id: row.id,
+    institutionId: row.institution_id,
+    firstName: row.first_name,
+    lastName: row.last_name,
+    photoFileId: row.photo_file_id,
+    gender: row.gender,
+    dateOfBirth: row.date_of_birth,
+    bloodGroup: row.blood_group,
+    placement: {
+      academicYearId: placed.academic_year_id,
+      classId: placed.class_id,
+      sectionId: placed.section_id,
+      rollNumber: placed.roll_number,
+    },
   };
 }

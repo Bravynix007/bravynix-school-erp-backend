@@ -45,7 +45,7 @@ interface SectionBody {
   predefinedSection: Entry;
   displayName: string;
   capacity: number | null;
-  currentStudentCount: null;
+  currentStudentCount: number;
   classTeacher: null;
   status: number;
   version: number;
@@ -661,7 +661,7 @@ describe('CLS-01 to CLS-05 and SEC-01 to SEC-04 classes and sections (PRD 7.3, A
         predefinedSection: { code: 'A' },
         displayName: 'A',
         capacity: null,
-        currentStudentCount: null,
+        currentStudentCount: 0,
         classTeacher: null,
         status: 1,
         version: 1,

@@ -1,4 +1,5 @@
 import type { Principal } from '../../common/auth/access-token-verifier.js';
+import { ApiResult } from '../../common/http/api-result.js';
 import { AppException } from '../../common/http/app-exception.js';
 import { FixedClock } from '../../common/time/clock.js';
 import type { AuditService } from '../../platform/audit/index.js';
@@ -8,6 +9,7 @@ import type { AccountDirectory, PersonDirectory } from '../../platform/identity/
 import type { MasterReferences } from '../../platform/masters/index.js';
 import type { InstitutionDirectory, ScopeService } from '../../platform/tenancy/index.js';
 import type { AcademicYearDirectory, SectionDirectory } from '../academic-setup/index.js';
+import type { StudentClassroomService } from './student-classroom.service.js';
 import { StudentContext } from './student-context.js';
 import type {
   CreateStudentDto,
@@ -210,6 +212,12 @@ function build(found: StudentRow | null = row()) {
     page,
   } as unknown as StudentRepository;
   const scopeService = { requireInstitution, forPrincipal } as unknown as ScopeService;
+  const classroomList = vi
+    .fn<StudentClassroomService['list']>()
+    .mockResolvedValue(ApiResult.list([], null));
+  const classroomGet = vi
+    .fn<StudentClassroomService['get']>()
+    .mockResolvedValue({ id: 'student-1' } as Awaited<ReturnType<StudentClassroomService['get']>>);
   const service = new StudentService(
     database,
     repository,
@@ -240,6 +248,7 @@ function build(found: StudentRow | null = row()) {
     } as unknown as InstitutionDirectory,
     { record } as unknown as AuditService,
     new FixedClock('2026-11-11T04:30:00.000Z'),
+    { list: classroomList, get: classroomGet } as unknown as StudentClassroomService,
   );
   return {
     service,
@@ -264,6 +273,8 @@ function build(found: StudentRow | null = row()) {
     placeOf,
     requireInstitution,
     forPrincipal,
+    classroomList,
+    classroomGet,
     linkGuardian,
     welcomeAs,
     record,
@@ -602,6 +613,32 @@ describe('StudentService', () => {
       >);
       await t.service.list(owner, query());
       expect(t.page.mock.calls[0]![1].institutionIds).toEqual([]);
+    });
+  });
+
+  describe('the classroom view for a Teacher or Staff member (STU-01, STU-03)', () => {
+    const teacher = { ...owner, personId: 'teacher-1', roleCode: 4 } as Principal;
+
+    it('hands the list to the classroom view, and reads nothing as an admin would', async () => {
+      const t = build();
+      await t.service.list(teacher, query());
+      expect(t.classroomList).toHaveBeenCalledWith(teacher, query());
+      expect(t.page).not.toHaveBeenCalled();
+    });
+
+    it('hands the profile to the classroom view too', async () => {
+      const t = build();
+      expect(await t.service.get(teacher, 'student-1')).toEqual({ id: 'student-1' });
+      expect(t.classroomGet).toHaveBeenCalledWith(teacher, 'student-1');
+      expect(t.guardians).not.toHaveBeenCalled();
+    });
+
+    it('does not use it for an admin', async () => {
+      const t = build();
+      await t.service.list(owner, query());
+      await t.service.get(owner, 'student-1');
+      expect(t.classroomList).not.toHaveBeenCalled();
+      expect(t.classroomGet).not.toHaveBeenCalled();
     });
   });
 

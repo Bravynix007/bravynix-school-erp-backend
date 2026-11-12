@@ -24,6 +24,7 @@ import { AccountDirectory, PersonDirectory } from '../../platform/identity/index
 import { MasterReferences, placeOf } from '../../platform/masters/index.js';
 import { InstitutionDirectory, ScopeService } from '../../platform/tenancy/index.js';
 import { AcademicYearDirectory, SectionDirectory } from '../academic-setup/index.js';
+import { StudentClassroomService } from './student-classroom.service.js';
 import { StudentContext } from './student-context.js';
 import {
   STUDENT_SORT_FIELDS,
@@ -44,6 +45,7 @@ import {
 import {
   studentResource,
   studentSummary,
+  type StudentClassroomResource,
   type StudentResource,
   type StudentSummary,
 } from './student.resource.js';
@@ -82,8 +84,9 @@ const SECTION_OVER_CAPACITY = 'SECTION_OVER_CAPACITY';
 /**
  * STU-01 to STU-05 and STU-08 (API design 9.6): the students of an Institution, each with the class and section they
  * sit in and their guardians. Society Owners reach every active Institution of their Society and Institution Admins
- * their own; a student whose Institution the caller does not reach is 404, never 403 (SDD 12.4). The teacher's
- * classroom view and the identity numbers arrive in the slices after this one.
+ * their own; a student whose Institution the caller does not reach is 404, never 403 (SDD 12.4). A Teacher or Staff
+ * member gets the classroom view of their own sections' students (`StudentClassroomService`). The identity numbers
+ * arrive in a later slice.
  */
 @Injectable()
 export class StudentService {
@@ -101,6 +104,7 @@ export class StudentService {
     private readonly institutions: InstitutionDirectory,
     private readonly audit: AuditService,
     private readonly clock: Clock,
+    private readonly classroom: StudentClassroomService,
   ) {}
 
   /**
@@ -254,7 +258,8 @@ export class StudentService {
   async list(
     principal: Principal,
     query: ListStudentsQueryDto,
-  ): Promise<ApiResult<StudentSummary[]>> {
+  ): Promise<ApiResult<StudentSummary[] | StudentClassroomResource[]>> {
+    if (principal.roleCode === RoleCode.TeacherStaff) return this.classroom.list(principal, query);
     const scope = await this.scope.forPrincipal(principal);
     const institutionIds = query.institutionId
       ? [(await this.scope.requireInstitution(principal, query.institutionId)).institutionId]
@@ -280,7 +285,8 @@ export class StudentService {
   }
 
   /** STU-03: the profile; 404 for a student who is not at an Institution the caller reaches. */
-  async get(principal: Principal, id: string): Promise<StudentResource> {
+  async get(principal: Principal, id: string): Promise<StudentResource | StudentClassroomResource> {
+    if (principal.roleCode === RoleCode.TeacherStaff) return this.classroom.get(principal, id);
     const context = await this.context.of(principal, id);
     const found = await this.database.transaction(context.tenant, async (tx) => {
       const row = await this.students.find(tx, id);

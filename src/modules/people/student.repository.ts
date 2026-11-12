@@ -48,6 +48,12 @@ export interface StudentFilter {
   academicYearId?: string;
   classId?: string;
   sectionId?: string;
+  /** Only students whose placement is in one of these sections (a teacher's own); none listed is no student. */
+  inSectionIds?: readonly string[];
+  /** Only placements of these years (a teacher's current years); none listed is no student. */
+  inYearIds?: readonly string[];
+  /** Search the name and roll number only, never the Admission ID (the classroom view hides it). */
+  searchNameAndRollOnly?: boolean;
 }
 
 /** A student with the placement a list shows. */
@@ -181,6 +187,19 @@ export class StudentRepository {
     return Number(total);
   }
 
+  /** The students now in each of these sections, in any year: the open placements. A section with none is left out. */
+  async sectionCounts(tx: Tx, sectionIds: readonly string[]): Promise<Map<string, number>> {
+    if (sectionIds.length === 0) return new Map();
+    const rows = await tx
+      .selectFrom('student_section_placements')
+      .select(['section_id', (eb) => eb.fn.countAll<number>().as('total')])
+      .where('section_id', 'in', sectionIds)
+      .where('end_date', 'is', null)
+      .groupBy('section_id')
+      .execute();
+    return new Map(rows.map((row) => [row.section_id, Number(row.total)]));
+  }
+
   /** Students of the filter, each with the placement shown: the year named, else the latest. */
   private listed(tx: Tx, filter: StudentFilter) {
     return tx
@@ -194,6 +213,9 @@ export class StudentRepository {
             .whereRef('e.student_id', '=', 'students.id')
             .$if(filter.academicYearId !== undefined, (qb) =>
               qb.where('p.academic_year_id', '=', filter.academicYearId!),
+            )
+            .$if(filter.inYearIds !== undefined, (qb) =>
+              qb.where('p.academic_year_id', 'in', filter.inYearIds!),
             )
             .orderBy('p.start_date', 'desc')
             .orderBy('p.id', 'desc')
@@ -212,11 +234,18 @@ export class StudentRepository {
       ];
       if (filter.classId) conditions.push(eb('pl.class_id', '=', filter.classId));
       if (filter.sectionId) conditions.push(eb('pl.section_id', '=', filter.sectionId));
+      if (filter.inSectionIds) conditions.push(eb('pl.section_id', 'in', filter.inSectionIds));
       if (filter.q) {
         const pattern = containsPattern(filter.q.toLowerCase());
         conditions.push(
           eb.or([
-            eb('students.search_text', 'like', pattern),
+            filter.searchNameAndRollOnly
+              ? eb(
+                  sql`lower(students.first_name || ' ' || coalesce(students.last_name, ''))`,
+                  'like',
+                  pattern,
+                )
+              : eb('students.search_text', 'like', pattern),
             eb(sql`lower(pl.roll_number)`, 'like', pattern),
           ]),
         );
@@ -233,7 +262,12 @@ export class StudentRepository {
     limit: number,
     offset: number,
   ): Promise<{ rows: StudentListRow[]; total: number }> {
-    if (filter.institutionIds.length === 0 || filter.statuses.length === 0) {
+    if (
+      filter.institutionIds.length === 0 ||
+      filter.statuses.length === 0 ||
+      filter.inSectionIds?.length === 0 ||
+      filter.inYearIds?.length === 0
+    ) {
       return { rows: [], total: 0 };
     }
     let query = this.listed(tx, filter)

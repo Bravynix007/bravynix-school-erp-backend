@@ -8,14 +8,16 @@ const section = (overrides: Partial<SectionRow> = {}) =>
 
 const build = (found?: SectionRow) => {
   const find = vi.fn<SectionRepository['find']>().mockResolvedValue(found);
+  const keptOpen = vi.fn<SectionRepository['keptOpen']>().mockResolvedValue(found);
   const namesOf = vi
     .fn<SectionRepository['namesOf']>()
     .mockResolvedValue(
       new Map([['section-1', { displayName: 'A', classId: 'c', className: '5' }]]),
     );
   return {
-    directory: new SectionDirectory({ find, namesOf } as unknown as SectionRepository),
+    directory: new SectionDirectory({ find, keptOpen, namesOf } as unknown as SectionRepository),
     find,
+    keptOpen,
     namesOf,
   };
 };
@@ -55,6 +57,13 @@ describe('SectionDirectory', () => {
         active: true,
         capacity: 40,
       });
+    });
+
+    it('holds the section open until the transaction ends, so it cannot be deactivated meanwhile', async () => {
+      const t = build(section({ class_id: 'class-1' }));
+      await t.directory.placeOf(tx, 'section-1');
+      expect(t.keptOpen).toHaveBeenCalledWith(tx, 'section-1');
+      expect(t.find).not.toHaveBeenCalled();
     });
 
     it('says a deactivated section is not active', async () => {

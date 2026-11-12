@@ -13,10 +13,15 @@ import {
   MoveStudentDto,
   UpdateStudentDto,
 } from './student.dto.js';
-import type { StudentResource, StudentSummary } from './student.resource.js';
+import type {
+  StudentClassroomResource,
+  StudentResource,
+  StudentSummary,
+} from './student.resource.js';
 import { StudentService } from './student.service.js';
 
 const ADMINS = [RoleCode.SocietyOwner, RoleCode.InstitutionAdmin];
+const READERS = [...ADMINS, RoleCode.TeacherStaff];
 
 /** STU-01 to STU-05 and STU-08 (API design 9.6): the students of an Institution. */
 @ApiTags('Students')
@@ -25,16 +30,16 @@ export class StudentController {
   constructor(private readonly students: StudentService) {}
 
   @Policy({
-    roles: ADMINS,
+    roles: READERS,
     scope: 'institution',
     operationId: 'STU-01',
-    rule: 'Lists the students whose Institution the caller reaches, a page at a time, with search by name, Admission ID or roll number and filters by year, class and section',
+    rule: 'Lists the students whose Institution the caller reaches, a page at a time, with search by name, Admission ID or roll number and filters by year, class and section; a Teacher or Staff member gets the classroom view of the students in their own sections',
   })
   @Get()
   list(
     @CurrentPrincipal() principal: Principal,
     @Query() query: ListStudentsQueryDto,
-  ): Promise<ApiResult<StudentSummary[]>> {
+  ): Promise<ApiResult<StudentSummary[] | StudentClassroomResource[]>> {
     return this.students.list(principal, query);
   }
 
@@ -53,16 +58,16 @@ export class StudentController {
   }
 
   @Policy({
-    roles: ADMINS,
+    roles: READERS,
     scope: 'institution',
     operationId: 'STU-03',
-    rule: 'The profile of a student whose Institution the caller reaches, with the placement and the guardians',
+    rule: 'The profile of a student whose Institution the caller reaches, with the placement and the guardians; a Teacher or Staff member gets the classroom view of a student in their own sections, else 403 NOT_ASSIGNED',
   })
   @Get(':studentId')
   get(
     @CurrentPrincipal() principal: Principal,
     @Param('studentId', UuidParamPipe) studentId: string,
-  ): Promise<StudentResource> {
+  ): Promise<StudentResource | StudentClassroomResource> {
     return this.students.get(principal, studentId);
   }
 
