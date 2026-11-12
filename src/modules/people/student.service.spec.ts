@@ -948,6 +948,33 @@ describe('StudentService', () => {
       expect(t.updatePlacement).not.toHaveBeenCalled();
     });
 
+    it('corrects in place, on its first day, a placement that begins later (a child admitted ahead)', async () => {
+      const t = build();
+      t.openPlacement.mockResolvedValue(openAt('2026-12-01'));
+      const moved = await t.service.move(owner, 'student-1', move({ rollNumber: '15' }));
+      expect(t.insertPlacement).not.toHaveBeenCalled();
+      expect(t.updatePlacement).toHaveBeenCalledWith(
+        expect.anything(),
+        'placement-1',
+        expect.objectContaining({ roll_number: '15' }),
+      );
+      expect(moved.data.placement).toMatchObject({ rollNumber: '15', startDate: '2026-12-01' });
+    });
+
+    it('never opens a placement after the year ended: the default day is the last of the year', async () => {
+      const t = build();
+      t.openPlacement.mockResolvedValue(openAt('2026-06-01'));
+      t.openYear.mockResolvedValue({ open: true, startDate: '2026-06-01', endDate: '2026-11-01' });
+      await t.service.move(owner, 'student-1', move({ rollNumber: '15' }));
+      expect(t.updatePlacement.mock.calls[0]![2]).toMatchObject({ end_date: '2026-10-31' });
+      expect(t.insertPlacement.mock.calls[0]![1]).toMatchObject({ start_date: '2026-11-01' });
+      const refused = await fail(
+        t.service.move(owner, 'student-1', move({ rollNumber: '16', effectiveDate: '2026-11-05' })),
+      );
+      expect(refused.status).toBe(400);
+      expect(refused.fields).toEqual([expect.objectContaining({ field: 'effectiveDate' })]);
+    });
+
     it('is 404 for another Institution’s section, 422 for a section of another class or one that is closed, and 422 for a year that is closed', async () => {
       const t = build();
       t.openPlacement.mockResolvedValue(openAt('2026-06-01'));

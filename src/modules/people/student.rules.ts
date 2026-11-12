@@ -62,15 +62,28 @@ export function requireValidStudent(input: StudentRuleInput, today: string): voi
 }
 
 /**
- * STU-08: the move takes effect on a day that is not in the future and not before the current placement began (the
- * old row must keep at least its first day). 400 `INVALID_VALUE` on `effectiveDate` otherwise.
+ * STU-08: the last day a move can take effect: today, or the day the current placement begins when that is later (a
+ * child placed from a later day, as one admitted ahead, is corrected in place), and never after the year ends.
+ */
+export function latestMoveDate(currentStart: string, today: string, yearEnd: string): string {
+  const latest = today > currentStart ? today : currentStart;
+  return latest < yearEnd ? latest : yearEnd;
+}
+
+/**
+ * STU-08: the move takes effect on a day that is not before the current placement began (the old row must keep at
+ * least its first day) and not after `latestMoveDate`. 400 `INVALID_VALUE` on `effectiveDate` otherwise.
  */
 export function requireValidMoveDate(
   effectiveDate: string,
   currentStart: string,
   today: string,
+  yearEnd: string,
 ): void {
-  if (effectiveDate > today || effectiveDate < currentStart) {
+  if (
+    effectiveDate > latestMoveDate(currentStart, today, yearEnd) ||
+    effectiveDate < currentStart
+  ) {
     throw AppException.validation([fieldError('effectiveDate', FieldErrorCode.INVALID_VALUE)]);
   }
 }

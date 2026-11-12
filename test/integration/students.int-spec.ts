@@ -925,6 +925,26 @@ describe('students: add, read and list', () => {
   });
 
   describe('STU-08 move', () => {
+    it('corrects a child admitted ahead in place on the day their placement begins, by default and by date', async () => {
+      const student = await added({ admissionDate: '2026-07-01', ...roll('7') });
+      expect(student.placement).toMatchObject({ startDate: '2026-07-01' });
+      const fixed = await move(student.id, { rollNumber: '8' });
+      expect(fixed.status).toBe(200);
+      expect(fixed.body.data.placement).toMatchObject({ rollNumber: '8', startDate: '2026-07-01' });
+      const other = await move(student.id, {
+        sectionId: sectionB,
+        rollNumber: '2',
+        effectiveDate: '2026-07-01',
+      });
+      expect(other.status).toBe(200);
+      expect(await placements(student.id)).toEqual([
+        { section_id: sectionB, roll_number: '2', start_date: '2026-07-01', end_date: null },
+      ]);
+      const later = await move(student.id, { rollNumber: '3', effectiveDate: '2026-07-02' });
+      expect(later.status).toBe(400);
+      expect(fieldCodes(later)).toEqual([{ field: 'effectiveDate', code: 'INVALID_VALUE' }]);
+    });
+
     it('closes the placement the day before and opens the next, with the new section and roll number', async () => {
       const student = await sinceMay();
       const res = await move(student.id, {

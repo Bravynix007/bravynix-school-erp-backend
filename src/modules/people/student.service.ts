@@ -50,6 +50,7 @@ import {
   type StudentSummary,
 } from './student.resource.js';
 import {
+  latestMoveDate,
   requireValidDates,
   requireValidMoveDate,
   requireValidStudent,
@@ -454,13 +455,13 @@ export class StudentService {
         if (sectionId === open.section_id && rollNumber === open.roll_number) {
           return { row, placed: open, guardians, overCapacity: false };
         }
-        const effective = body.effectiveDate ?? today;
-        requireValidMoveDate(effective, open.start_date, today);
-        const { capacity } = await this.requirePlace(
+        const { capacity, endDate: yearEnd } = await this.requirePlace(
           tx,
           { academicYearId: open.academic_year_id, classId: open.class_id, sectionId },
           context.institutionId,
         );
+        const effective = body.effectiveDate ?? latestMoveDate(open.start_date, today, yearEnd);
+        requireValidMoveDate(effective, open.start_date, today, yearEnd);
         let placement: { id: string; start_date: string };
         if (effective === open.start_date) {
           await this.students.updatePlacement(tx, open.placement_id, {
