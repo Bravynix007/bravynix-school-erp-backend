@@ -4,6 +4,7 @@ import {
   DeactivateStudentQueryDto,
   ListStudentsQueryDto,
   MoveStudentDto,
+  CorrectStudentClassDto,
   UpdateStudentDto,
 } from './student.dto.js';
 
@@ -253,6 +254,36 @@ describe('MoveStudentDto', () => {
     [{ classId: id }, 'classId', 'FIELD_NOT_ALLOWED'],
   ])('refuses %j', async (value, field, code) => {
     expect(await problems(body(MoveStudentDto, value))).toContainEqual({ field, code });
+  });
+});
+
+describe('CorrectStudentClassDto', () => {
+  it('takes the class and the section, with the roll number or without', async () => {
+    expect(await problems(body(CorrectStudentClassDto, { classId: id, sectionId: id }))).toEqual(
+      [],
+    );
+    expect(
+      await problems(
+        body(CorrectStudentClassDto, { classId: id, sectionId: id, rollNumber: '15' }),
+      ),
+    ).toEqual([]);
+  });
+
+  it.each([
+    [{ sectionId: id }, 'classId', 'INVALID_FORMAT'],
+    [{ classId: id }, 'sectionId', 'INVALID_FORMAT'],
+    [{ classId: 'x', sectionId: id }, 'classId', 'INVALID_FORMAT'],
+    [{ classId: id, sectionId: null }, 'sectionId', 'INVALID_FORMAT'],
+    [{ classId: id, sectionId: id, rollNumber: '' }, 'rollNumber', 'TOO_SHORT'],
+    [{ classId: id, sectionId: id, rollNumber: '  ' }, 'rollNumber', 'INVALID_FORMAT'],
+    [{ classId: id, sectionId: id, rollNumber: 'x'.repeat(21) }, 'rollNumber', 'TOO_LONG'],
+    [
+      { classId: id, sectionId: id, effectiveDate: '2026-07-01' },
+      'effectiveDate',
+      'FIELD_NOT_ALLOWED',
+    ],
+  ])('refuses %j', async (value, field, code) => {
+    expect(await problems(body(CorrectStudentClassDto, value))).toContainEqual({ field, code });
   });
 });
 

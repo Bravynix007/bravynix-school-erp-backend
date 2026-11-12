@@ -9,7 +9,11 @@ import type { FileDirectory } from '../../platform/files/index.js';
 import type { AccountDirectory, PersonDirectory } from '../../platform/identity/index.js';
 import type { MasterReferences } from '../../platform/masters/index.js';
 import type { InstitutionDirectory, ScopeService } from '../../platform/tenancy/index.js';
-import type { AcademicYearDirectory, SectionDirectory } from '../academic-setup/index.js';
+import type {
+  AcademicYearDirectory,
+  ClassDirectory,
+  SectionDirectory,
+} from '../academic-setup/index.js';
 import type { StudentClassroomService } from './student-classroom.service.js';
 import { StudentContext } from './student-context.js';
 import {
@@ -21,6 +25,7 @@ import type {
   CreateStudentDto,
   ListStudentsQueryDto,
   MoveStudentDto,
+  CorrectStudentClassDto,
   UpdateStudentDto,
 } from './student.dto.js';
 import type {
@@ -165,6 +170,16 @@ function build(found: StudentRow | null = row()) {
   const updateEnrolment = vi
     .fn<StudentRepository['updateEnrolment']>()
     .mockResolvedValue(undefined);
+  const deferPlacementClassKey = vi
+    .fn<StudentRepository['deferPlacementClassKey']>()
+    .mockResolvedValue(undefined);
+  const updateOtherPlacements = vi
+    .fn<StudentRepository['updateOtherPlacements']>()
+    .mockResolvedValue(undefined);
+  const previousEnrolment = vi
+    .fn<StudentRepository['previousEnrolment']>()
+    .mockResolvedValue(undefined);
+  const isBelow = vi.fn<ClassDirectory['isBelow']>().mockResolvedValue(false);
   const placedNow = vi.fn<StudentRepository['placedNow']>().mockResolvedValue(placedRow);
   const sectionCount = vi.fn<StudentRepository['sectionCount']>().mockResolvedValue(1);
   const page = vi
@@ -220,6 +235,9 @@ function build(found: StudentRow | null = row()) {
     openPlacement,
     updatePlacement,
     updateEnrolment,
+    deferPlacementClassKey,
+    updateOtherPlacements,
+    previousEnrolment,
     placedNow,
     sectionCount,
     page,
@@ -244,6 +262,7 @@ function build(found: StudentRow | null = row()) {
     { requireReady } as unknown as FileDirectory,
     { openYear } as unknown as AcademicYearDirectory,
     { placeOf } as unknown as SectionDirectory,
+    { isBelow } as unknown as ClassDirectory,
     {
       names: vi.fn<InstitutionDirectory['names']>().mockResolvedValue(
         new Map([
@@ -279,6 +298,10 @@ function build(found: StudentRow | null = row()) {
     openPlacement,
     updatePlacement,
     updateEnrolment,
+    deferPlacementClassKey,
+    updateOtherPlacements,
+    previousEnrolment,
+    isBelow,
     placedNow,
     sectionCount,
     page,
@@ -303,9 +326,20 @@ const query = (fields: object = {}) =>
   Object.assign({ page: 2, limit: 20 }, fields) as ListStudentsQueryDto;
 
 const move = (fields: object = {}) => fields as MoveStudentDto;
+const correct = (fields: object = {}) =>
+  ({ classId: 'class-2', sectionId: 'section-9', ...fields }) as CorrectStudentClassDto;
 const openAt = (start: string): PlacedRow => ({ ...placedRow, start_date: start });
 
 const change = (fields: object = {}) => ({ version: 1, ...fields }) as UpdateStudentDto;
+
+/** The section the student is corrected into belongs to the second class. */
+const inClass2 = (t: ReturnType<typeof build>, capacity: number | null = null) =>
+  t.placeOf.mockResolvedValue({
+    classId: 'class-2',
+    institutionId: 'institution-1',
+    active: true,
+    capacity,
+  });
 
 describe('StudentService', () => {
   describe('create (STU-02)', () => {
@@ -1078,6 +1112,180 @@ describe('StudentService', () => {
       expect((await fail(u.service.deactivate(owner, 'student-1', { reason: 1 }))).status).toBe(
         404,
       );
+    });
+  });
+
+  describe('correctClass (STU-12)', () => {
+    it('puts the enrolment and every placement in the new class, the open one with the roll number, and audits it', async () => {
+      const t = build();
+      inClass2(t);
+      const done = await t.service.correctClass(owner, 'student-1', correct({ rollNumber: '3' }));
+      expect(t.deferPlacementClassKey).toHaveBeenCalledOnce();
+      expect(t.updateEnrolment).toHaveBeenCalledExactlyOnceWith(expect.anything(), 'enrolment-1', {
+        class_id: 'class-2',
+        updated_by: 'owner-1',
+      });
+      expect(t.updatePlacement).toHaveBeenCalledExactlyOnceWith(expect.anything(), 'placement-1', {
+        class_id: 'class-2',
+        section_id: 'section-9',
+        roll_number: '3',
+        updated_by: 'owner-1',
+      });
+      expect(t.updateOtherPlacements).toHaveBeenCalledExactlyOnceWith(
+        expect.anything(),
+        'enrolment-1',
+        'placement-1',
+        { class_id: 'class-2', section_id: 'section-9', updated_by: 'owner-1' },
+      );
+      expect(done.data.placement).toMatchObject({
+        classId: 'class-2',
+        sectionId: 'section-9',
+        rollNumber: '3',
+        startDate: '2026-11-11',
+      });
+      expect(done.options).toMatchObject({ status: 200, code: 'OK', meta: null });
+      expect(t.record).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          action: 'student.class_corrected',
+          before: expect.objectContaining({ classId: 'class-1', sectionId: 'section-1' }),
+          after: expect.objectContaining({ classId: 'class-2', sectionId: 'section-9' }),
+        }),
+      );
+    });
+
+    it('keeps the roll number when none is sent', async () => {
+      const t = build();
+      inClass2(t);
+      await t.service.correctClass(owner, 'student-1', correct());
+      expect(t.updatePlacement.mock.calls[0]![2]).toMatchObject({ roll_number: '14' });
+    });
+
+    it('is 422 CLASS_UNCHANGED for the class the student is in, and writes nothing', async () => {
+      const t = build();
+      await expect(
+        t.service.correctClass(owner, 'student-1', correct({ classId: 'class-1' })),
+      ).rejects.toMatchObject({ code: 'CLASS_UNCHANGED' });
+      expect(t.updateEnrolment).not.toHaveBeenCalled();
+    });
+
+    it('is 422 NO_CURRENT_PLACEMENT for a student without an open placement', async () => {
+      const t = build();
+      t.openPlacement.mockResolvedValue(undefined);
+      await expect(t.service.correctClass(owner, 'student-1', correct())).rejects.toMatchObject({
+        code: 'NO_CURRENT_PLACEMENT',
+      });
+    });
+
+    it('is 422 SECTION_NOT_IN_CLASS for a section of another class, and INACTIVE_SECTION for a closed one', async () => {
+      const t = build();
+      await expect(t.service.correctClass(owner, 'student-1', correct())).rejects.toMatchObject({
+        code: 'SECTION_NOT_IN_CLASS',
+      });
+      t.placeOf.mockResolvedValue({
+        classId: 'class-2',
+        institutionId: 'institution-1',
+        active: false,
+        capacity: null,
+      });
+      await expect(t.service.correctClass(owner, 'student-1', correct())).rejects.toMatchObject({
+        code: 'INACTIVE_SECTION',
+      });
+      expect(t.updateEnrolment).not.toHaveBeenCalled();
+    });
+
+    it('is 404 for a section of another Institution', async () => {
+      const t = build();
+      t.placeOf.mockResolvedValue({
+        classId: 'class-2',
+        institutionId: 'institution-2',
+        active: true,
+        capacity: null,
+      });
+      await expect(t.service.correctClass(owner, 'student-1', correct())).rejects.toMatchObject({
+        status: 404,
+      });
+    });
+
+    it('warns when the section is over its capacity, and does not stop', async () => {
+      const t = build();
+      inClass2(t, 1);
+      t.sectionCount.mockResolvedValue(2);
+      const done = await t.service.correctClass(owner, 'student-1', correct());
+      expect(done.options.meta).toEqual({ warnings: ['SECTION_OVER_CAPACITY'] });
+    });
+
+    it('is 409 ROLL_NUMBER_TAKEN when the roll number is held in the section', async () => {
+      const t = build();
+      inClass2(t);
+      t.updatePlacement.mockRejectedValue(
+        Object.assign(new Error('duplicate'), { code: '23505', constraint: 'uq_placements_roll' }),
+      );
+      await expect(t.service.correctClass(owner, 'student-1', correct())).rejects.toMatchObject({
+        code: 'ROLL_NUMBER_TAKEN',
+      });
+    });
+
+    describe('for a student who came from an earlier year', () => {
+      const came = { id: 'enrolment-0', class_id: 'class-0', outcome: 1 };
+
+      it('refuses a class below the one they left, and changes nothing', async () => {
+        const t = build();
+        inClass2(t);
+        t.previousEnrolment.mockResolvedValue(came);
+        t.isBelow.mockResolvedValue(true);
+        await expect(t.service.correctClass(owner, 'student-1', correct())).rejects.toMatchObject({
+          code: 'TARGET_CLASS_BELOW_SOURCE',
+        });
+        expect(t.isBelow).toHaveBeenCalledWith(
+          expect.anything(),
+          'class-2',
+          'class-0',
+          'institution-1',
+        );
+        expect(t.updateEnrolment).not.toHaveBeenCalled();
+      });
+
+      it('is 404 when the class they left cannot be seen', async () => {
+        const t = build();
+        inClass2(t);
+        t.previousEnrolment.mockResolvedValue(came);
+        t.isBelow.mockResolvedValue(undefined);
+        await expect(t.service.correctClass(owner, 'student-1', correct())).rejects.toMatchObject({
+          status: 404,
+        });
+      });
+
+      it('makes that year Repeating when the class is the one they left', async () => {
+        const t = build();
+        inClass2(t);
+        t.previousEnrolment.mockResolvedValue({ ...came, class_id: 'class-2' });
+        await t.service.correctClass(owner, 'student-1', correct());
+        expect(t.isBelow).not.toHaveBeenCalled();
+        expect(t.updateEnrolment).toHaveBeenCalledWith(expect.anything(), 'enrolment-0', {
+          outcome: 2,
+          updated_by: 'owner-1',
+        });
+        expect(t.record).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({
+            before: expect.objectContaining({ previousOutcome: 1 }),
+            after: expect.objectContaining({ previousOutcome: 2 }),
+          }),
+        );
+      });
+
+      it('leaves that year alone when its outcome already fits', async () => {
+        const t = build();
+        inClass2(t);
+        t.previousEnrolment.mockResolvedValue(came);
+        await t.service.correctClass(owner, 'student-1', correct());
+        expect(t.updateEnrolment).toHaveBeenCalledExactlyOnceWith(
+          expect.anything(),
+          'enrolment-1',
+          expect.anything(),
+        );
+      });
     });
   });
 

@@ -225,4 +225,38 @@ describe('StudentRepository', () => {
       expect(queries[0]!.parameters).toEqual(['year-2', 'section-2']);
     });
   });
+
+  describe('class correction', () => {
+    it('lets the key between a placement and its enrolment class wait for the commit', async () => {
+      const { tx, queries } = recorder();
+      await repository.deferPlacementClassKey(tx);
+      expect(queries[0]!.sql).toBe('set constraints fk_placements_enrolment_class deferred');
+    });
+
+    it('changes the placements of the enrolment other than the open one', async () => {
+      const { tx, queries } = recorder();
+      await repository.updateOtherPlacements(tx, 'enrolment-1', 'placement-1', {
+        class_id: 'class-2',
+        section_id: 'section-9',
+      });
+      expect(queries[0]!.sql).toContain('where "student_enrolment_id" = $3 and "id" != $4');
+      expect(queries[0]!.parameters).toEqual([
+        'class-2',
+        'section-9',
+        'enrolment-1',
+        'placement-1',
+      ]);
+    });
+
+    it('reads the latest other enrolment a promotion ended as Promoted or Repeating', async () => {
+      const { tx, queries } = recorder();
+      expect(await repository.previousEnrolment(tx, 'student-1', 'enrolment-1')).toBeUndefined();
+      const { sql, parameters } = queries[0]!;
+      expect(sql).toContain(
+        '"student_id" = $1 and "status" = $2 and "id" != $3 and "outcome" in ($4, $5)',
+      );
+      expect(sql).toContain('order by "enrolled_date" desc limit $6');
+      expect(parameters).toEqual(['student-1', 1, 'enrolment-1', 1, 2, 1]);
+    });
+  });
 });

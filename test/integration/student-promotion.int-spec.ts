@@ -8,6 +8,10 @@ import {
   down,
   up,
 } from '../../src/platform/database/migrations/2026_11_12_0037_people_student_completed_reason.js';
+import {
+  down as migrateDown,
+  up as migrateUp,
+} from '../../src/platform/database/migrations/2026_11_12_0038_people_placement_class_deferrable.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { personaByKey } from '../../src/seeds/two-worlds.js';
 import { apiCaller } from '../support/api.js';
@@ -27,6 +31,13 @@ const target = (to: StudentPlace) => ({
   toAcademicYearId: to.academicYearId,
   toClassId: to.classId,
   toSectionId: to.sectionId,
+});
+
+/** STU-12 body: the class and section of a place, and the other fields. */
+const into = (place: StudentPlace, fields: object = {}) => ({
+  classId: place.classId,
+  sectionId: place.sectionId,
+  ...fields,
 });
 
 /** STU-09 and PRM-01 (API design 10.7, PRD 7.6): students move to the next academic year. */
@@ -78,6 +89,8 @@ describe('promotion', () => {
   });
   const promoteOne = (student: SchoolStudent, body: object, token = owner.token) =>
     api('post', `/v1/students/${student.id}/promote`, token, body);
+  const correct = (student: SchoolStudent, body: object, token = owner.token) =>
+    api('patch', `/v1/students/${student.id}/class`, token, body);
   const profile = async (student: SchoolStudent, token = owner.token) =>
     (await api('get', `/v1/students/${student.id}`, token)).body.data as unknown as {
       placement: { academicYearId: string; classId: string; sectionId: string; rollNumber: string };
@@ -699,6 +712,130 @@ describe('promotion', () => {
       const asTeacher = await kit.actingAs(teacher.person.email, TEACHER, societyId);
       expect((await promoteOne(diya, target(tenA), asTeacher)).status).toBe(403);
       expect((await promoteOne(diya, target(tenA), institutionAdmin.token)).status).toBe(200);
+    });
+  });
+  describe('STU-12 correct the class', () => {
+    it('puts a wrongly promoted student in the class they repeat, and the old year becomes Repeating', async () => {
+      await promote(fromNineA());
+      const res = await correct(diya, into(nineA));
+      expect([res.status, res.body.code]).toEqual([200, 'OK']);
+      expect(res.body.data.placement).toMatchObject({
+        academicYearId: year2,
+        classId: class9,
+        sectionId: nineA.sectionId,
+        rollNumber: '1',
+        startDate: '2027-06-01',
+      });
+      expect(await history(diya)).toMatchObject([
+        { year: year1, class_id: class9, outcome: 2, end_date: '2027-03-31' },
+        {
+          year: year2,
+          class_id: class9,
+          outcome: null,
+          section_id: nineA.sectionId,
+          start_date: '2027-06-01',
+          end_date: null,
+          updated_by: owner.person,
+        },
+      ]);
+      expect(await counts(class10)).toEqual({ [tenA.sectionId]: 1 });
+      expect(await audits(sql`action = 'student.class_corrected'`)).toEqual([
+        {
+          entityId: diya.id,
+          after: expect.objectContaining({ classId: class9, previousOutcome: 2 }),
+        },
+      ]);
+    });
+
+    it('moves a student admitted into the wrong class, with every placement they had, and the roll number they choose', async () => {
+      const early = await admit(nineA, '9');
+      // The test clock says it is 1 June: backdate the placement by hand, so that a move can be made from a day between.
+      await read((tx) =>
+        sql`update student_section_placements set start_date = '2026-05-01'
+          where student_enrolment_id in (select id from student_enrolments where student_id = ${early.id})`.execute(
+          tx,
+        ),
+      );
+      const moved = await api('patch', `/v1/students/${early.id}/placement`, owner.token, {
+        sectionId: nineB.sectionId,
+        rollNumber: '8',
+        effectiveDate: '2026-05-10',
+      });
+      expect(moved.status).toBe(200);
+      expect(await history(early)).toHaveLength(2);
+      const res = await correct(early, into(tenAYear1, { rollNumber: '4' }));
+      expect(res.status).toBe(200);
+      expect(await history(early)).toMatchObject([
+        {
+          class_id: class10,
+          section_id: tenAYear1.sectionId,
+          roll_number: '9',
+          end_date: '2026-05-09',
+        },
+        { class_id: class10, section_id: tenAYear1.sectionId, roll_number: '4', end_date: null },
+      ]);
+      expect(await counts(class9)).toEqual({ [nineA.sectionId]: 2, [nineB.sectionId]: 1 });
+      expect(await audits(sql`action = 'student.class_corrected'`)).toEqual([
+        {
+          entityId: early.id,
+          after: expect.objectContaining({ classId: class10, rollNumber: '4' }),
+        },
+      ]);
+    });
+
+    it('refuses a class below the one the student left, and changes nothing', async () => {
+      const senior = await admit(tenAYear1, '5');
+      expect((await promoteOne(senior, target(tenA))).status).toBe(200);
+      const res = await correct(senior, into(nineA));
+      expect([res.status, res.body.code]).toEqual([422, 'TARGET_CLASS_BELOW_SOURCE']);
+      expect(await history(senior)).toMatchObject([
+        { class_id: class10, outcome: 2 },
+        { class_id: class10, outcome: null },
+      ]);
+    });
+
+    it('is 422 for the class the student is in, a section of another class and a year that is closed, and 409 for a roll number in use', async () => {
+      expect((await correct(diya, into(nineB))).body.code).toBe('CLASS_UNCHANGED');
+      expect(
+        (await correct(diya, { classId: class10, sectionId: nineB.sectionId })).body.code,
+      ).toBe('SECTION_NOT_IN_CLASS');
+      await admit(tenAYear1, '1');
+      const taken = await correct(diya, into(tenAYear1));
+      expect([taken.status, taken.body.code]).toEqual([409, 'ROLL_NUMBER_TAKEN']);
+      expect((await profile(diya)).placement).toMatchObject({ classId: class9, rollNumber: '1' });
+    });
+
+    it('is 404 for a deactivated student, a stranger’s and another Institution’s, and 400 for a half body', async () => {
+      await api('delete', `/v1/students/${ravi.id}?reason=1`, owner.token);
+      expect((await correct(ravi, into(tenAYear1))).status).toBe(404);
+      const other = await fixtures.owner(await kit.society(admin));
+      expect((await correct(diya, into(tenAYear1), other.token)).status).toBe(404);
+      const abroad = await admit(abroadPlace, '1', second);
+      expect((await correct(abroad, into(tenAYear1), institutionAdmin.token)).status).toBe(404);
+      expect((await correct(diya, { classId: class10 })).status).toBe(400);
+    });
+
+    it('is for the Owner and the Admins, and no teacher or Super Admin', async () => {
+      expect((await correct(diya, into(tenAYear1), admin)).status).toBe(403);
+      const teacher = await kit.staff(
+        owner.token,
+        first,
+        (await kit.masters(admin, 'class-categories'))[0]!.id,
+      );
+      const asTeacher = await kit.actingAs(teacher.person.email, TEACHER, societyId);
+      expect((await correct(diya, into(tenAYear1), asTeacher)).status).toBe(403);
+      expect((await correct(diya, into(tenAYear1), institutionAdmin.token)).status).toBe(200);
+    });
+
+    it('runs the migration down and up, and the key stays deferrable', async () => {
+      await ownerDb.transaction().execute(async (tx) => {
+        await migrateDown(tx);
+        await migrateUp(tx);
+      });
+      const { rows } = await sql<{ condeferrable: boolean }>`
+        select condeferrable from pg_constraint where conname = 'fk_placements_enrolment_class'
+      `.execute(ownerDb);
+      expect(rows).toEqual([{ condeferrable: true }]);
     });
   });
 });

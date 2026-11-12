@@ -162,6 +162,50 @@ export class StudentRepository {
     await tx.updateTable('student_section_placements').set(changes).where('id', '=', id).execute();
   }
 
+  /**
+   * Lets the key between a placement and its enrolment's class be checked when the transaction commits, so the class
+   * of the enrolment and of its placements change together (STU-12).
+   */
+  async deferPlacementClassKey(tx: Tx): Promise<void> {
+    await sql`set constraints fk_placements_enrolment_class deferred`.execute(tx);
+  }
+
+  /** Changes every placement of the enrolment but one: the ones STU-12 leaves behind in the class it corrects. */
+  async updateOtherPlacements(
+    tx: Tx,
+    enrolmentId: string,
+    exceptId: string,
+    changes: PlacementChanges,
+  ): Promise<void> {
+    await tx
+      .updateTable('student_section_placements')
+      .set(changes)
+      .where('student_enrolment_id', '=', enrolmentId)
+      .where('id', '!=', exceptId)
+      .execute();
+  }
+
+  /**
+   * The enrolment this one followed: the latest other enrolment of the student that a promotion ended as Promoted or
+   * Repeating. None for a student admitted into this year.
+   */
+  previousEnrolment(
+    tx: Tx,
+    studentId: string,
+    enrolmentId: string,
+  ): Promise<Pick<EnrolmentRow, 'id' | 'class_id' | 'outcome'> | undefined> {
+    return tx
+      .selectFrom('student_enrolments')
+      .select(['id', 'class_id', 'outcome'])
+      .where('student_id', '=', studentId)
+      .where('status', '=', 1)
+      .where('id', '!=', enrolmentId)
+      .where('outcome', 'in', [1, 2])
+      .orderBy('enrolled_date', 'desc')
+      .limit(1)
+      .executeTakeFirst();
+  }
+
   async insertGuardians(tx: Tx, rows: NewGuardian[]): Promise<GuardianRow[]> {
     return tx.insertInto('student_guardians').values(rows).returningAll().execute();
   }

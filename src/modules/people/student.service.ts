@@ -23,7 +23,12 @@ import { FileDirectory, FilePurpose } from '../../platform/files/index.js';
 import { AccountDirectory, PersonDirectory } from '../../platform/identity/index.js';
 import { MasterReferences, placeOf } from '../../platform/masters/index.js';
 import { InstitutionDirectory, ScopeService } from '../../platform/tenancy/index.js';
-import { AcademicYearDirectory, SectionDirectory } from '../academic-setup/index.js';
+import {
+  AcademicYearDirectory,
+  ClassDirectory,
+  SectionDirectory,
+} from '../academic-setup/index.js';
+import { outcomeOf } from './promotion.rules.js';
 import { StudentClassroomService } from './student-classroom.service.js';
 import { StudentContext } from './student-context.js';
 import {
@@ -33,6 +38,7 @@ import {
 import { AADHAAR_EXISTS_IN_SOCIETY, StudentIdentityService } from './student-identity.service.js';
 import {
   STUDENT_SORT_FIELDS,
+  type CorrectStudentClassDto,
   type CreateStudentDto,
   type DeactivateStudentQueryDto,
   type ListStudentsQueryDto,
@@ -106,6 +112,7 @@ export class StudentService {
     private readonly files: FileDirectory,
     private readonly years: AcademicYearDirectory,
     private readonly sections: SectionDirectory,
+    private readonly classes: ClassDirectory,
     private readonly institutions: InstitutionDirectory,
     private readonly audit: AuditService,
     private readonly clock: Clock,
@@ -576,6 +583,112 @@ export class StudentService {
       status: HttpStatus.OK,
       code: ResultCode.OK,
       meta: moved.overCapacity ? warnings(SECTION_OVER_CAPACITY) : null,
+    });
+  }
+
+  /**
+   * STU-12: puts the student in the class they belong in, for the whole of the year they are enrolled in: the
+   * enrolment and every placement of it take the new class and section, the open one with the roll number (the
+   * current one when not sent), and the dates stay. It is for a class that was wrong from the start (an admission or
+   * a promotion into the wrong class), so no new placement begins; a move during the year is STU-08. When the
+   * student came from an earlier year, the class cannot be below the one they left, and that year's outcome follows
+   * (Repeating in the same class, Promoted in another). 422 `CLASS_UNCHANGED`, `TARGET_CLASS_BELOW_SOURCE`,
+   * `NO_CURRENT_PLACEMENT`, `INACTIVE_SECTION`, `SECTION_NOT_IN_CLASS`, `YEAR_NOT_ACTIVE`; 409 `ROLL_NUMBER_TAKEN`;
+   * a full section is a warning. A deactivated student is 404.
+   */
+  async correctClass(
+    principal: Principal,
+    id: string,
+    body: CorrectStudentClassDto,
+  ): Promise<ApiResult<StudentResource>> {
+    const context = await this.context.of(principal, id);
+    const corrected = await this.database
+      .transaction(context.tenant, async (tx) => {
+        const row = await this.context.lockedActive(tx, id);
+        const open = await this.students.openPlacement(tx, id);
+        if (!open) throw AppException.businessRule(ErrorCode.NO_CURRENT_PLACEMENT);
+        if (body.classId === open.class_id)
+          throw AppException.businessRule(ErrorCode.CLASS_UNCHANGED);
+        const { capacity } = await this.requirePlace(
+          tx,
+          {
+            academicYearId: open.academic_year_id,
+            classId: body.classId,
+            sectionId: body.sectionId,
+          },
+          context.institutionId,
+        );
+        const previous = await this.students.previousEnrolment(tx, id, open.enrolment_id);
+        if (previous && previous.class_id !== body.classId) {
+          const below = await this.classes.isBelow(
+            tx,
+            body.classId,
+            previous.class_id,
+            context.institutionId,
+          );
+          if (below === undefined) throw AppException.notFound();
+          if (below) throw AppException.businessRule(ErrorCode.TARGET_CLASS_BELOW_SOURCE);
+        }
+        const guardians = await this.students.guardians(tx, id);
+        const identity = await this.identities.find(tx, id);
+        const stamp = updateStamp(principal.personId);
+        const rollNumber = body.rollNumber ?? open.roll_number;
+        const place = { class_id: body.classId, section_id: body.sectionId };
+        await this.students.deferPlacementClassKey(tx);
+        await this.students.updateEnrolment(tx, open.enrolment_id, {
+          class_id: body.classId,
+          ...stamp,
+        });
+        await this.students.updatePlacement(tx, open.placement_id, {
+          ...place,
+          roll_number: rollNumber,
+          ...stamp,
+        });
+        await this.students.updateOtherPlacements(tx, open.enrolment_id, open.placement_id, {
+          ...place,
+          ...stamp,
+        });
+        const outcome = previous && outcomeOf(previous.class_id, body.classId);
+        if (previous && outcome !== previous.outcome) {
+          await this.students.updateEnrolment(tx, previous.id, { outcome, ...stamp });
+        }
+        const placed: PlacedRow = { ...open, ...place, roll_number: rollNumber };
+        await this.audit.record(tx, {
+          action: 'student.class_corrected',
+          institutionId: row.institution_id,
+          entityType: 'student',
+          entityId: id,
+          before: {
+            ...studentAuditView(row, open, guardians),
+            previousOutcome: previous?.outcome ?? null,
+          },
+          after: { ...studentAuditView(row, placed, guardians), previousOutcome: outcome ?? null },
+        });
+        return {
+          row,
+          placed,
+          guardians,
+          identity,
+          overCapacity: await this.overCapacity(
+            tx,
+            { academicYearId: open.academic_year_id, sectionId: body.sectionId },
+            capacity,
+          ),
+        };
+      })
+      .catch((error: unknown) => {
+        throw translate(error);
+      });
+    const resource = await this.resource(
+      corrected.row,
+      corrected.placed,
+      corrected.guardians,
+      corrected.identity,
+    );
+    return new ApiResult(resource, {
+      status: HttpStatus.OK,
+      code: ResultCode.OK,
+      meta: corrected.overCapacity ? warnings(SECTION_OVER_CAPACITY) : null,
     });
   }
 
