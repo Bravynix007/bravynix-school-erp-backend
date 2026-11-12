@@ -27,6 +27,7 @@ import { PlaceDto } from '../../common/validation/place.dto.js';
 import { VersionDto } from '../../common/validation/version.dto.js';
 import { WhenPresent } from '../../common/validation/when-present.js';
 import { BLOOD_GROUPS, GENDERS } from './staff.dto.js';
+import { StudentIdentityDto } from './student-identity.dto.js';
 
 export const MAX_GUARDIANS = 5;
 /** 1 Father, 2 Mother, 3 Guardian, 4 Grandparent, 5 Sibling, 6 Other (DDD 9.6). */
@@ -255,6 +256,13 @@ export class CreateStudentDto extends StudentDetailsDto {
   @ValidateNested({ each: true })
   @Type(() => GuardianDto)
   guardians!: GuardianDto[];
+
+  @ApiPropertyOptional({ type: StudentIdentityDto })
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => StudentIdentityDto)
+  identity?: StudentIdentityDto;
 }
 
 /** The fields of STU-04 that cannot be cleared: sent, they need a value. */

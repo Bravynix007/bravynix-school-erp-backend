@@ -3,6 +3,11 @@ import {
   type AuthorRef,
   type AuthorStamps,
 } from '../../common/http/author-stamps.js';
+import {
+  studentIdentityResource,
+  type StudentIdentityResource,
+} from './student-identity.resource.js';
+import type { StudentIdentityRow } from './student-identity.repository.js';
 import type { GuardianRow, PlacedRow, StudentListRow, StudentRow } from './student.repository.js';
 
 export interface GuardianResource {
@@ -59,6 +64,8 @@ export interface StudentResource extends AuthorStamps {
   };
   placement: StudentPlacementResource | null;
   guardians: GuardianResource[];
+  /** The Aadhaar number masked and the birth certificate number; `null` for each that is not set. */
+  identity: StudentIdentityResource;
   status: number;
   version: number;
 }
@@ -134,6 +141,7 @@ export function studentResource(
   row: StudentRow,
   placed: PlacedRow | undefined,
   guardians: readonly GuardianRow[],
+  identity: StudentIdentityRow | undefined,
   people: ReadonlyMap<string, AuthorRef>,
 ): StudentResource {
   return {
@@ -164,6 +172,7 @@ export function studentResource(
     },
     placement: placed ? placementResource(placed) : null,
     guardians: guardians.map(guardianResource),
+    identity: studentIdentityResource(identity),
     status: row.status,
     version: row.version,
     ...authorStamps(row, people),

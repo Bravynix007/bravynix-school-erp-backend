@@ -19,6 +19,7 @@ declare module '../../platform/database/schema.js' {
     student_guardians: StudentGuardiansTable;
     student_enrolments: StudentEnrolmentsTable;
     student_section_placements: StudentSectionPlacementsTable;
+    student_identities: StudentIdentitiesTable;
   }
 }
 
@@ -258,4 +259,25 @@ export interface StudentSectionPlacementsTable extends StudentOwned {
   roll_number: string;
   start_date: string;
   end_date: string | null;
+}
+
+/**
+ * A student's Aadhaar and birth certificate numbers (DDD 9.6): one row per student, made on the first write and kept
+ * when the numbers are cleared. The Aadhaar columns are sealed, hashed and masked as on `staff_identities` and are all
+ * set or all empty; the birth certificate number is kept as typed.
+ */
+export interface StudentIdentitiesTable {
+  student_id: string;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  created_by: string | null;
+  updated_at: ColumnType<Date, never, Date>;
+  updated_by: string | null;
+  version: Generated<number>;
+  society_id: string;
+  institution_id: string;
+  aadhaar_ciphertext: Buffer | null;
+  aadhaar_key_version: number | null;
+  aadhaar_hmac: Buffer | null;
+  aadhaar_last4: string | null;
+  birth_certificate_number: string | null;
 }
