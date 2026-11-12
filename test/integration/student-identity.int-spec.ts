@@ -26,6 +26,14 @@ const NUMBER = '2345 6789 0124';
 const DIGITS = '234567890124';
 const OTHER = '9876 5432 1096';
 
+const sealed = (hmacByte: number, fields: object = {}) => ({
+  aadhaar_ciphertext: Buffer.from('sealed'),
+  aadhaar_key_version: 1,
+  aadhaar_hmac: Buffer.alloc(32, hmacByte),
+  aadhaar_last4: '0124',
+  ...fields,
+});
+
 /** STU-02 `identity`, STU-10 and STU-11 (API design 6.8, 10.6, 10.9): the Aadhaar and birth certificate numbers of a student. */
 describe('a student’s Aadhaar and birth certificate numbers', () => {
   let ownerDb: Kysely<unknown>;
@@ -71,6 +79,57 @@ describe('a student’s Aadhaar and birth certificate numbers', () => {
     database.transaction(
       { personId: owner.person, roleCode: 2, societyId, institutionIds: [first, second] },
       work,
+    );
+  const tenantOf = (institutionIds: string[]) => ({
+    personId: owner.person,
+    roleCode: 2,
+    societyId,
+    institutionIds,
+  });
+  const hashOf = async (student: SchoolStudent) =>
+    (
+      await read(
+        async (tx) =>
+          (
+            await sql<{
+              aadhaar_hmac: Buffer;
+            }>`select aadhaar_hmac from student_identities where student_id = ${student.id}`.execute(
+              tx,
+            )
+          ).rows[0]!,
+      )
+    ).aadhaar_hmac;
+  const asked = (
+    tenant: {
+      personId?: string;
+      roleCode: number;
+      societyId?: string;
+      institutionIds?: string[];
+    },
+    hash: Buffer,
+  ) =>
+    database.transaction(tenant, async (tx) => {
+      const settings = sql<{ role: string; institutions: string }>`
+        select current_setting('app.role_code', true) as role,
+          current_setting('app.institution_ids', true) as institutions`;
+      const before = (await settings.execute(tx)).rows[0];
+      const found = (
+        await sql<{ found: boolean }>`
+          select app_student_aadhaar_elsewhere(${first}::uuid, ${hash}) as found`.execute(tx)
+      ).rows[0]!.found;
+      return { found, settingsBack: (await settings.execute(tx)).rows[0], before };
+    });
+  const insert = (student: SchoolStudent, institutionId: string, fields: object) =>
+    database.transaction(tenantOf([first]), (tx) =>
+      tx
+        .insertInto('student_identities')
+        .values({
+          student_id: student.id,
+          society_id: societyId,
+          institution_id: institutionId,
+          ...fields,
+        })
+        .execute(),
     );
   const stored = (student: { id: string }) =>
     read(
@@ -408,6 +467,14 @@ describe('a student’s Aadhaar and birth certificate numbers', () => {
       );
     });
 
+    it('never warns for its own Institution: a schoolmate’s released number, or the same number sent again', async () => {
+      await aadhaar(diya, NUMBER);
+      await api('delete', `/v1/students/${diya.id}?reason=1`, owner.token);
+      const taken = await aadhaar(ravi, NUMBER);
+      expect([taken.status, taken.body.meta]).toEqual([200, null]);
+      expect((await aadhaar(ravi, NUMBER)).body.meta).toBeNull();
+    });
+
     it('warns when another Institution of the Society holds the number, to an Admin who does not reach it, and writes the number', async () => {
       await admit(secondPlace, { identity: { aadhaarNumber: NUMBER } });
       const res = await aadhaar(diya, NUMBER, institutionAdmin.token);
@@ -529,6 +596,102 @@ describe('a student’s Aadhaar and birth certificate numbers', () => {
       expect((await reveal(diya, {}, institutionAdmin.token)).body.data.value).toBe(DIGITS);
       await api('delete', `/v1/students/${diya.id}?reason=1`, owner.token);
       expect((await reveal(diya)).body.data.value).toBe(DIGITS);
+    });
+  });
+
+  describe('the rules the database keeps itself', () => {
+    it('keeps one record per number in an Institution even when two rows are written straight to the table', async () => {
+      await expect(
+        database.transaction(tenantOf([first]), async (tx) => {
+          for (const student of [diya, ravi]) {
+            await tx
+              .insertInto('student_identities')
+              .values({
+                student_id: student.id,
+                society_id: societyId,
+                institution_id: first,
+                ...sealed(7),
+              })
+              .execute();
+          }
+        }),
+      ).rejects.toMatchObject({
+        code: '23505',
+        constraint: 'uq_student_identities_institution_aadhaar',
+      });
+    });
+
+    it('refuses an identity row for a student of an Institution the session does not reach', async () => {
+      const abroad = await admit(secondPlace);
+      await expect(insert(abroad, second, sealed(1))).rejects.toThrow(/row-level security/);
+    });
+
+    it('refuses to move an identity row to another Institution', async () => {
+      await aadhaar(diya, NUMBER);
+      await expect(
+        database.transaction(tenantOf([first]), (tx) =>
+          tx.updateTable('student_identities').set({ institution_id: second }).execute(),
+        ),
+      ).rejects.toThrow(/row-level security/);
+    });
+
+    it('gives the application no right to delete an identity row', async () => {
+      await aadhaar(diya, NUMBER);
+      await expect(
+        database.transaction(tenantOf([first]), (tx) =>
+          tx.deleteFrom('student_identities').where('student_id', '=', diya.id).execute(),
+        ),
+      ).rejects.toMatchObject({ code: '42501' });
+    });
+
+    it.each([
+      [
+        'an Aadhaar number with a part missing',
+        { aadhaar_last4: null },
+        'ck_student_identities_aadhaar_complete',
+      ],
+      [
+        'a hash that is not 32 bytes',
+        { aadhaar_hmac: Buffer.alloc(8, 1) },
+        'ck_student_identities_aadhaar_hmac',
+      ],
+      [
+        'last four digits that are not digits',
+        { aadhaar_last4: 'abcd' },
+        'ck_student_identities_aadhaar_last4',
+      ],
+      [
+        'a blank birth certificate number',
+        { birth_certificate_number: '  ' },
+        'ck_student_identities_birth_certificate',
+      ],
+    ])('refuses %s', async (_name, fields, constraint) => {
+      await expect(insert(diya, first, sealed(1, fields))).rejects.toMatchObject({
+        code: '23514',
+        constraint,
+      });
+    });
+  });
+
+  describe('app_student_aadhaar_elsewhere', () => {
+    it('answers for the caller’s own Society only, and puts the caller’s settings back', async () => {
+      const held = await admit(secondPlace, { identity: { aadhaarNumber: NUMBER } });
+      const hash = await hashOf(held);
+      const mine = { personId: owner.person, roleCode: 2, societyId, institutionIds: [first] };
+      const answer = await asked(mine, hash);
+      expect(answer.found).toBe(true);
+      expect(answer.settingsBack).toEqual(answer.before);
+
+      const otherSociety = await kit.society(admin);
+      const abroad = await asked(
+        { personId: owner.person, roleCode: 2, societyId: otherSociety, institutionIds: [] },
+        hash,
+      );
+      expect(abroad.found).toBe(false);
+      expect(abroad.settingsBack).toEqual(abroad.before);
+      const nobody = await asked({ roleCode: 2 }, hash);
+      expect(nobody.found).toBe(false);
+      expect(nobody.settingsBack).toEqual(nobody.before);
     });
   });
 });
