@@ -397,6 +397,10 @@ describe('students: add, read and list', () => {
       const taken = await add({ admissionNo: 'gvs-1', ...roll('2') });
       expect(taken.status).toBe(409);
       expect(taken.body.code).toBe('ADMISSION_NO_TAKEN');
+      // The ID is free again once the first student is deactivated.
+      const gone = await added({ admissionNo: 'GVS-GONE', ...roll('3') });
+      await deactivateRow(gone.id);
+      expect((await add({ admissionNo: 'gvs-gone', ...roll('4') })).status).toBe(201);
       // Another Institution's students have their own numbering.
       const otherClasses = await masters('predefined-classes');
       const otherYear = await kit.year(owner.token, second);
@@ -617,12 +621,28 @@ describe('students: add, read and list', () => {
       expect((await add({}, token)).status).toBe(403);
     });
 
-    it('links a guardian email that belongs to a Super Admin: a parent may hold any other role', async () => {
-      const res = await add({ guardians: [guardian({ email: superAdmin.email })] });
-      expect(res.status).toBe(201);
-      expect(res.body.data).toMatchObject({
-        guardians: [{ email: superAdmin.email, hasLogin: true }],
+    it('refuses to make a guardian a Super Admin: the platform team and the parents are kept apart both ways', async () => {
+      const parent = guardian();
+      await added({ guardians: [parent] });
+      const refusedAdmin = await api('post', '/v1/platform/super-admins', admin, {
+        email: parent.email,
       });
+      expect([refusedAdmin.status, refusedAdmin.body.code]).toEqual([409, 'ROLE_CONFLICT']);
+      const holds = await sql<{ n: number }>`
+        select count(*)::int as n from role_assignments g join users u on u.id = g.user_id
+        where u.email = ${parent.email}`.execute(ownerDb);
+      expect(holds.rows[0]!.n).toBe(0);
+    });
+
+    it('refuses a guardian email that belongs to a Super Admin, and links a teacher', async () => {
+      const res = await add({ guardians: [guardian({ email: superAdmin.email })] });
+      expect([res.status, res.body.code]).toEqual([409, 'ROLE_CONFLICT']);
+      const teacher = await kit.staff(owner.token, first, categoryId);
+      const linked = await add({
+        guardians: [guardian({ email: teacher.person.email })],
+        ...roll('8'),
+      });
+      expect(linked.status).toBe(201);
     });
   });
 
@@ -1216,6 +1236,34 @@ describe('students: add, read and list', () => {
       ).rejects.toThrow(/row-level security/);
     });
 
+    it('give a roll number back when the placement is closed: a current placement may take it', async () => {
+      const first1 = await added(roll('5'));
+      await refused(
+        sql`update student_section_placements set end_date = start_date
+          where student_enrolment_id = ${first1.placement.enrolmentId}`,
+      );
+      expect((await add({ firstName: 'Kabir', ...roll('5') })).status).toBe(201);
+    });
+
+    it('refuse an insert for another Institution of the same Society, in each table', async () => {
+      const attempts = [
+        sql`insert into students (society_id, institution_id, first_name)
+          values (${societyA}, ${second}, 'X')`,
+        sql`insert into student_guardians
+          (society_id, institution_id, student_id, first_name, relation, country_code, phone_number)
+          values (${societyA}, ${second}, ${newId()}, 'X', 1, '91', '9845012345')`,
+        sql`insert into student_enrolments
+          (society_id, institution_id, academic_year_id, student_id, class_id, enrolled_date)
+          values (${societyA}, ${second}, ${newId()}, ${newId()}, ${newId()}, '2026-06-01')`,
+        sql`insert into student_section_placements
+          (society_id, institution_id, academic_year_id, student_enrolment_id, class_id, section_id, roll_number, start_date)
+          values (${societyA}, ${second}, ${newId()}, ${newId()}, ${newId()}, ${newId()}, '1', '2026-06-01')`,
+      ];
+      for (const attempt of attempts) {
+        await expect(refused(attempt)).rejects.toThrow(/row-level security/);
+      }
+    });
+
     it('keep one section at a time, a section of the enrolment’s class, and a roll number once among the current', async () => {
       const student = await added(roll('r1'));
       const other = await added({ firstName: 'Kabir', ...roll('2') });
@@ -1322,6 +1370,85 @@ describe('students: add, read and list', () => {
       // Another Society's blocks, and a person who is nobody's guardian here, are not shown.
       expect(await blocksOf(userId, otherOwner.contexts[0]!.societyId!)).toEqual([]);
       expect(await blocksOf(newId())).toEqual([]);
+    });
+
+    it('answer only for the Society asked about, even when that Society has a block in force', async () => {
+      const parent = guardian();
+      await added({ guardians: [parent] });
+      const userId = (await usersWith(parent.email))[0]!.id;
+      const societyB = otherOwner.contexts[0]!.societyId!;
+      await blocks.setBlock(ownerDb, societyB, null, 1, true);
+      expect(await blocksOf(userId, societyB)).toEqual([]);
+      const { rows } = await sql<{ name: string | null }>`
+        select app_society_name(${societyB}, ${userId}) as name`.execute(ownerDb);
+      expect(rows[0]?.name).toBeNull();
+    });
+
+    it('put every setting of the caller back after they answer', async () => {
+      const parent = guardian();
+      await added({ guardians: [parent] });
+      const userId = (await usersWith(parent.email))[0]!.id;
+      const otherSociety = otherOwner.contexts[0]!.societyId!;
+      await blocks.setBlock(ownerDb, societyA, first, 3, true);
+      const settings = (tx: Parameters<Parameters<typeof database.transaction>[1]>[0]) =>
+        sql<{ values: string[] }>`
+          select array[
+            current_setting('app.role_code', true), current_setting('app.society_id', true),
+            current_setting('app.person_id', true), current_setting('app.institution_ids', true)
+          ] as values`.execute(tx);
+      const unchanged = await database.transaction(tenant([first, second]), async (tx) => {
+        const before = (await settings(tx)).rows[0]!.values;
+        const seen = await sql<{ section: number }>`
+          select section from app_active_blocks(${societyA}, ${userId})`.execute(tx);
+        const afterBlocks = (await settings(tx)).rows[0]!.values;
+        await sql`select app_society_name(${societyA}, ${userId})`.execute(tx);
+        const afterName = (await settings(tx)).rows[0]!.values;
+        // Asked about another Society, the caller's own Society must still be put back.
+        await sql`select * from app_active_blocks(${otherSociety}, ${userId})`.execute(tx);
+        const afterOtherBlocks = (await settings(tx)).rows[0]!.values;
+        await sql`select app_society_name(${otherSociety}, ${userId})`.execute(tx);
+        const afterOtherName = (await settings(tx)).rows[0]!.values;
+        return {
+          before,
+          afterBlocks,
+          afterName,
+          afterOtherBlocks,
+          afterOtherName,
+          seen: seen.rows.length,
+        };
+      });
+      expect(unchanged.seen).toBe(1);
+      expect(unchanged.before[3]).toBe(`${first},${second}`);
+      expect(unchanged.afterBlocks).toEqual(unchanged.before);
+      expect(unchanged.afterName).toEqual(unchanged.before);
+      expect(unchanged.afterOtherBlocks).toEqual(unchanged.before);
+      expect(unchanged.afterOtherName).toEqual(unchanged.before);
+    });
+
+    it('tell a guardian from a stranger in any Society, and put the role, Society and person back', async () => {
+      const parent = guardian();
+      await added({ guardians: [parent] });
+      const userId = (await usersWith(parent.email))[0]!.id;
+      const asked = (person: string) =>
+        database.transaction(
+          { societyId: otherOwner.contexts[0]!.societyId!, roleCode: 2, personId: owner.person },
+          async (tx) => {
+            const found = await sql<{
+              held: boolean;
+            }>`select app_is_guardian(${person}::uuid) as held`.execute(tx);
+            const settings = await sql<{ role: string; society: string; person: string }>`
+              select current_setting('app.role_code') as role, current_setting('app.society_id') as society,
+                current_setting('app.person_id') as person`.execute(tx);
+            return { held: found.rows[0]?.held, settings: settings.rows[0] };
+          },
+        );
+      const settings = {
+        role: '2',
+        society: otherOwner.contexts[0]!.societyId!,
+        person: owner.person,
+      };
+      expect(await asked(userId)).toEqual({ held: true, settings });
+      expect(await asked(newId())).toEqual({ held: false, settings });
     });
 
     it('stop answering once every child of the guardian is deactivated, but not while one stays', async () => {

@@ -155,6 +155,17 @@ export class SessionRepository {
     return this.hasStaffElsewhere(db, userId, NO_SOCIETY);
   }
 
+  /**
+   * Is the person a guardian of any student, in any Society? Dormant access counts. Read through a definer function,
+   * because a tenant sees no other Society's student rows.
+   */
+  async holdsGuardianRecord(db: Db, userId: string): Promise<boolean> {
+    const { rows } = await sql<{
+      found: boolean;
+    }>`select app_is_guardian(${userId}::uuid) as found`.execute(db);
+    return rows[0]?.found === true;
+  }
+
   private async explicitGrants(tx: Db, userId: string): Promise<Grant[]> {
     // Sign-in has no role set, so row-level security hides every Society and block; the
     // functions hand back the one name, and the active blocks, of a Society the person

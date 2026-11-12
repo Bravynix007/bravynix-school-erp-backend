@@ -28,6 +28,9 @@ function build(existing?: AccountRow, taken: number[] = []) {
     .fn<AccountRepository['holdsGrantOrRestorable']>()
     .mockResolvedValue(false);
   const holdsStaffRecord = vi.fn<SessionRepository['holdsStaffRecord']>().mockResolvedValue(false);
+  const holdsGuardianRecord = vi
+    .fn<SessionRepository['holdsGuardianRecord']>()
+    .mockResolvedValue(false);
   const findByEmail = vi.fn<AccountRepository['findByEmail']>().mockResolvedValue(existing);
   const insertPending = vi
     .fn<AccountRepository['insertPending']>()
@@ -52,7 +55,7 @@ function build(existing?: AccountRow, taken: number[] = []) {
       revokeGrant,
       endRoleSessions,
     } as unknown as AccountRepository,
-    { holdsStaffRecord } as unknown as SessionRepository,
+    { holdsStaffRecord, holdsGuardianRecord } as unknown as SessionRepository,
     {} as MfaRepository,
     { send } as unknown as BackgroundMailer,
   );
@@ -63,6 +66,7 @@ function build(existing?: AccountRow, taken: number[] = []) {
     holdsActiveGrant,
     holdsGrantOrRestorable,
     holdsStaffRecord,
+    holdsGuardianRecord,
     findByEmail,
     insertPending,
     activeGrant,
@@ -135,6 +139,7 @@ describe('AccountDirectory.grant', () => {
   it.each([
     ['an Institution Admin, active or dormant', 'holdsGrantOrRestorable'],
     ['staff, in any Society, active or dormant', 'holdsStaffRecord'],
+    ['a guardian of a student, in any Society', 'holdsGuardianRecord'],
   ] as const)(
     'refuses %s as Super Admin: the platform team holds no school role',
     async (_name, which) => {
@@ -388,14 +393,21 @@ describe('AccountDirectory.linkGuardian', () => {
     expect(t.insertPending).not.toHaveBeenCalled();
   });
 
-  it('links a Super Admin, a Society Owner or a teacher too: a parent may hold any other role', async () => {
+  it('refuses a Super Admin, under the separation lock', async () => {
     const t = build(user());
     t.holdsActiveGrant.mockResolvedValue(true);
+    await expect(
+      t.directory.linkGuardian(tx, { email: 'asha@example.com' }, 'admin-1'),
+    ).rejects.toMatchObject({ status: 409, code: 'ROLE_CONFLICT' });
+    expect(t.lockRoleSeparation).toHaveBeenCalled();
+    expect(t.holdsActiveGrant).toHaveBeenCalledWith(tx, 'user-1', [1]);
+  });
+
+  it('links a teacher or an Owner: a parent may hold any role but Super Admin', async () => {
+    const t = build(user());
     t.holdsStaffRecord.mockResolvedValue(true);
     const linked = await t.directory.linkGuardian(tx, { email: 'asha@example.com' }, 'admin-1');
     expect(linked).toMatchObject({ id: 'user-1', created: false });
-    expect(t.holdsActiveGrant).not.toHaveBeenCalled();
-    expect(t.holdsStaffRecord).not.toHaveBeenCalled();
   });
 
   it.each([

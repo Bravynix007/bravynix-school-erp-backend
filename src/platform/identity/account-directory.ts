@@ -169,12 +169,13 @@ export class AccountDirectory {
   /**
    * The person for a guardian, by email, as for a staff record: a new email makes a Pending account, an email that
    * already belongs to a person is that person (one email can be linked to several children, PRD decision 12). A
-   * blocked or inactive person cannot be linked. Any other mix of roles is allowed (PRD 5.2): a parent may also be a
-   * teacher, an Owner or a Super Admin. Runs in the caller's transaction; the welcome mail is the caller's, after the
-   * commit.
+   * blocked or inactive person cannot be linked; a Super Admin is never a parent (409 `ROLE_CONFLICT`, owner decision
+   * of 11 Nov 2026). Runs in the caller's transaction; the welcome mail is the caller's, after the commit.
    */
   async linkGuardian(tx: Tx, person: NewPersonDto, by: string): Promise<LinkedPerson> {
-    return this.findOrMake(tx, person, by, () => Promise.resolve());
+    return this.findOrMake(tx, person, by, (existing) =>
+      this.requireSeparateRoles(tx, existing.id, RoleCode.StudentParent),
+    );
   }
 
   /**
@@ -578,7 +579,9 @@ export class AccountDirectory {
         userId,
         [RoleCode.InstitutionAdmin],
         RESTORABLE_REVOKE_REASONS,
-      )) || (await this.sessions.holdsStaffRecord(tx, userId))
+      )) ||
+      (await this.sessions.holdsStaffRecord(tx, userId)) ||
+      (await this.sessions.holdsGuardianRecord(tx, userId))
     );
   }
 

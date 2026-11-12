@@ -271,14 +271,49 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   `.execute(db);
 
   await replaceBlockFunctions(db, true);
+
+  // A Super Admin is never a guardian, in either direction (owner decision, 11 Nov 2026). Making a person Super Admin
+  // asks whether they already guard a child anywhere; a Super Admin's tenant sees no Society's student rows, so the
+  // one boolean comes from a definer function, as for staff (migration 0026). Dormant access counts: an ended or
+  // deactivated child's row still stands until the guardian is removed.
+  await sql`
+    create function app_is_guardian(person uuid) returns boolean
+    language plpgsql volatile security definer
+    set search_path = pg_catalog, public, pg_temp
+    as $$
+    declare
+      caller_role text := current_setting('app.role_code', true);
+      caller_person text := current_setting('app.person_id', true);
+      found boolean;
+    begin
+      perform set_config('app.role_code', '1', true);
+      perform set_config('app.person_id', person::text, true);
+      select exists (
+        select 1 from student_guardians g where g.user_id = person and g.status = 1
+      ) into found;
+      perform set_config('app.role_code', coalesce(caller_role, ''), true);
+      perform set_config('app.person_id', coalesce(caller_person, ''), true);
+      return found;
+    end;
+    $$
+  `.execute(db);
+  await sql`revoke all on function app_is_guardian(uuid) from public`.execute(db);
+  await sql`
+    do $$
+    begin
+      if exists (select 1 from pg_roles where rolname = 'erp_app') then
+        grant execute on function app_is_guardian(uuid) to erp_app;
+      end if;
+    end;
+    $$
+  `.execute(db);
 }
 
 /**
  * The two definer functions of migration 0011, as migration 0024 left them, answering now for a guardian of an active
- * student as well. A function acts as Super Admin for the one read and as the person it is asked about (so the
- * "own records" policy shows their guardian rows) and with the Society's Institutions (so the student rows are in
- * scope), then puts the caller's settings back. `withGuardian` false
- * leaves the guardian out again.
+ * student as well. A function acts as Super Admin for the one read, with the Society and its Institutions set (so the
+ * staff, guardian and student rows of the Society are in scope), then puts the caller's settings back.
+ * `withGuardian` false leaves the guardian out again.
  */
 async function replaceBlockFunctions(db: Kysely<unknown>, withGuardian: boolean): Promise<void> {
   const holds = (society: string, person: string) =>
@@ -309,12 +344,10 @@ async function replaceBlockFunctions(db: Kysely<unknown>, withGuardian: boolean)
     declare
       caller_role text := current_setting('app.role_code', true);
       caller_society text := current_setting('app.society_id', true);
-      caller_person text := current_setting('app.person_id', true);
       caller_institutions text := current_setting('app.institution_ids', true);
     begin
       perform set_config('app.role_code', '1', true);
       perform set_config('app.society_id', society::text, true);
-      perform set_config('app.person_id', person::text, true);
       perform set_config(
         'app.institution_ids',
         coalesce((select string_agg(i.id::text, ',') from institutions i where i.society_id = society), ''),
@@ -326,7 +359,6 @@ async function replaceBlockFunctions(db: Kysely<unknown>, withGuardian: boolean)
           and (${holds('society', 'person')});
       perform set_config('app.role_code', coalesce(caller_role, ''), true);
       perform set_config('app.society_id', coalesce(caller_society, ''), true);
-      perform set_config('app.person_id', coalesce(caller_person, ''), true);
       perform set_config('app.institution_ids', coalesce(caller_institutions, ''), true);
     end;
     $$
@@ -339,13 +371,11 @@ async function replaceBlockFunctions(db: Kysely<unknown>, withGuardian: boolean)
     declare
       caller_role text := current_setting('app.role_code', true);
       caller_society text := current_setting('app.society_id', true);
-      caller_person text := current_setting('app.person_id', true);
       caller_institutions text := current_setting('app.institution_ids', true);
       found_name text;
     begin
       perform set_config('app.role_code', '1', true);
       perform set_config('app.society_id', society::text, true);
-      perform set_config('app.person_id', person::text, true);
       perform set_config(
         'app.institution_ids',
         coalesce((select string_agg(i.id::text, ',') from institutions i where i.society_id = society), ''),
@@ -356,7 +386,6 @@ async function replaceBlockFunctions(db: Kysely<unknown>, withGuardian: boolean)
         and (${holds('society', 'person')});
       perform set_config('app.role_code', coalesce(caller_role, ''), true);
       perform set_config('app.society_id', coalesce(caller_society, ''), true);
-      perform set_config('app.person_id', coalesce(caller_person, ''), true);
       perform set_config('app.institution_ids', coalesce(caller_institutions, ''), true);
       return found_name;
     end;
@@ -369,6 +398,7 @@ export async function down(db: Kysely<unknown>): Promise<void> {
   if (process.env.NODE_ENV === 'production') {
     throw new Error('Refusing to drop students in production: later tables refer to them');
   }
+  await sql`drop function if exists app_is_guardian(uuid)`.execute(db);
   await replaceBlockFunctions(db, false);
   await sql`drop table if exists student_section_placements`.execute(db);
   await sql`drop table if exists student_enrolments`.execute(db);
