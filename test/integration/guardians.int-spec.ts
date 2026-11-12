@@ -689,8 +689,8 @@ describe('guardians: list, add, edit and remove', () => {
       const sibling = await admit(place, { guardians: [primaryOf({ email: ravi.email })] });
       const [head, meena] = await listed(diya);
       expect((await edit(meena!.id, { version: 1, isPrimary: true })).status).toBe(200);
-      const second = await add(sibling, guardian({ email: mail(), isPrimary: true }));
-      expect(second.status).toBe(201);
+      const handedOver = await add(sibling, guardian({ email: mail(), isPrimary: true }));
+      expect(handedOver.status).toBe(201);
       const session = await parentSession(ravi.email);
       const [siblingLink] = (await links(ravi.email)).filter((l) => l.student_id === sibling.id);
 
