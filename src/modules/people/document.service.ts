@@ -48,7 +48,7 @@ export class DocumentService {
   constructor(
     private readonly database: DatabaseService,
     private readonly documents: DocumentRepository,
-    private readonly context: StaffContext,
+    private readonly staffContext: StaffContext,
     private readonly studentContext: StudentContext,
     private readonly scope: ScopeService,
     private readonly files: FileDirectory,
@@ -61,9 +61,9 @@ export class DocumentService {
    * (404 for another), an admin the records of Institutions they reach; a deactivated record keeps its documents.
    */
   async list(principal: Principal, staffMemberId: string): Promise<ApiResult<DocumentResource[]>> {
-    const context = await this.context.of(principal, staffMemberId);
+    const context = await this.staffContext.of(principal, staffMemberId);
     const rows = await this.database.transaction(context.tenant, (tx) =>
-      this.documents.ofStaff(tx, staffMemberId),
+      this.documents.ofOwner(tx, 'staff_member_id', staffMemberId),
     );
     return ApiResult.list(await this.resources(context.tenant, rows), null);
   }
@@ -78,7 +78,7 @@ export class DocumentService {
   ): Promise<ApiResult<DocumentResource[]>> {
     const context = await this.studentContext.of(principal, studentId);
     const rows = await this.database.transaction(context.tenant, (tx) =>
-      this.documents.ofStudent(tx, studentId),
+      this.documents.ofOwner(tx, 'student_id', studentId),
     );
     return ApiResult.list(await this.resources(context.tenant, rows), null);
   }
@@ -93,9 +93,9 @@ export class DocumentService {
     staffMemberId: string,
     body: CreateDocumentDto,
   ): Promise<DocumentResource> {
-    const context = await this.context.of(principal, staffMemberId);
+    const context = await this.staffContext.of(principal, staffMemberId);
     return this.attach(principal, context.tenant, body, async (tx) => {
-      const staff = await this.context.lockedActive(tx, staffMemberId);
+      const staff = await this.staffContext.lockedActive(tx, staffMemberId);
       return {
         societyId: staff.society_id,
         institutionId: staff.home_institution_id,
