@@ -106,6 +106,7 @@ const en: Catalogue = {
   PRIMARY_GUARDIAN_REQUIRED: 'Exactly one guardian must be the primary guardian',
   GUARDIAN_LIMIT_REACHED: 'A student can have at most five guardians',
   LAST_GUARDIAN: 'A student must keep at least one guardian',
+  NO_CURRENT_PLACEMENT: 'The student is not in a class this year',
   // Files (API design 15)
   ALREADY_CONFIRMED: 'This file has already been confirmed',
   FILE_TOO_LARGE: 'The file is larger than 5 MB',

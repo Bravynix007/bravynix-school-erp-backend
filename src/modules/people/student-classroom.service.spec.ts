@@ -220,4 +220,25 @@ describe('StudentClassroomService', () => {
       });
     });
   });
+
+  describe('requireOwnSection', () => {
+    it('answers the placement it is given when it is in an own section of the current year', async () => {
+      const t = build();
+      expect(await t.service.requireOwnSection({} as Tx, teacher, 'institution-1', placed)).toBe(
+        placed,
+      );
+      expect(t.placedNow).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['no placement', undefined],
+      ['a section that is not theirs', { ...placed, section_id: 'section-2' }],
+      ['another year', { ...placed, academic_year_id: 'year-0' }],
+    ])('is 403 NOT_ASSIGNED for %s', async (_name, given) => {
+      const t = build();
+      expect(
+        await fail(t.service.requireOwnSection({} as Tx, teacher, 'institution-1', given)),
+      ).toEqual({ status: 403, code: 'NOT_ASSIGNED' });
+    });
+  });
 });
