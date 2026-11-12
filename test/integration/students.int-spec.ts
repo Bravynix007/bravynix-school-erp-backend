@@ -1179,10 +1179,13 @@ describe('students: add, read and list', () => {
       expect(namesOf(await list('?status=0'))).toEqual([]);
     });
 
-    it('is for Owners and Admins: a Teacher gets 403', async () => {
+    it('shows a Teacher with no section nothing, and Super Admin is not a caller (the classroom view is in students-guards)', async () => {
+      await added();
       const teacher = await kit.staff(owner.token, first, categoryId);
       const token = await kit.actingAs(teacher.person.email, 4, societyA);
-      expect((await list('', token)).status).toBe(403);
+      const res = await list('', token);
+      expect([res.status, res.body.data]).toEqual([200, []]);
+      expect((await list('', admin)).status).toBe(403);
     });
   });
 

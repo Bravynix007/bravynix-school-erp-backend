@@ -20,15 +20,15 @@ const view: SectionView = {
 };
 
 describe('sectionResource', () => {
-  it('shows the section with its capacity and no class teacher, and a student count that waits for the Students slice', () => {
-    expect(sectionResource(view, new Map(), null)).toMatchObject({
+  it('shows the section with its capacity, no class teacher and the students in it', () => {
+    expect(sectionResource(view, new Map(), null, 12)).toMatchObject({
       id: view.id,
       classId: view.class_id,
       institutionId: view.institution_id,
       predefinedSection: { id: view.predefined_section_id, code: 'A', name: 'A' },
       displayName: 'A',
       capacity: 40,
-      currentStudentCount: null,
+      currentStudentCount: 12,
       classTeacher: null,
       status: 1,
       version: 1,
@@ -36,11 +36,11 @@ describe('sectionResource', () => {
   });
 
   it('shows no capacity as null', () => {
-    expect(sectionResource({ ...view, capacity: null }, new Map(), null).capacity).toBeNull();
+    expect(sectionResource({ ...view, capacity: null }, new Map(), null, 0).capacity).toBeNull();
   });
 
   it('shows the class teacher it is given', () => {
     const lead = { staffMemberId: 'staff-1', firstName: 'Meera', lastName: null };
-    expect(sectionResource(view, new Map(), lead).classTeacher).toEqual(lead);
+    expect(sectionResource(view, new Map(), lead, 0).classTeacher).toEqual(lead);
   });
 });

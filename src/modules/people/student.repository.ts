@@ -48,6 +48,8 @@ export interface StudentFilter {
   academicYearId?: string;
   classId?: string;
   sectionId?: string;
+  /** Only students whose placement is in one of these sections (a teacher's own); none listed is no student. */
+  inSectionIds?: readonly string[];
 }
 
 /** A student with the placement a list shows. */
@@ -181,6 +183,19 @@ export class StudentRepository {
     return Number(total);
   }
 
+  /** The students now in each of these sections, in any year: the open placements. A section with none is left out. */
+  async sectionCounts(tx: Tx, sectionIds: readonly string[]): Promise<Map<string, number>> {
+    if (sectionIds.length === 0) return new Map();
+    const rows = await tx
+      .selectFrom('student_section_placements')
+      .select(['section_id', (eb) => eb.fn.countAll<number>().as('total')])
+      .where('section_id', 'in', sectionIds)
+      .where('end_date', 'is', null)
+      .groupBy('section_id')
+      .execute();
+    return new Map(rows.map((row) => [row.section_id, Number(row.total)]));
+  }
+
   /** Students of the filter, each with the placement shown: the year named, else the latest. */
   private listed(tx: Tx, filter: StudentFilter) {
     return tx
@@ -212,6 +227,7 @@ export class StudentRepository {
       ];
       if (filter.classId) conditions.push(eb('pl.class_id', '=', filter.classId));
       if (filter.sectionId) conditions.push(eb('pl.section_id', '=', filter.sectionId));
+      if (filter.inSectionIds) conditions.push(eb('pl.section_id', 'in', filter.inSectionIds));
       if (filter.q) {
         const pattern = containsPattern(filter.q.toLowerCase());
         conditions.push(
@@ -233,7 +249,11 @@ export class StudentRepository {
     limit: number,
     offset: number,
   ): Promise<{ rows: StudentListRow[]; total: number }> {
-    if (filter.institutionIds.length === 0 || filter.statuses.length === 0) {
+    if (
+      filter.institutionIds.length === 0 ||
+      filter.statuses.length === 0 ||
+      filter.inSectionIds?.length === 0
+    ) {
       return { rows: [], total: 0 };
     }
     let query = this.listed(tx, filter)

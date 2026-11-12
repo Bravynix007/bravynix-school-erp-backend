@@ -63,6 +63,19 @@ export class SectionRepository {
     return (lock ? query.forUpdate() : query).executeTakeFirst();
   }
 
+  /**
+   * The section, held against deactivation until the transaction ends: whoever places a student in it keeps it open
+   * (`for key share` waits for a deactivation under way, and a deactivation waits for it).
+   */
+  keptOpen(tx: Tx, id: string): Promise<SectionRow | undefined> {
+    return tx
+      .selectFrom('sections')
+      .selectAll()
+      .where('id', '=', id)
+      .forKeyShare()
+      .executeTakeFirst();
+  }
+
   /** A class's active sections, locked for the class being deactivated. */
   lockedActive(tx: Tx, classId: string): Promise<SectionRow[]> {
     return tx

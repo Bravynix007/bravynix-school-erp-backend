@@ -23,6 +23,7 @@ describe('StudentRepository.page', () => {
   it('reads nothing when there is no Institution or no status to look in', async () => {
     expect(await page({ institutionIds: [] })).toEqual([]);
     expect(await page({ statuses: [] })).toEqual([]);
+    expect(await page({ inSectionIds: [] })).toEqual([]);
     const { tx } = recorder();
     expect(await repository.page(tx, filter({ institutionIds: [] }), [], 10, 0)).toEqual({
       rows: [],
@@ -39,6 +40,14 @@ describe('StudentRepository.page', () => {
     }
     expect(list!.sql).toMatch(/limit \$\d+ offset \$\d+$/);
     expect(count!.sql).toContain('count(*) as "total"');
+  });
+
+  it('keeps to the sections given, in the list and in the count', async () => {
+    const [list, count] = await page({ inSectionIds: ['section-1', 'section-2'] });
+    for (const query of [list!, count!]) {
+      expect(query.sql).toContain('"pl"."section_id" in (');
+      expect(query.parameters).toEqual(expect.arrayContaining(['section-1', 'section-2']));
+    }
   });
 
   it('shows the latest placement of the student, or the one of the year asked for', async () => {
@@ -139,5 +148,16 @@ describe('StudentRepository', () => {
       '"academic_year_id" = $1 and "section_id" = $2 and "end_date" is null',
     );
     expect(queries[0]!.parameters).toEqual(['year-1', 'section-1']);
+  });
+
+  it('counts the open placements of each section, in any year, and leaves out a section with none', async () => {
+    const { tx, queries } = recorder();
+    await repository.sectionCounts(tx, ['section-1', 'section-2']).catch(() => undefined);
+    expect(queries[0]!.sql).toContain('"section_id" in ($1, $2) and "end_date" is null');
+    expect(queries[0]!.sql).toContain('group by "section_id"');
+    expect(queries[0]!.parameters).toEqual(['section-1', 'section-2']);
+    const none = recorder();
+    expect(await repository.sectionCounts(none.tx, [])).toEqual(new Map());
+    expect(none.queries).toEqual([]);
   });
 });

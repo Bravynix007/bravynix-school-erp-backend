@@ -98,6 +98,7 @@ const en: Catalogue = {
   // Students (API design 10.6)
   ADMISSION_NO_TAKEN: 'Another active student of this Institution has this Admission ID',
   ROLL_NUMBER_TAKEN: 'Another student of this section has this roll number',
+  HAS_STUDENTS: 'Students are placed here, so it cannot be deactivated',
   SECTION_NOT_IN_CLASS: 'This section does not belong to the class',
   YEAR_NOT_ACTIVE: 'This academic year is not active',
   INACTIVE_SECTION: 'This section is deactivated',

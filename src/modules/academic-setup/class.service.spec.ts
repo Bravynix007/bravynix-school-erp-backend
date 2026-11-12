@@ -8,6 +8,7 @@ import type { InstitutionContext, ScopeService } from '../../platform/tenancy/in
 import type { ClassRepository, ClassRow, ClassView } from './class.repository.js';
 import { ClassService } from './class.service.js';
 import type { SectionRepository, SectionRow } from './section.repository.js';
+import type { SectionStudents } from './section-students.js';
 import type { TeachingStaff } from './teaching-staff.js';
 
 const owner = {
@@ -143,6 +144,7 @@ function build(current: ClassRow | null = row(), offeredIds: string[] = ['cat-hs
   const ownSectionIds = vi
     .fn<TeachingStaff['ownSectionIds']>()
     .mockResolvedValue(new Set(['section-1']));
+  const countsOf = vi.fn<SectionStudents['countsOf']>().mockResolvedValue(new Map());
   const record = vi.fn<AuditService['record']>().mockResolvedValue('audit-1');
   const service = new ClassService(
     { transaction } as unknown as DatabaseService,
@@ -154,11 +156,13 @@ function build(current: ClassRow | null = row(), offeredIds: string[] = ['cat-hs
       describe: vi.fn<PersonDirectory['describe']>().mockResolvedValue(new Map()),
     } as unknown as PersonDirectory,
     { ownSectionIds } as unknown as TeachingStaff,
+    { countsOf } as unknown as SectionStudents,
     { record } as unknown as AuditService,
   );
   return {
     service,
     ownSectionIds,
+    countsOf,
     active,
     find,
     insert,
@@ -365,6 +369,19 @@ describe('ClassService', () => {
         'class.deactivated',
       ]);
       expect(t.update.mock.calls[0]![2]).toMatchObject({ status: 0 });
+    });
+
+    it('counts the students of the sections it holds, and refuses with 409 HAS_STUDENTS while any sit in one', async () => {
+      const t = build();
+      t.countsOf.mockResolvedValue(new Map([['section-2', 3]]));
+      expect(await fail(t.service.deactivate(owner, 'class-1'))).toMatchObject({
+        status: 409,
+        code: 'HAS_STUDENTS',
+      });
+      expect(t.countsOf).toHaveBeenCalledWith(expect.anything(), ['section-1', 'section-2']);
+      expect(t.sectionUpdate).not.toHaveBeenCalled();
+      expect(t.update).not.toHaveBeenCalled();
+      expect(t.record).not.toHaveBeenCalled();
     });
 
     it('is 404 for an unknown or already deactivated class', async () => {
