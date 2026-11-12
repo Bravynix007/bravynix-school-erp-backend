@@ -37,6 +37,10 @@ interface ClassroomStudent {
   placement: { sectionId: string; rollNumber: string };
 }
 
+/** The refusal code of an answer, `undefined` when it succeeded. */
+const refusal = (res: { status: number; body: { code?: string } }) =>
+  res.status < 300 ? undefined : res.body.code;
+
 const CLASSROOM_KEYS = [
   'bloodGroup',
   'dateOfBirth',
@@ -98,6 +102,12 @@ describe('students: the section count, HAS_STUDENTS and the classroom view', () 
     (await sections(classId)).find((s) => s.id === sectionId)!.currentStudentCount;
   const deactivateStudent = (student: SchoolStudent, reason = 1) =>
     api('delete', `/v1/students/${student.id}?reason=${reason}`, owner.token);
+  const tenant = () => ({
+    personId: owner.person,
+    roleCode: 2,
+    societyId: societyA,
+    institutionIds: [first],
+  });
   const asTeacher = (staff: SchoolStaff) => kit.actingAs(staff.person.email, TEACHER, societyA);
   const classroom = async (token: string, query = '') => {
     const res = await api('get', `/v1/students${query}`, token);
@@ -275,13 +285,7 @@ describe('students: the section count, HAS_STUDENTS and the classroom view', () 
       const gate = new Promise<void>((resolve) => (release = resolve));
       let locked!: () => void;
       const held = new Promise<void>((resolve) => (locked = resolve));
-      const tenant = {
-        personId: owner.person,
-        roleCode: 2,
-        societyId: societyA,
-        institutionIds: [first],
-      };
-      const deactivating = database.transaction(tenant, async (tx) => {
+      const deactivating = database.transaction(tenant(), async (tx) => {
         await sql`select id from sections where id = ${nineA} for update`.execute(tx);
         locked();
         await gate;
@@ -305,6 +309,55 @@ describe('students: the section count, HAS_STUDENTS and the classroom view', () 
       const res = await adding;
       expect(res.status).toBe(422);
       expect(res.body).toMatchObject({ code: 'INACTIVE_SECTION' });
+    });
+
+    it('takes the class before the section, as CLS-05 does, so an add waiting on a class holds no section', async () => {
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      let locked!: () => void;
+      const held = new Promise<void>((resolve) => (locked = resolve));
+      const holding = database.transaction(tenant(), async (tx) => {
+        await sql`select id from classes where id = ${class9} for update`.execute(tx);
+        locked();
+        await gate;
+      });
+      await held;
+      let settled = false;
+      const adding = api(
+        'post',
+        '/v1/students',
+        owner.token,
+        kit.studentBody(first, at(nineA)),
+      ).then((res) => {
+        settled = true;
+        return res;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      expect(settled).toBe(false);
+      // The add is waiting for the class, so the section is still free to be locked: `nowait` would fail otherwise.
+      await database.transaction(tenant(), (tx) =>
+        sql`select id from sections where id = ${nineA} for update nowait`.execute(tx),
+      );
+      release();
+      await holding;
+      expect((await adding).status).toBe(201);
+    });
+
+    it('never deadlocks when a student is added while the class is deactivated: one of the two wins cleanly', async () => {
+      for (let round = 0; round < 4; round += 1) {
+        const [deactivated, added] = await Promise.all([
+          api('delete', `/v1/classes/${class10}`, owner.token),
+          api('post', '/v1/students', owner.token, kit.studentBody(first, at(tenA, class10))),
+        ]);
+        const outcome = [deactivated.status, refusal(deactivated), added.status, refusal(added)];
+        expect([
+          [200, undefined, 422, 'INACTIVE_SECTION'],
+          [409, 'HAS_STUDENTS', 201, undefined],
+        ]).toContainEqual(outcome);
+        if (deactivated.status === 200) break;
+        // The class stays: take the student out again so the next round can race the same way.
+        await api('delete', `/v1/students/${added.body.data.id}?reason=1`, owner.token);
+      }
     });
   });
 

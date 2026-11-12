@@ -65,9 +65,22 @@ export class SectionRepository {
 
   /**
    * The section, held against deactivation until the transaction ends: whoever places a student in it keeps it open
-   * (`for key share` waits for a deactivation under way, and a deactivation waits for it).
+   * (`for key share` waits for a deactivation under way, and a deactivation waits for it). The class is held first,
+   * then the section, the order CLS-05 takes them in (DDD 13.3), so an add and a class deactivation cannot deadlock.
    */
-  keptOpen(tx: Tx, id: string): Promise<SectionRow | undefined> {
+  async keptOpen(tx: Tx, id: string): Promise<SectionRow | undefined> {
+    const found = await tx
+      .selectFrom('sections')
+      .select('class_id')
+      .where('id', '=', id)
+      .executeTakeFirst();
+    if (!found) return undefined;
+    await tx
+      .selectFrom('classes')
+      .select('id')
+      .where('id', '=', found.class_id)
+      .forKeyShare()
+      .execute();
     return tx
       .selectFrom('sections')
       .selectAll()
