@@ -8,6 +8,7 @@ export {
   type AccessHolder,
   type AdminGrantRequest,
   type GrantedPerson,
+  type GuardianEmailChange,
   type LinkedPerson,
   type StaffEmailChange,
   type SeatKind,

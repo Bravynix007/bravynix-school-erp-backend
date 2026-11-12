@@ -2,6 +2,7 @@ import { AppException } from '../../common/http/app-exception.js';
 import type { GuardianRow, PlacedRow, StudentRow } from './student.repository.js';
 import {
   enrolmentAuditView,
+  guardianAuditView,
   latestMoveDate,
   requireValidDates,
   requireValidMoveDate,
@@ -247,6 +248,42 @@ const refused = (work: () => void) => {
   }
   return null;
 };
+
+describe('guardianAuditView', () => {
+  it('keeps the name, relation, flags and status, with the numbers by their last four digits', () => {
+    expect(guardianAuditView(guardian({ status: 1 }))).toEqual({
+      firstName: 'Ravi',
+      lastName: 'Shetty',
+      relation: 1,
+      phone: '******2345',
+      alternatePhone: '******2346',
+      occupation: 'Engineer',
+      hasLogin: true,
+      isPrimary: true,
+      isEmergencyContact: false,
+      status: 1,
+    });
+  });
+
+  it('shows a guardian without a login, an alternate number or an occupation as nulls and false', () => {
+    expect(
+      guardianAuditView(
+        guardian({ user_id: null, email: null, alternate_phone: null, occupation: null }),
+      ),
+    ).toMatchObject({
+      hasLogin: false,
+      alternatePhone: null,
+      occupation: null,
+    });
+  });
+
+  it('leaves out the email and every whole number', () => {
+    const text = JSON.stringify(guardianAuditView(guardian({ alternate_phone: '9845012346' })));
+    for (const secret of ['ravi@example.com', '9845012345', '9845012346']) {
+      expect(text).not.toContain(secret);
+    }
+  });
+});
 
 describe('requireValidDates', () => {
   it('passes dates that agree, and no dates', () => {

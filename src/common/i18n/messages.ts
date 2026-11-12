@@ -74,6 +74,7 @@ const en: Catalogue = {
   EMPLOYEE_ID_TAKEN: 'Another active staff member of this Institution has this Employee ID',
   CANNOT_ACT_ON_SELF: 'You cannot do this to your own account',
   ALREADY_ADMIN: 'This person is already an Admin of this Institution',
+  ALREADY_GUARDIAN: 'This person is already a guardian of this student',
   ADMIN_ACCESS_HELD: 'This person is an Admin of this Institution; revoke that access first',
   SUBJECT_ASSIGNED:
     'This staff member still teaches this subject in a section; end that assignment first',
@@ -103,6 +104,8 @@ const en: Catalogue = {
   YEAR_NOT_ACTIVE: 'This academic year is not active',
   INACTIVE_SECTION: 'This section is deactivated',
   PRIMARY_GUARDIAN_REQUIRED: 'Exactly one guardian must be the primary guardian',
+  GUARDIAN_LIMIT_REACHED: 'A student can have at most five guardians',
+  LAST_GUARDIAN: 'A student must keep at least one guardian',
   // Files (API design 15)
   ALREADY_CONFIRMED: 'This file has already been confirmed',
   FILE_TOO_LARGE: 'The file is larger than 5 MB',
