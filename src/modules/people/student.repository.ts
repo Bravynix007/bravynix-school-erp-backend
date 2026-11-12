@@ -50,6 +50,10 @@ export interface StudentFilter {
   sectionId?: string;
   /** Only students whose placement is in one of these sections (a teacher's own); none listed is no student. */
   inSectionIds?: readonly string[];
+  /** Only placements of these years (a teacher's current years); none listed is no student. */
+  inYearIds?: readonly string[];
+  /** Search the name and roll number only, never the Admission ID (the classroom view hides it). */
+  searchNameAndRollOnly?: boolean;
 }
 
 /** A student with the placement a list shows. */
@@ -210,6 +214,9 @@ export class StudentRepository {
             .$if(filter.academicYearId !== undefined, (qb) =>
               qb.where('p.academic_year_id', '=', filter.academicYearId!),
             )
+            .$if(filter.inYearIds !== undefined, (qb) =>
+              qb.where('p.academic_year_id', 'in', filter.inYearIds!),
+            )
             .orderBy('p.start_date', 'desc')
             .orderBy('p.id', 'desc')
             .limit(1)
@@ -232,7 +239,13 @@ export class StudentRepository {
         const pattern = containsPattern(filter.q.toLowerCase());
         conditions.push(
           eb.or([
-            eb('students.search_text', 'like', pattern),
+            filter.searchNameAndRollOnly
+              ? eb(
+                  sql`lower(students.first_name || ' ' || coalesce(students.last_name, ''))`,
+                  'like',
+                  pattern,
+                )
+              : eb('students.search_text', 'like', pattern),
             eb(sql`lower(pl.roll_number)`, 'like', pattern),
           ]),
         );
@@ -252,7 +265,8 @@ export class StudentRepository {
     if (
       filter.institutionIds.length === 0 ||
       filter.statuses.length === 0 ||
-      filter.inSectionIds?.length === 0
+      filter.inSectionIds?.length === 0 ||
+      filter.inYearIds?.length === 0
     ) {
       return { rows: [], total: 0 };
     }

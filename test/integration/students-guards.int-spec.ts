@@ -350,6 +350,20 @@ describe('students: the section count, HAS_STUDENTS and the classroom view', () 
       ]);
     });
 
+    it('does not match the Admission ID the view hides, and lists nobody for a year that is not the current one', async () => {
+      await admit(nineA, { firstName: 'Diya', admissionNo: 'ADM-4417', ...roll(nineA, '44') });
+      const token = await asTeacher(meera);
+      expect(await classroom(token, '?q=ADM-4417')).toEqual([]);
+      expect((await classroom(token, '?q=44')).map((s) => s.firstName)).toEqual(['Diya']);
+      expect((await classroom(token, `?academicYearId=${year}`)).map((s) => s.firstName)).toEqual([
+        'Diya',
+      ]);
+      expect(await classroom(token, `?academicYearId=${nineA}`)).toEqual([]);
+      // An Admin finds the same student by the Admission ID.
+      const found = await api('get', '/v1/students?q=ADM-4417', institutionAdmin.token);
+      expect(found.body.data).toHaveLength(1);
+    });
+
     it('does not show deactivated students, whatever status is asked', async () => {
       const diya = await admit(nineA, { firstName: 'Diya' });
       await admit(nineA, { firstName: 'Asha' });

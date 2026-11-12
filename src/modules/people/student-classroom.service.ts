@@ -6,7 +6,7 @@ import { ErrorCode } from '../../common/http/error-codes.js';
 import { pageMeta, pageOffset, parseSort } from '../../common/pagination/pagination.js';
 import { DatabaseService } from '../../platform/database/index.js';
 import { ScopeService } from '../../platform/tenancy/index.js';
-import { TeachingStaff } from '../academic-setup/index.js';
+import { AcademicYearDirectory, TeachingStaff } from '../academic-setup/index.js';
 import { StudentContext } from './student-context.js';
 import type { ListStudentsQueryDto } from './student.dto.js';
 import { StudentRepository } from './student.repository.js';
@@ -17,7 +17,8 @@ const CLASSROOM_SORT_FIELDS = ['name', 'rollNumber'] as const;
 
 /**
  * STU-01 and STU-03 for a Teacher or Staff member (API design 6.4, D7): the students of the sections they lead or
- * teach this year, in the classroom view. A student of another section of their own school is 403 `NOT_ASSIGNED`; a
+ * teach this year, in the classroom view: placements of the current year only, and a search by name or roll
+ * number (never the Admission ID, which the view hides). A student of another section of their own school is 403 `NOT_ASSIGNED`; a
  * student of an Institution they do not reach is 404. Deactivated students are not shown.
  */
 @Injectable()
@@ -28,6 +29,7 @@ export class StudentClassroomService {
     private readonly scope: ScopeService,
     private readonly context: StudentContext,
     private readonly teaching: TeachingStaff,
+    private readonly years: AcademicYearDirectory,
   ) {}
 
   /** STU-01: the students in the caller's own sections, filtered and searched as for an admin. */
@@ -44,10 +46,17 @@ export class StudentClassroomService {
     ]);
     const { rows, total } = await this.database.transaction(scope.tenant, async (tx) => {
       const own = new Set<string>();
+      const current = new Set<string>();
       for (const institutionId of institutionIds) {
+        const year = await this.years.currentId(tx, institutionId);
+        if (year !== null) current.add(year);
         for (const id of await this.teaching.ownSectionIds(tx, principal.personId, institutionId)) {
           own.add(id);
         }
+      }
+      // A teacher's classroom is this year's: another year named lists nobody.
+      if (query.academicYearId !== undefined && !current.has(query.academicYearId)) {
+        return { rows: [], total: 0 };
       }
       return this.students.page(
         tx,
@@ -59,6 +68,8 @@ export class StudentClassroomService {
           classId: query.classId,
           sectionId: query.sectionId,
           inSectionIds: [...own],
+          inYearIds: [...current],
+          searchNameAndRollOnly: true,
         },
         sort,
         query.limit,
@@ -79,7 +90,8 @@ export class StudentClassroomService {
       if (!row) throw AppException.notFound();
       const placed = row.status === 1 ? await this.students.placedNow(tx, id) : undefined;
       const own = await this.teaching.ownSectionIds(tx, principal.personId, context.institutionId);
-      if (!placed || !own.has(placed.section_id)) {
+      const current = await this.years.currentId(tx, context.institutionId);
+      if (!placed || !own.has(placed.section_id) || placed.academic_year_id !== current) {
         throw AppException.forbidden(ErrorCode.NOT_ASSIGNED);
       }
       return studentClassroom(row, placed);

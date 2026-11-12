@@ -24,6 +24,7 @@ describe('StudentRepository.page', () => {
     expect(await page({ institutionIds: [] })).toEqual([]);
     expect(await page({ statuses: [] })).toEqual([]);
     expect(await page({ inSectionIds: [] })).toEqual([]);
+    expect(await page({ inYearIds: [] })).toEqual([]);
     const { tx } = recorder();
     expect(await repository.page(tx, filter({ institutionIds: [] }), [], 10, 0)).toEqual({
       rows: [],
@@ -78,6 +79,19 @@ describe('StudentRepository.page', () => {
     expect(list!.sql).toContain('"students"."search_text" like $5');
     expect(list!.sql).toContain('lower(pl.roll_number) like $6');
     expect(list!.parameters.slice(4, 6)).toEqual(['%50\\%\\_x%', '%50\\%\\_x%']);
+  });
+
+  it('searches only the name and roll number for the classroom view, never the Admission ID', async () => {
+    const [list] = await page({ q: 'adm', searchNameAndRollOnly: true });
+    expect(list!.sql).not.toContain('search_text');
+    expect(list!.sql).toContain(
+      "lower(students.first_name || ' ' || coalesce(students.last_name, '')) like $5",
+    );
+  });
+
+  it('keeps the placement to the years given', async () => {
+    const [list] = await page({ inYearIds: ['year-1'] });
+    expect(list!.sql).toContain('"p"."academic_year_id" in ($1)');
   });
 
   it.each([

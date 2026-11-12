@@ -2,7 +2,7 @@ import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { AppException } from '../../common/http/app-exception.js';
 import type { DatabaseService, Tx } from '../../platform/database/index.js';
 import type { InstitutionContext, ScopeService } from '../../platform/tenancy/index.js';
-import type { TeachingStaff } from '../academic-setup/index.js';
+import type { AcademicYearDirectory, TeachingStaff } from '../academic-setup/index.js';
 import { StudentClassroomService } from './student-classroom.service.js';
 import type { StudentContext } from './student-context.js';
 import type { ListStudentsQueryDto } from './student.dto.js';
@@ -87,14 +87,20 @@ function build(found: StudentRow | null = student, placement: PlacedRow | null =
   const of = vi
     .fn<StudentContext['of']>()
     .mockResolvedValue({ tenant: {}, institutionId: 'institution-1' } as InstitutionContext);
+  const currentId = vi
+    .fn<AcademicYearDirectory['currentId']>()
+    .mockImplementation((_tx, institutionId) =>
+      Promise.resolve(institutionId === 'institution-1' ? 'year-1' : 'year-9'),
+    );
   const service = new StudentClassroomService(
     { transaction } as unknown as DatabaseService,
     { find, placedNow, page } as unknown as StudentRepository,
     { requireInstitution, forPrincipal } as unknown as ScopeService,
     { of } as unknown as StudentContext,
     { ownSectionIds } as unknown as TeachingStaff,
+    { currentId } as unknown as AcademicYearDirectory,
   );
-  return { service, find, placedNow, page, ownSectionIds, requireInstitution, of };
+  return { service, find, placedNow, page, ownSectionIds, requireInstitution, of, currentId };
 }
 
 describe('StudentClassroomService', () => {
@@ -106,6 +112,8 @@ describe('StudentClassroomService', () => {
         institutionIds: ['institution-1'],
         statuses: [1],
         inSectionIds: ['section-1'],
+        inYearIds: ['year-1'],
+        searchNameAndRollOnly: true,
         q: 'di',
       });
       expect(result.data).toEqual([
@@ -134,6 +142,18 @@ describe('StudentClassroomService', () => {
       expect(t.page.mock.calls[0]![2]).toEqual([{ field: 'rollNumber', direction: 'asc' }]);
       expect(await fail(t.service.list(teacher, query({ sort: 'admissionNo' })))).toMatchObject({
         status: 400,
+      });
+    });
+
+    it('lists nobody for a year other than the current one, so last year’s section is not this teacher’s', async () => {
+      const t = build();
+      const result = await t.service.list(teacher, query({ academicYearId: 'year-0' }));
+      expect(t.page).not.toHaveBeenCalled();
+      expect(result.data).toEqual([]);
+      await t.service.list(teacher, query({ academicYearId: 'year-1' }));
+      expect(t.page.mock.calls[0]![1]).toMatchObject({
+        academicYearId: 'year-1',
+        inYearIds: ['year-1'],
       });
     });
 
@@ -184,6 +204,14 @@ describe('StudentClassroomService', () => {
         code: 'NOT_ASSIGNED',
       });
       expect(gone.placedNow).not.toHaveBeenCalled();
+    });
+
+    it('is 403 NOT_ASSIGNED when the placement shown is of another year', async () => {
+      const t = build(student, { ...placed, academic_year_id: 'year-0' });
+      expect(await fail(t.service.get(teacher, 'student-1'))).toEqual({
+        status: 403,
+        code: 'NOT_ASSIGNED',
+      });
     });
 
     it('is 404 for a student who is not there', async () => {
