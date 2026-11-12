@@ -967,6 +967,32 @@ describe('students: add, read and list', () => {
       expect(unchanged.afterOtherName).toEqual(unchanged.before);
     });
 
+    it('tell a guardian from a stranger in any Society, and put the role, Society and person back', async () => {
+      const parent = guardian();
+      await added({ guardians: [parent] });
+      const userId = (await usersWith(parent.email))[0]!.id;
+      const asked = (person: string) =>
+        database.transaction(
+          { societyId: otherOwner.contexts[0]!.societyId!, roleCode: 2, personId: owner.person },
+          async (tx) => {
+            const found = await sql<{
+              held: boolean;
+            }>`select app_is_guardian(${person}::uuid) as held`.execute(tx);
+            const settings = await sql<{ role: string; society: string; person: string }>`
+              select current_setting('app.role_code') as role, current_setting('app.society_id') as society,
+                current_setting('app.person_id') as person`.execute(tx);
+            return { held: found.rows[0]?.held, settings: settings.rows[0] };
+          },
+        );
+      const settings = {
+        role: '2',
+        society: otherOwner.contexts[0]!.societyId!,
+        person: owner.person,
+      };
+      expect(await asked(userId)).toEqual({ held: true, settings });
+      expect(await asked(newId())).toEqual({ held: false, settings });
+    });
+
     it('stop answering once every child of the guardian is deactivated, but not while one stays', async () => {
       const parent = guardian();
       const gone = await added({ guardians: [parent] });

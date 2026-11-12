@@ -666,12 +666,13 @@ describe('PLT-42 to PLT-44 and SOC-02 section blocks (API design 6.5, 10.4e)', (
       const { rows } = await sql<{ name: string; owner_only: boolean; app_can: boolean }>`
         select proname as name, proacl::text !~ '(^|[{,])=' as owner_only,
           has_function_privilege('erp_app', oid, 'execute') as app_can
-        from pg_proc where proname in ('app_active_blocks', 'app_has_staff_elsewhere', 'app_society_name', 'app_staff_blocked', 'app_staff_extra_institutions', 'app_staff_roles') order by proname`.execute(
+        from pg_proc where proname in ('app_active_blocks', 'app_has_staff_elsewhere', 'app_is_guardian', 'app_society_name', 'app_staff_blocked', 'app_staff_extra_institutions', 'app_staff_roles') order by proname`.execute(
         ownerDb,
       );
       expect(rows).toEqual([
         { name: 'app_active_blocks', owner_only: true, app_can: true },
         { name: 'app_has_staff_elsewhere', owner_only: true, app_can: true },
+        { name: 'app_is_guardian', owner_only: true, app_can: true },
         { name: 'app_society_name', owner_only: true, app_can: true },
         { name: 'app_staff_blocked', owner_only: true, app_can: true },
         { name: 'app_staff_extra_institutions', owner_only: true, app_can: true },
