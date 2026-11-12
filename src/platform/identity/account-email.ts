@@ -71,6 +71,34 @@ export function staffMovedEmail(to: string): EmailMessage {
   };
 }
 
+/** Tells a person their link as a parent or guardian moved to another email address; their own account stays as it was. */
+export function guardianMovedEmail(to: string): EmailMessage {
+  return {
+    to,
+    template: 'guardian-access-moved',
+    subject: 'Your access as a parent in BravyNix School ERP was moved to another email address',
+    text: [
+      "Your child's school moved your parent access to another email address. You can no longer sign in to see your child with this address.",
+      '',
+      'Your other access, if any, is unchanged. If you think this is a mistake, contact your child’s school.',
+    ].join('\n'),
+  };
+}
+
+/** Tells a person their link as a parent or guardian was taken away; their own account stays as it was. */
+export function guardianRemovedEmail(to: string): EmailMessage {
+  return {
+    to,
+    template: 'guardian-access-removed',
+    subject: 'Your parent access in BravyNix School ERP was removed',
+    text: [
+      "Your child's school removed your access to your child in BravyNix School ERP.",
+      '',
+      'Your other access, if any, is unchanged. If you think this is a mistake, contact your child’s school.',
+    ].join('\n'),
+  };
+}
+
 /** Tells a person their Institution Admin access to an Institution was given or taken away. */
 export function adminAccessEmail(
   to: string,

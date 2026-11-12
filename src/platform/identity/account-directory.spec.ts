@@ -446,6 +446,8 @@ function change(
     existing?: AccountRow;
     grant?: boolean;
     staffElsewhere?: boolean;
+    staffHere?: boolean;
+    guardianLinks?: number;
     adminGrants?: { id: string; user_id: string; society_id: string; institution_id: string }[];
   } = {},
 ) {
@@ -474,6 +476,15 @@ function change(
   const hasStaffElsewhere = vi
     .fn<SessionRepository['hasStaffElsewhere']>()
     .mockResolvedValue(options.staffElsewhere ?? false);
+  const holdsStaffRecord = vi
+    .fn<SessionRepository['holdsStaffRecord']>()
+    .mockResolvedValue(options.staffHere ?? false);
+  const guardianLinkCount = vi
+    .fn<SessionRepository['guardianLinkCount']>()
+    .mockResolvedValue(options.guardianLinks ?? 0);
+  const holdsGuardianRecord = vi
+    .fn<SessionRepository['holdsGuardianRecord']>()
+    .mockResolvedValue((options.guardianLinks ?? 0) > 0);
   const spendTokens = vi.fn<MfaRepository['spendTokens']>().mockResolvedValue();
   const send = vi.fn<BackgroundMailer['send']>();
   const directory = new AccountDirectory(
@@ -490,7 +501,13 @@ function change(
       restampRevokeReason,
       revokeGrant,
     } as unknown as AccountRepository,
-    { endUserSessions, hasStaffElsewhere } as unknown as SessionRepository,
+    {
+      endUserSessions,
+      hasStaffElsewhere,
+      holdsStaffRecord,
+      guardianLinkCount,
+      holdsGuardianRecord,
+    } as unknown as SessionRepository,
     { spendTokens } as unknown as MfaRepository,
     { send } as unknown as BackgroundMailer,
   );
@@ -504,6 +521,9 @@ function change(
     holdsActiveGrant,
     holdsGrantOrRestorable,
     hasStaffElsewhere,
+    holdsStaffRecord,
+    guardianLinkCount,
+    holdsGuardianRecord,
     adminGrantsOfStaff,
     revokeGrant,
     endRoleSessions,
@@ -713,6 +733,237 @@ describe('AccountDirectory.changeStaffEmail', () => {
       ['old@example.com', 'staff-access-moved'],
       ['new@example.com', 'welcome'],
     ]);
+  });
+
+  it('counts a guardian link as access the person holds, so their own email is not changed from here', async () => {
+    const t = change({ guardianLinks: 1 });
+    const result = await t.directory.changeStaffEmail(tx, request());
+    expect(t.holdsGuardianRecord).toHaveBeenCalledWith(tx, 'user-1');
+    expect(result).toMatchObject({ kind: 'moved', person: { id: 'new-1', created: true } });
+    expect(t.update).not.toHaveBeenCalled();
+    expect(t.endUserSessions).not.toHaveBeenCalled();
+  });
+});
+
+const guardianRequest = (
+  overrides: Partial<Parameters<AccountDirectory['changeGuardianEmail']>[1]> = {},
+) => ({
+  userId: 'user-1',
+  societyId: 'society-1',
+  email: 'New@Example.com',
+  names: { firstName: 'Ravi', lastName: 'Shetty' },
+  by: 'admin-1',
+  now,
+  vet: vi.fn<(personId: string) => Promise<void>>().mockResolvedValue(),
+  ...overrides,
+});
+
+describe('AccountDirectory.changeGuardianEmail', () => {
+  it('writes nothing for the email the person already has', async () => {
+    const t = change();
+    const result = await t.directory.changeGuardianEmail(
+      tx,
+      guardianRequest({ email: 'ASHA@example.com' }),
+    );
+    expect(result).toMatchObject({ kind: 'unchanged', person: { id: 'user-1' } });
+    expect(t.update).not.toHaveBeenCalled();
+    expect(t.endUserSessions).not.toHaveBeenCalled();
+  });
+
+  it('changes the email of a person who holds only this link, and ends every session of theirs', async () => {
+    const t = change({ guardianLinks: 1 });
+    const result = await t.directory.changeGuardianEmail(tx, guardianRequest());
+    expect(result).toMatchObject({
+      kind: 'edited',
+      previousEmail: 'asha@example.com',
+      person: { id: 'user-1', email: 'new@example.com' },
+    });
+    expect(t.update).toHaveBeenCalledWith(tx, 'user-1', {
+      email: 'new@example.com',
+      updated_by: 'admin-1',
+    });
+    expect(t.endUserSessions).toHaveBeenCalledWith(tx, 'user-1', 7, now);
+    expect(t.spendTokens).toHaveBeenCalledWith(tx, 'user-1', now);
+    expect(t.endRoleSessions).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['another guardian link', { guardianLinks: 2 }, 0],
+    ['a staff record', { guardianLinks: 1, staffHere: true }, 1],
+    ['a grant, dormant ones included', { guardianLinks: 1, grant: true }, 1],
+  ])(
+    'makes a new person and moves the link when the person holds %s, and never edits the account they hold',
+    async (_name, options, ended) => {
+      const t = change(options);
+      const result = await t.directory.changeGuardianEmail(tx, guardianRequest());
+      expect(result).toMatchObject({
+        kind: 'moved',
+        previousEmail: 'asha@example.com',
+        person: { id: 'new-1', created: true },
+        sessionsEnded: ended,
+      });
+      expect(t.insertPending).toHaveBeenCalledWith(
+        tx,
+        { email: 'new@example.com', firstName: 'Ravi', lastName: 'Shetty' },
+        'admin-1',
+      );
+      expect(t.update).not.toHaveBeenCalled();
+      expect(t.endUserSessions).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [1, 1],
+    [2, 0],
+  ])(
+    'ends the parent sessions of the old person only when this was their last link: %s link(s) held, %s session(s) ended',
+    async (links, ended) => {
+      const t = change({
+        existing: user({ id: 'user-2', email: 'new@example.com' }),
+        guardianLinks: links,
+      });
+      const result = await t.directory.changeGuardianEmail(tx, guardianRequest());
+      expect(result).toMatchObject({ kind: 'moved', sessionsEnded: ended });
+      expect(t.endRoleSessions).toHaveBeenCalledTimes(ended);
+    },
+  );
+
+  it('counts dormant access as held: grants a reactivation restores, a staff record and links anywhere', async () => {
+    const t = change({ guardianLinks: 1 });
+    await t.directory.changeGuardianEmail(tx, guardianRequest());
+    expect(t.holdsGrantOrRestorable).toHaveBeenCalledWith(
+      tx,
+      'user-1',
+      [1, 2, 3],
+      ['society_deactivated', 'institution_deactivated'],
+    );
+    expect(t.holdsStaffRecord).toHaveBeenCalledWith(tx, 'user-1');
+    expect(t.guardianLinkCount).toHaveBeenCalledWith(tx, 'user-1');
+  });
+
+  it('moves the link to the person the email belongs to, after vetting them as a parent', async () => {
+    const t = change({ existing: user({ id: 'user-2', email: 'new@example.com' }) });
+    const vet = vi.fn<(personId: string) => Promise<void>>().mockResolvedValue();
+    const result = await t.directory.changeGuardianEmail(tx, guardianRequest({ vet }));
+    expect(vet).toHaveBeenCalledWith('user-2');
+    expect(result).toMatchObject({ kind: 'moved', person: { id: 'user-2', created: false } });
+    expect(t.endRoleSessions).toHaveBeenCalledWith(tx, 'user-1', 5, null, 4, now);
+    expect(t.update).not.toHaveBeenCalled();
+  });
+
+  it('passes the refusal of vet on and moves nothing', async () => {
+    const t = change({ existing: user({ id: 'user-2' }) });
+    const vet = vi.fn<(personId: string) => Promise<void>>().mockRejectedValue(new Error('taken'));
+    await expect(t.directory.changeGuardianEmail(tx, guardianRequest({ vet }))).rejects.toThrow(
+      'taken',
+    );
+    expect(t.endRoleSessions).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['blocked', 2, 'ACCOUNT_BLOCKED'],
+    ['inactive', 0, 'INVALID_STATE'],
+  ])('refuses to move the link to a %s person', async (_name, status, code) => {
+    const t = change({ existing: user({ id: 'user-2', account_status: status }) });
+    await expect(t.directory.changeGuardianEmail(tx, guardianRequest())).rejects.toMatchObject({
+      status: 409,
+      code,
+    });
+  });
+
+  it('refuses to move the link to a Super Admin', async () => {
+    const t = change({ existing: user({ id: 'user-2' }) });
+    t.holdsActiveGrant.mockResolvedValue(true);
+    await expect(t.directory.changeGuardianEmail(tx, guardianRequest())).rejects.toMatchObject({
+      status: 409,
+      code: 'ROLE_CONFLICT',
+    });
+  });
+
+  it('takes the identity lock before it reads anyone', async () => {
+    const t = change();
+    await t.directory.changeGuardianEmail(tx, guardianRequest());
+    expect(t.lockRoleSeparation).toHaveBeenCalledWith(tx);
+    const lockedAt = t.lockRoleSeparation.mock.invocationCallOrder[0] ?? 0;
+    expect(t.findById).toHaveBeenCalledWith(tx, 'user-1', true);
+    expect(lockedAt).toBeLessThan(t.findById.mock.invocationCallOrder[0] ?? 0);
+    expect(lockedAt).toBeLessThan(t.findByEmail.mock.invocationCallOrder[0] ?? 0);
+  });
+
+  it('tells the loser of a race on the email that it is taken, and answers 404 for a person who is gone', async () => {
+    const duplicate = Object.assign(new Error('duplicate'), {
+      code: '23505',
+      constraint: 'uq_users_email',
+    });
+    const raced = change({ guardianLinks: 1 });
+    raced.update.mockRejectedValue(duplicate);
+    await expect(raced.directory.changeGuardianEmail(tx, guardianRequest())).rejects.toMatchObject({
+      status: 409,
+      code: 'EMAIL_IN_USE',
+    });
+    const gone = change();
+    gone.findById.mockResolvedValue(undefined);
+    await expect(gone.directory.changeGuardianEmail(tx, guardianRequest())).rejects.toMatchObject({
+      status: 404,
+    });
+  });
+
+  it('tells the old and the new address of a changed email, in the child’s school’s name', () => {
+    const t = change();
+    t.directory.announceGuardianEmail(
+      {
+        kind: 'edited',
+        sessionsEnded: 1,
+        previousEmail: 'old@example.com',
+        person: { id: 'u', email: 'new@example.com', displayName: 'x', created: false },
+      },
+      'Sunrise',
+    );
+    expect(t.send.mock.calls.map(([message]) => [message.to, message.template])).toEqual([
+      ['old@example.com', 'email-changed-old'],
+      ['new@example.com', 'email-changed-new'],
+    ]);
+  });
+
+  it('tells the old person their access moved, and welcomes the new one as a parent', () => {
+    const t = change();
+    t.directory.announceGuardianEmail(
+      {
+        kind: 'moved',
+        sessionsEnded: 1,
+        previousEmail: 'old@example.com',
+        person: { id: 'u', email: 'new@example.com', displayName: 'x', created: true },
+      },
+      'Sunrise',
+    );
+    expect(t.send.mock.calls.map(([message]) => [message.to, message.template])).toEqual([
+      ['old@example.com', 'guardian-access-moved'],
+      ['new@example.com', 'welcome'],
+    ]);
+    expect(t.send.mock.calls[1]![0].variables).toMatchObject({ role: 'Parent' });
+  });
+
+  it('tells a guardian who lost the link that they did', () => {
+    const t = change();
+    t.directory.announceGuardianRemoved('old@example.com');
+    expect(t.send.mock.calls.map(([message]) => [message.to, message.template])).toEqual([
+      ['old@example.com', 'guardian-access-removed'],
+    ]);
+  });
+});
+
+describe('AccountDirectory.endParentSessionsIfLast', () => {
+  it('ends the parent sessions of a person whose last link this is, which name no Society', async () => {
+    const t = change({ guardianLinks: 1 });
+    expect(await t.directory.endParentSessionsIfLast(tx, 'user-1', now)).toBe(1);
+    expect(t.guardianLinkCount).toHaveBeenCalledWith(tx, 'user-1');
+    expect(t.endRoleSessions).toHaveBeenCalledWith(tx, 'user-1', 5, null, 4, now);
+  });
+
+  it('leaves them while the person holds another link, which counts this one too', async () => {
+    const t = change({ guardianLinks: 2 });
+    expect(await t.directory.endParentSessionsIfLast(tx, 'user-1', now)).toBe(0);
+    expect(t.endRoleSessions).not.toHaveBeenCalled();
   });
 });
 

@@ -170,3 +170,22 @@ export function studentAuditView(
     inactiveReason: row.inactive_reason,
   };
 }
+
+/**
+ * What the audit log keeps of one guardian (DDD 9.12): the names, the relation and the flags. The numbers show as their
+ * last four digits and the email is left out (the entry of an email change has it masked).
+ */
+export function guardianAuditView(guardian: GuardianRow): AuditValues {
+  return {
+    firstName: guardian.first_name,
+    lastName: guardian.last_name,
+    relation: guardian.relation,
+    phone: maskPhone(guardian.phone_number),
+    alternatePhone: guardian.alternate_phone === null ? null : maskPhone(guardian.alternate_phone),
+    occupation: guardian.occupation,
+    hasLogin: guardian.user_id !== null,
+    isPrimary: guardian.is_primary,
+    isEmergencyContact: guardian.is_emergency_contact,
+    status: guardian.status,
+  };
+}

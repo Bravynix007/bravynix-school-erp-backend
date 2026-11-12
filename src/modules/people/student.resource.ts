@@ -23,6 +23,7 @@ export interface GuardianResource {
   isEmergencyContact: boolean;
   /** The guardian has a Student / Parent login: an email links one. */
   hasLogin: boolean;
+  version: number;
 }
 
 /** Where the student sits: the class for the year, the section and the roll number there, and since when. */
@@ -121,6 +122,7 @@ export const guardianResource = (row: GuardianRow): GuardianResource => ({
   isPrimary: row.is_primary,
   isEmergencyContact: row.is_emergency_contact,
   hasLogin: row.user_id !== null,
+  version: row.version,
 });
 
 export function studentSummary(row: StudentListRow): StudentSummary {

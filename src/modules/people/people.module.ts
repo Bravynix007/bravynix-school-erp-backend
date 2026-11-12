@@ -7,6 +7,10 @@ import { AssignmentService } from './assignment.service.js';
 import { DocumentController } from './document.controller.js';
 import { DocumentRepository } from './document.repository.js';
 import { DocumentService } from './document.service.js';
+import { GuardianContext } from './guardian-context.js';
+import { GuardianController } from './guardian.controller.js';
+import { GuardianRepository } from './guardian.repository.js';
+import { GuardianService } from './guardian.service.js';
 import { IdentityRepository } from './identity.repository.js';
 import { InstitutionAdminController } from './institution-admin.controller.js';
 import { InstitutionAdminService } from './institution-admin.service.js';
@@ -46,6 +50,7 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
     TeachingAssignmentController,
     StudentController,
     StudentIdentityController,
+    GuardianController,
   ],
   providers: [
     StaffRepository,
@@ -64,6 +69,9 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
     StudentClassroomService,
     StudentIdentityRepository,
     StudentIdentityService,
+    GuardianRepository,
+    GuardianContext,
+    GuardianService,
     PeopleTeachingStaff,
     { provide: TeachingStaff, useExisting: PeopleTeachingStaff },
     PeopleSectionStudents,

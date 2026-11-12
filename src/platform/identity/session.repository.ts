@@ -166,6 +166,17 @@ export class SessionRepository {
     return rows[0]?.found === true;
   }
 
+  /**
+   * How many active guardian links the person holds, in any Society, whatever the status of the student, the
+   * Institution or the Society. Read through a definer function, because a tenant sees no other Society's student rows.
+   */
+  async guardianLinkCount(db: Db, userId: string): Promise<number> {
+    const { rows } = await sql<{
+      found: number;
+    }>`select app_guardian_link_count(${userId}::uuid) as found`.execute(db);
+    return rows[0]?.found ?? 0;
+  }
+
   private async explicitGrants(tx: Db, userId: string): Promise<Grant[]> {
     // Sign-in has no role set, so row-level security hides every Society and block; the
     // functions hand back the one name, and the active blocks, of a Society the person
