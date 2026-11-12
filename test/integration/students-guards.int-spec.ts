@@ -97,7 +97,7 @@ describe('students: the section count, HAS_STUDENTS and the classroom view', () 
   const countOf = async (classId: string, sectionId: string) =>
     (await sections(classId)).find((s) => s.id === sectionId)!.currentStudentCount;
   const deactivateStudent = (student: SchoolStudent, reason = 1) =>
-    api('delete', `/v1/students/${student.id}`, owner.token, { reason });
+    api('delete', `/v1/students/${student.id}?reason=${reason}`, owner.token);
   const asTeacher = (staff: SchoolStaff) => kit.actingAs(staff.person.email, TEACHER, societyA);
   const classroom = async (token: string, query = '') => {
     const res = await api('get', `/v1/students${query}`, token);
@@ -451,9 +451,7 @@ describe('students: the section count, HAS_STUDENTS and the classroom view', () 
       expect((await api('patch', `/v1/students/${diya.id}`, token, { version: 1 })).status).toBe(
         403,
       );
-      expect((await api('delete', `/v1/students/${diya.id}`, token, { reason: 1 })).status).toBe(
-        403,
-      );
+      expect((await api('delete', `/v1/students/${diya.id}?reason=1`, token)).status).toBe(403);
       expect(
         (await api('patch', `/v1/students/${diya.id}/placement`, token, { rollNumber: '9' }))
           .status,
