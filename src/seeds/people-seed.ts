@@ -206,6 +206,13 @@ async function writeStudentsIn(tx: Kysely<unknown>): Promise<void> {
         ${sectionId}, ${rollNumber}, '2026-06-01')
       on conflict (id) do nothing
     `.execute(tx);
+    await sql`
+      insert into student_achievements
+        (id, society_id, institution_id, academic_year_id, student_enrolment_id, tier, description)
+      values (${seedId(4601 + index)}, ${societyId}, ${home.id}, ${yearId}, ${seedId(4101 + index)}, 1,
+        'Helpful in class')
+      on conflict (id) do nothing
+    `.execute(tx);
     // No number is seeded (nothing here is a real person's): the row stands for a child whose identity is not set yet.
     await sql`
       insert into student_identities (student_id, society_id, institution_id)

@@ -20,6 +20,7 @@ declare module '../../platform/database/schema.js' {
     student_enrolments: StudentEnrolmentsTable;
     student_section_placements: StudentSectionPlacementsTable;
     student_identities: StudentIdentitiesTable;
+    student_achievements: StudentAchievementsTable;
   }
 }
 
@@ -284,4 +285,24 @@ export interface StudentIdentitiesTable {
   aadhaar_hmac: Buffer | null;
   aadhaar_last4: string | null;
   birth_certificate_number: string | null;
+}
+
+/** One star given to a student for a year (PRD 7.6): removed by `status` 0, never edited or deleted. */
+export interface StudentAchievementsTable {
+  id: Generated<string>;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  created_by: string | null;
+  updated_at: ColumnType<Date, never, Date>;
+  updated_by: string | null;
+  /** 1 active, 0 removed. */
+  status: Generated<number>;
+  society_id: string;
+  institution_id: string;
+  academic_year_id: string;
+  student_enrolment_id: string;
+  /** 1 Silver, 2 Gold, 3 Platinum. */
+  tier: number;
+  description: string;
+  /** The staff record that gave it; empty when a Society Owner did. */
+  awarded_by_staff_member_id: string | null;
 }
