@@ -14,6 +14,7 @@ const row = (overrides: Partial<DocumentRow> = {}): DocumentRow =>
     institution_id: 'institution-1',
     owner_type: 2,
     staff_member_id: 'staff-1',
+    student_id: null,
     title: 'Appointment letter',
     file_id: 'file-1',
     ...overrides,
@@ -38,9 +39,19 @@ describe('documentResource', () => {
     });
   });
 
-  it('refuses a row with no staff owner: the table never holds one', () => {
+  it('names a student as the owner of a student document', () => {
+    expect(
+      documentResource(
+        row({ owner_type: 1, staff_member_id: null, student_id: 'student-1' }),
+        file,
+        new Map(),
+      ),
+    ).toMatchObject({ ownerType: 'student', studentId: 'student-1' });
+  });
+
+  it('refuses a row with no owner: the table never holds one', () => {
     expect(() => documentResource(row({ staff_member_id: null }), file, new Map())).toThrow(
-      'no staff owner',
+      'no owner',
     );
   });
 });

@@ -18,6 +18,7 @@ import { PeopleFileReaders } from './people-file-readers.js';
 import { PeopleSectionStudents } from './people-section-students.js';
 import { PeopleTeachingStaff } from './people-teaching-staff.js';
 import { StaffDocumentController } from './staff-document.controller.js';
+import { StudentDocumentController } from './student-document.controller.js';
 import { StaffIdentityController } from './staff-identity.controller.js';
 import { StaffIdentityService } from './staff-identity.service.js';
 import { StaffContext } from './staff-context.js';
@@ -45,6 +46,7 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
     StaffController,
     StaffIdentityController,
     StaffDocumentController,
+    StudentDocumentController,
     DocumentController,
     InstitutionAdminController,
     TeachingAssignmentController,

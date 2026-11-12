@@ -14,12 +14,16 @@ export class DocumentRepository {
     return (lock ? query.forUpdate() : query).executeTakeFirst();
   }
 
-  /** The active documents of a staff member, newest first. */
-  ofStaff(tx: Tx, staffMemberId: string): Promise<DocumentRow[]> {
+  /** The active documents of a staff member or of a student, newest first. */
+  ofOwner(
+    tx: Tx,
+    column: 'staff_member_id' | 'student_id',
+    ownerId: string,
+  ): Promise<DocumentRow[]> {
     return tx
       .selectFrom('documents')
       .selectAll()
-      .where('staff_member_id', '=', staffMemberId)
+      .where(column, '=', ownerId)
       .where('status', '=', 1)
       .orderBy('created_at', 'desc')
       .orderBy('id', 'desc')

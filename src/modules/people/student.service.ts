@@ -579,6 +579,56 @@ export class StudentService {
     });
   }
 
+  /**
+   * STU-06: blocks the guardians' access to an active student (DDD D-02). Only this child is stopped: the siblings
+   * stay visible and the guardians' accounts and sessions are untouched. The child stays in a parent's list with
+   * `isBlocked: true` and its data answers 403 `CHILD_ACCESS_BLOCKED` once parents have contexts (API design 6.5). 404
+   * when deactivated; 409 `INVALID_STATE` when already blocked. The block moves `version` by one.
+   */
+  async block(principal: Principal, id: string): Promise<StudentResource> {
+    return this.setBlock(principal, id, true);
+  }
+
+  /** STU-07: lifts the block. 409 `INVALID_STATE` when the student is not blocked; otherwise as STU-06. */
+  async unblock(principal: Principal, id: string): Promise<StudentResource> {
+    return this.setBlock(principal, id, false);
+  }
+
+  private async setBlock(
+    principal: Principal,
+    id: string,
+    blocked: boolean,
+  ): Promise<StudentResource> {
+    const context = await this.context.of(principal, id);
+    const now = this.clock.now();
+    const done = await this.database.transaction(context.tenant, async (tx) => {
+      const current = await this.context.lockedActive(tx, id);
+      if ((current.access_blocked_at !== null) === blocked) {
+        throw AppException.conflict(ErrorCode.INVALID_STATE);
+      }
+      const row = await this.students.update(tx, id, {
+        access_blocked_at: blocked ? now : null,
+        access_blocked_by: blocked ? principal.personId : null,
+        ...updateStamp(principal.personId),
+      });
+      await this.audit.record(tx, {
+        action: blocked ? 'student.blocked' : 'student.unblocked',
+        institutionId: row.institution_id,
+        entityType: 'student',
+        entityId: id,
+        before: { isBlocked: !blocked },
+        after: { isBlocked: blocked },
+      });
+      return {
+        row,
+        placed: await this.students.placedNow(tx, id),
+        guardians: await this.students.guardians(tx, id),
+        identity: await this.identities.find(tx, id),
+      };
+    });
+    return this.resource(done.row, done.placed, done.guardians, done.identity);
+  }
+
   private async resource(
     row: StudentRow,
     placed: PlacedRow | undefined,

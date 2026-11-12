@@ -54,6 +54,7 @@ export async function removeScratchSocieties(
     await sql`delete from institution_price_rates where society_id in (${sql.join(ids)})`.execute(
       tx,
     );
+    await sql`delete from documents where society_id in (${sql.join(ids)})`.execute(tx);
     await sql`delete from student_section_placements where society_id in (${sql.join(ids)})`.execute(
       tx,
     );
@@ -61,7 +62,6 @@ export async function removeScratchSocieties(
     await sql`delete from student_identities where society_id in (${sql.join(ids)})`.execute(tx);
     await sql`delete from student_guardians where society_id in (${sql.join(ids)})`.execute(tx);
     await sql`delete from students where society_id in (${sql.join(ids)})`.execute(tx);
-    await sql`delete from documents where society_id in (${sql.join(ids)})`.execute(tx);
     await sql`delete from staff_identities where society_id in (${sql.join(ids)})`.execute(tx);
     await sql`delete from teaching_assignments where society_id in (${sql.join(ids)})`.execute(tx);
     await sql`delete from class_teacher_assignments where society_id in (${sql.join(ids)})`.execute(

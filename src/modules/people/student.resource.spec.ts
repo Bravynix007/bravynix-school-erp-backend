@@ -14,6 +14,7 @@ const student = (overrides: Partial<StudentRow> = {}): StudentRow =>
     institution_id: 'institution-1',
     version: 3,
     status: 1,
+    access_blocked_at: null,
     admission_no: 'GVS-1',
     first_name: 'Diya',
     last_name: null,
@@ -119,6 +120,8 @@ describe('studentResource', () => {
         },
       ],
       identity: { aadhaarMasked: null, birthCertificateNumber: null },
+      isBlocked: false,
+      blockedAt: null,
       status: 1,
       version: 3,
       createdBy: { id: 'owner-1', displayName: 'Asha Rao', roleName: 'Society Owner' },
@@ -166,8 +169,23 @@ describe('studentSummary', () => {
         enrolledDate: '2026-05-20',
         startDate: '2026-06-01',
       },
+      isBlocked: false,
       status: 1,
       version: 3,
+    });
+  });
+});
+
+describe('a blocked student', () => {
+  it('shows the block in the profile with when it began, and in the list row', () => {
+    const at = new Date('2026-11-12T05:00:00.000Z');
+    const blocked = student({ access_blocked_at: at });
+    expect(studentResource(blocked, undefined, [], undefined, new Map())).toMatchObject({
+      isBlocked: true,
+      blockedAt: '2026-11-12T05:00:00.000Z',
+    });
+    expect(studentSummary({ ...blocked, ...placed } as StudentListRow)).toMatchObject({
+      isBlocked: true,
     });
   });
 });

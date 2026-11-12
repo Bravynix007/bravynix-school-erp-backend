@@ -1,4 +1,15 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { CurrentPrincipal } from '../../common/auth/current-principal.decorator.js';
@@ -114,5 +125,35 @@ export class StudentController {
     @Body() body: MoveStudentDto,
   ): Promise<ApiResult<StudentResource>> {
     return this.students.move(principal, studentId, body);
+  }
+
+  @Policy({
+    roles: ADMINS,
+    scope: 'institution',
+    operationId: 'STU-06',
+    rule: 'Blocks the guardians’ access to one active student of an Institution the caller reaches; the siblings and the guardians’ accounts are untouched',
+  })
+  @Post(':studentId/block')
+  @HttpCode(HttpStatus.OK)
+  block(
+    @CurrentPrincipal() principal: Principal,
+    @Param('studentId', UuidParamPipe) studentId: string,
+  ): Promise<StudentResource> {
+    return this.students.block(principal, studentId);
+  }
+
+  @Policy({
+    roles: ADMINS,
+    scope: 'institution',
+    operationId: 'STU-07',
+    rule: 'Lifts the block on the guardians’ access to one active student of an Institution the caller reaches',
+  })
+  @Post(':studentId/unblock')
+  @HttpCode(HttpStatus.OK)
+  unblock(
+    @CurrentPrincipal() principal: Principal,
+    @Param('studentId', UuidParamPipe) studentId: string,
+  ): Promise<StudentResource> {
+    return this.students.unblock(principal, studentId);
   }
 }

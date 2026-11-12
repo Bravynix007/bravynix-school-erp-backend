@@ -103,6 +103,8 @@ const row = (overrides: Partial<StudentRow> = {}): StudentRow =>
     alternate_number: null,
     inactive_reason: null,
     inactive_at: null,
+    access_blocked_at: null,
+    access_blocked_by: null,
     ...overrides,
   }) as StudentRow;
 
@@ -1272,6 +1274,78 @@ describe('StudentService', () => {
       expect(
         (await fail(u.service.move(owner, 'student-1', move({ rollNumber: '2' })))).status,
       ).toBe(404);
+    });
+  });
+
+  describe('block and unblock (STU-06, STU-07)', () => {
+    const blockedAt = new Date('2026-11-11T04:30:00.000Z');
+
+    it('blocks an active student at once, stamps who and when, audits it and answers the profile', async () => {
+      const t = build();
+      const blocked = await t.service.block(owner, 'student-1');
+      expect(t.requireInstitution).toHaveBeenCalledWith(owner, 'institution-1');
+      expect(t.find).toHaveBeenCalledWith(expect.anything(), 'student-1', true);
+      expect(t.update).toHaveBeenCalledWith(
+        expect.anything(),
+        'student-1',
+        expect.objectContaining({
+          access_blocked_at: blockedAt,
+          access_blocked_by: 'owner-1',
+          updated_by: 'owner-1',
+        }),
+      );
+      expect(t.record.mock.calls[0]![1]).toMatchObject({
+        action: 'student.blocked',
+        institutionId: 'institution-1',
+        entityType: 'student',
+        entityId: 'student-1',
+        before: { isBlocked: false },
+        after: { isBlocked: true },
+      });
+      expect(blocked).toMatchObject({ id: 'student-1', isBlocked: true, version: 2 });
+    });
+
+    it('lifts the block and clears who and when', async () => {
+      const t = build(row({ access_blocked_at: blockedAt, access_blocked_by: 'owner-1' }));
+      const unblocked = await t.service.unblock(owner, 'student-1');
+      expect(t.update).toHaveBeenCalledWith(
+        expect.anything(),
+        'student-1',
+        expect.objectContaining({
+          access_blocked_at: null,
+          access_blocked_by: null,
+          updated_by: 'owner-1',
+        }),
+      );
+      expect(t.record.mock.calls[0]![1]).toMatchObject({
+        action: 'student.unblocked',
+        before: { isBlocked: true },
+        after: { isBlocked: false },
+      });
+      expect(unblocked).toMatchObject({ isBlocked: false, blockedAt: null });
+    });
+
+    it('is 409 INVALID_STATE for a student already blocked, or one that is not blocked, and writes nothing', async () => {
+      const already = build(row({ access_blocked_at: blockedAt, access_blocked_by: 'owner-1' }));
+      expect(await fail(already.service.block(owner, 'student-1'))).toMatchObject({
+        status: 409,
+        code: 'INVALID_STATE',
+      });
+      const open = build();
+      expect(await fail(open.service.unblock(owner, 'student-1'))).toMatchObject({
+        status: 409,
+        code: 'INVALID_STATE',
+      });
+      expect(already.update).not.toHaveBeenCalled();
+      expect(open.update).not.toHaveBeenCalled();
+      expect(open.record).not.toHaveBeenCalled();
+    });
+
+    it('is 404 for a deactivated student and for one who is not found, whoever asks', async () => {
+      expect((await fail(build(row({ status: 0 })).service.block(owner, 'student-1'))).status).toBe(
+        404,
+      );
+      expect((await fail(build(null).service.unblock(owner, 'student-1'))).status).toBe(404);
     });
   });
 });

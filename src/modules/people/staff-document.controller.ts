@@ -6,7 +6,7 @@ import { Policy } from '../../common/auth/policy.decorator.js';
 import { RoleCode } from '../../common/auth/roles.js';
 import { ApiResult } from '../../common/http/api-result.js';
 import { UuidParamPipe } from '../../common/http/uuid-param.pipe.js';
-import { CreateStaffDocumentDto } from './document.dto.js';
+import { CreateDocumentDto } from './document.dto.js';
 import type { DocumentResource } from './document.resource.js';
 import { DocumentService } from './document.service.js';
 
@@ -42,7 +42,7 @@ export class StaffDocumentController {
   async create(
     @CurrentPrincipal() principal: Principal,
     @Param('staffMemberId', UuidParamPipe) staffMemberId: string,
-    @Body() body: CreateStaffDocumentDto,
+    @Body() body: CreateDocumentDto,
   ): Promise<ApiResult<DocumentResource>> {
     return ApiResult.created(await this.documents.create(principal, staffMemberId, body));
   }

@@ -1,14 +1,12 @@
 import { body, problems } from '../../../test/support/dto-validation.js';
-import { CreateStaffDocumentDto } from './document.dto.js';
+import { CreateDocumentDto } from './document.dto.js';
 
 const id = '0192f3b0-0000-7000-8000-000000000001';
 
-describe('CreateStaffDocumentDto', () => {
+describe('CreateDocumentDto', () => {
   it('takes a title and a file, in either case', async () => {
-    expect(await problems(body(CreateStaffDocumentDto, { title: 'Letter', fileId: id }))).toEqual(
-      [],
-    );
-    const upper = await body(CreateStaffDocumentDto, { title: 'Letter', fileId: id.toUpperCase() });
+    expect(await problems(body(CreateDocumentDto, { title: 'Letter', fileId: id }))).toEqual([]);
+    const upper = await body(CreateDocumentDto, { title: 'Letter', fileId: id.toUpperCase() });
     expect(upper.fileId).toBe(id);
   });
 
@@ -32,6 +30,6 @@ describe('CreateStaffDocumentDto', () => {
       [{ field: 'ownerType', code: 'FIELD_NOT_ALLOWED' }],
     ],
   ])('refuses %s', async (_name, value, expected) => {
-    expect(await problems(body(CreateStaffDocumentDto, value))).toEqual(expected);
+    expect(await problems(body(CreateDocumentDto, value))).toEqual(expected);
   });
 });

@@ -6,32 +6,50 @@ import { authorIdsOf } from '../../common/http/author-stamps.js';
 import { ApiResult } from '../../common/http/api-result.js';
 import { newId } from '../../common/ids/ids.js';
 import { AuditService } from '../../platform/audit/index.js';
-import { DatabaseService, insertStamp, isDuplicateOn } from '../../platform/database/index.js';
+import {
+  DatabaseService,
+  insertStamp,
+  isDuplicateOn,
+  type TenantContext,
+  type Tx,
+} from '../../platform/database/index.js';
 import { FileDirectory, FilePurpose } from '../../platform/files/index.js';
 import { PersonDirectory } from '../../platform/identity/index.js';
 import { ScopeService } from '../../platform/tenancy/index.js';
 import { DocumentRepository, type DocumentRow } from './document.repository.js';
-import type { CreateStaffDocumentDto } from './document.dto.js';
+import type { CreateDocumentDto } from './document.dto.js';
 import { documentResource, type DocumentResource } from './document.resource.js';
 import { StaffContext } from './staff-context.js';
+import { StudentContext } from './student-context.js';
 
 /** The unique key that attaches a file once (DDD 9.6). */
 const ONE_DOCUMENT_PER_FILE = 'uq_documents_file';
 
-/** The owner of a staff document, as the audit log and the screens see it. */
+/** The kind of owner in the audit log and on the screens. */
 const AUDIT_ENTITY = 'document';
 
+/** Whose document it is, as the insert and the audit entry need it: found under the owner's lock. */
+interface Owner {
+  societyId: string;
+  institutionId: string;
+  purpose: typeof FilePurpose.StaffDocument | typeof FilePurpose.StudentDocument;
+  columns: { owner_type: 1; student_id: string } | { owner_type: 2; staff_member_id: string };
+  audit: { staffMemberId: string } | { studentId: string };
+}
+
 /**
- * STF-14, STF-15 and DOC-03 (API design 9.5, 9.7): the files attached to a staff member, such as an appointment letter.
- * The file is uploaded first (FIL-01, FIL-02) as purpose 6 for the staff member's home Institution; a link to it comes
- * from FIL-03, which is audited.
+ * STF-14, STF-15, DOC-01, DOC-02 and DOC-03 (API design 9.5, 9.6, 9.7): the files attached to a staff member or a
+ * student, such as an appointment letter or an admission form. The file is uploaded first (FIL-01, FIL-02) as purpose
+ * 6 for the staff member's home Institution, or purpose 5 for the student's; a link to it comes from FIL-03, which is
+ * audited.
  */
 @Injectable()
 export class DocumentService {
   constructor(
     private readonly database: DatabaseService,
     private readonly documents: DocumentRepository,
-    private readonly context: StaffContext,
+    private readonly staffContext: StaffContext,
+    private readonly studentContext: StudentContext,
     private readonly scope: ScopeService,
     private readonly files: FileDirectory,
     private readonly people: PersonDirectory,
@@ -43,9 +61,24 @@ export class DocumentService {
    * (404 for another), an admin the records of Institutions they reach; a deactivated record keeps its documents.
    */
   async list(principal: Principal, staffMemberId: string): Promise<ApiResult<DocumentResource[]>> {
-    const context = await this.context.of(principal, staffMemberId);
+    const context = await this.staffContext.of(principal, staffMemberId);
     const rows = await this.database.transaction(context.tenant, (tx) =>
-      this.documents.ofStaff(tx, staffMemberId),
+      this.documents.ofOwner(tx, 'staff_member_id', staffMemberId),
+    );
+    return ApiResult.list(await this.resources(context.tenant, rows), null);
+  }
+
+  /**
+   * DOC-01: the active documents of a student, newest first, `meta: null`; a deactivated student keeps its documents.
+   * For the admins of the child's Institution (404 for one they do not reach).
+   */
+  async listOfStudent(
+    principal: Principal,
+    studentId: string,
+  ): Promise<ApiResult<DocumentResource[]>> {
+    const context = await this.studentContext.of(principal, studentId);
+    const rows = await this.database.transaction(context.tenant, (tx) =>
+      this.documents.ofOwner(tx, 'student_id', studentId),
     );
     return ApiResult.list(await this.resources(context.tenant, rows), null);
   }
@@ -58,24 +91,60 @@ export class DocumentService {
   async create(
     principal: Principal,
     staffMemberId: string,
-    body: CreateStaffDocumentDto,
+    body: CreateDocumentDto,
   ): Promise<DocumentResource> {
-    const context = await this.context.of(principal, staffMemberId);
+    const context = await this.staffContext.of(principal, staffMemberId);
+    return this.attach(principal, context.tenant, body, async (tx) => {
+      const staff = await this.staffContext.lockedActive(tx, staffMemberId);
+      return {
+        societyId: staff.society_id,
+        institutionId: staff.home_institution_id,
+        purpose: FilePurpose.StaffDocument,
+        columns: { owner_type: 2, staff_member_id: staffMemberId },
+        audit: { staffMemberId },
+      };
+    });
+  }
+
+  /** DOC-02: as STF-15 for an active student: purpose 5, made for the student's Institution. 404 when deactivated. */
+  async createForStudent(
+    principal: Principal,
+    studentId: string,
+    body: CreateDocumentDto,
+  ): Promise<DocumentResource> {
+    const context = await this.studentContext.of(principal, studentId);
+    return this.attach(principal, context.tenant, body, async (tx) => {
+      const student = await this.studentContext.lockedActive(tx, studentId);
+      return {
+        societyId: student.society_id,
+        institutionId: student.institution_id,
+        purpose: FilePurpose.StudentDocument,
+        columns: { owner_type: 1, student_id: studentId },
+        audit: { studentId },
+      };
+    });
+  }
+
+  private async attach(
+    principal: Principal,
+    tenant: TenantContext,
+    body: CreateDocumentDto,
+    lockOwner: (tx: Tx) => Promise<Owner>,
+  ): Promise<DocumentResource> {
     const row = await this.database
-      .transaction(context.tenant, async (tx) => {
-        const staff = await this.context.lockedActive(tx, staffMemberId);
+      .transaction(tenant, async (tx) => {
+        const owner = await lockOwner(tx);
         await this.files.requireReady(
           tx,
           body.fileId,
-          { purpose: FilePurpose.StaffDocument, institutionId: staff.home_institution_id },
+          { purpose: owner.purpose, institutionId: owner.institutionId },
           'fileId',
         );
         const created = await this.documents.insert(tx, {
           id: newId(),
-          society_id: staff.society_id,
-          institution_id: staff.home_institution_id,
-          owner_type: 2,
-          staff_member_id: staffMemberId,
+          society_id: owner.societyId,
+          institution_id: owner.institutionId,
+          ...owner.columns,
           title: body.title,
           file_id: body.fileId,
           ...insertStamp(principal.personId),
@@ -85,7 +154,7 @@ export class DocumentService {
           institutionId: created.institution_id,
           entityType: AUDIT_ENTITY,
           entityId: created.id,
-          after: { staffMemberId, title: created.title, fileId: created.file_id },
+          after: { ...owner.audit, title: created.title, fileId: created.file_id },
         });
         return created;
       })
@@ -95,7 +164,7 @@ export class DocumentService {
         }
         throw error;
       });
-    const [resource] = await this.resources(context.tenant, [row]);
+    const [resource] = await this.resources(tenant, [row]);
     if (!resource) throw new Error(`Document ${row.id} was made but cannot be shown`);
     return resource;
   }
