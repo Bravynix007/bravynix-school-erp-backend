@@ -103,11 +103,6 @@ export function requireValidMoveDate(
 const maskPhone = (number: string): string =>
   `${'*'.repeat(Math.max(number.length - 4, 0))}${number.slice(-4)}`;
 
-/**
- * What the audit log keeps of a student (DDD 9.12): names, codes, dates and where the child sits. The email, the
- * address lines and the guardians' numbers and emails are personal data the entry does not need, so they are left out;
- * a phone number shows as its last four digits.
- */
 /** How a deactivation ended the enrolment and the placement: the dates and the enrolment's status and outcome. */
 export interface EnrolmentEnding {
   placementEnd: string;
@@ -130,6 +125,11 @@ export function enrolmentAuditView(ending: EnrolmentEnding | undefined): AuditVa
   };
 }
 
+/**
+ * What the audit log keeps of a student (DDD 9.12): names, codes, dates and where the child sits. The email, the
+ * address lines and the guardians' numbers and emails are personal data the entry does not need, so they are left out;
+ * a phone number shows as its last four digits.
+ */
 export function studentAuditView(
   row: StudentRow,
   placed: PlacedRow | undefined,
