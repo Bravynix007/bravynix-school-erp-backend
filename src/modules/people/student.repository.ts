@@ -197,15 +197,39 @@ export class StudentRepository {
       .executeTakeFirst();
   }
 
-  /**
-   * The active students whose open placement is in the source class (and section) of the year, their rows locked until
-   * the transaction ends, so two promotions of the same students run one after the other.
-   */
-  promotable(tx: Tx, source: PromotionSource): Promise<PromotableRow[]> {
+  /** The students of the source whose placement is open, with every filter of a promotion applied. */
+  private inSource(tx: Tx, source: PromotionSource) {
     let query = tx
       .selectFrom('student_section_placements as p')
       .innerJoin('student_enrolments as e', 'e.id', 'p.student_enrolment_id')
       .innerJoin('students as s', 's.id', 'e.student_id')
+      .where('s.status', '=', 1)
+      .where('e.status', '=', 1)
+      .where('p.end_date', 'is', null)
+      .where('p.academic_year_id', '=', source.academicYearId)
+      .where('p.class_id', '=', source.classId);
+    if (source.sectionId !== null) query = query.where('p.section_id', '=', source.sectionId);
+    if (source.studentIds !== undefined) query = query.where('s.id', 'in', source.studentIds);
+    return query;
+  }
+
+  /**
+   * The active students whose open placement is in the source class (and section) of the year, their rows locked until
+   * the transaction ends, so two promotions of the same students run one after the other.
+   *
+   * The students are locked first and the placements read after, in a statement of their own: after a lock wait
+   * Postgres checks again only the rows it locked, so a placement read in the same statement could have been closed
+   * or moved by the change that held the lock. Every writer of placements (STU-05, STU-08, STU-09, PRM-01) locks the
+   * student first, so what is read under the lock stands.
+   */
+  async promotable(tx: Tx, source: PromotionSource): Promise<PromotableRow[]> {
+    const candidates = await this.inSource(tx, source)
+      .select('s.id')
+      .orderBy('s.id')
+      .forUpdate(['s'])
+      .execute();
+    if (candidates.length === 0) return [];
+    return this.inSource(tx, { ...source, studentIds: candidates.map((row) => row.id) })
       .select([
         's.id as student_id',
         's.institution_id',
@@ -216,14 +240,8 @@ export class StudentRepository {
         'p.roll_number',
         'p.start_date',
       ])
-      .where('s.status', '=', 1)
-      .where('e.status', '=', 1)
-      .where('p.end_date', 'is', null)
-      .where('p.academic_year_id', '=', source.academicYearId)
-      .where('p.class_id', '=', source.classId);
-    if (source.sectionId !== null) query = query.where('p.section_id', '=', source.sectionId);
-    if (source.studentIds !== undefined) query = query.where('s.id', 'in', source.studentIds);
-    return query.orderBy('s.id').forUpdate(['s', 'e']).execute();
+      .orderBy('s.id')
+      .execute();
   }
 
   /** Which of these students already hold an active enrolment in the year. */

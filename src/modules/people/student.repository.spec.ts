@@ -178,14 +178,16 @@ describe('StudentRepository', () => {
   describe('promotion', () => {
     const source = { academicYearId: 'year-1', classId: 'class-1', sectionId: null };
 
-    it('finds the active students with an open placement in the class, and locks their rows', async () => {
+    it('locks the active students with an open placement in the class first, and reads their placements after', async () => {
       const { tx, queries } = recorder();
       expect(await repository.promotable(tx, source)).toEqual([]);
+      // Nobody is locked, so there is nothing to read.
+      expect(queries).toHaveLength(1);
       const { sql, parameters } = queries[0]!;
       expect(sql).toContain('"s"."status" = $1 and "e"."status" = $2 and "p"."end_date" is null');
       expect(sql).toContain('"p"."academic_year_id" = $3 and "p"."class_id" = $4');
       expect(sql).not.toContain('"p"."section_id" =');
-      expect(sql).toMatch(/for update of "s", "e"$/);
+      expect(sql).toMatch(/for update of "s"$/);
       expect(parameters).toEqual([1, 1, 'year-1', 'class-1']);
     });
 

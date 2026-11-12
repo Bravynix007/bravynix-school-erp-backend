@@ -65,3 +65,36 @@ describe('PromoteClassDto', () => {
     expect(found.map((p) => p.field)).toContain(field);
   });
 });
+
+describe('a part that is left out', () => {
+  it.each(['toAcademicYearId', 'toClassId', 'toSectionId'] as const)(
+    'is REQUIRED for %s of a student, and null is still the answer of a completing student',
+    async (field) => {
+      const left = { ...target, [field]: undefined };
+      expect(await problems(body(PromoteStudentDto, left))).toEqual([{ field, code: 'REQUIRED' }]);
+      expect(await problems(body(PromoteStudentDto, { ...target, [field]: null }))).toEqual([]);
+    },
+  );
+
+  it.each(['toAcademicYearId', 'toClassId', 'toSectionId', 'fromSectionId'] as const)(
+    'is REQUIRED for %s of a class, and null is accepted',
+    async (field) => {
+      expect(await problems(body(PromoteClassDto, { ...batch, [field]: undefined }))).toEqual([
+        { field, code: 'REQUIRED' },
+      ]);
+      expect(await problems(body(PromoteClassDto, { ...batch, [field]: null }))).toEqual([]);
+    },
+  );
+
+  it('is INVALID_FORMAT only for one that is sent and not an ID', async () => {
+    expect(await problems(body(PromoteStudentDto, { ...target, toClassId: 'x' }))).toEqual([
+      { field: 'toClassId', code: 'INVALID_FORMAT' },
+    ]);
+  });
+
+  it('makes an empty list of students REQUIRED, not a query on nobody', async () => {
+    expect(await problems(body(PromoteClassDto, { ...batch, studentIds: [] }))).toEqual([
+      { field: 'studentIds', code: 'REQUIRED' },
+    ]);
+  });
+});

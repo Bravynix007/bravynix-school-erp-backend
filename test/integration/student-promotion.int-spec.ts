@@ -399,6 +399,104 @@ describe('promotion', () => {
       expect([res.status, res.body.code]).toEqual([413, 'BATCH_TOO_LARGE']);
     });
 
+    it('is 400 REQUIRED for a target part, a source section or a student list that is left out or empty', async () => {
+      for (const field of ['toAcademicYearId', 'toClassId', 'toSectionId', 'fromSectionId']) {
+        const res = await promote(fromNineA({ [field]: undefined }));
+        expect([res.status, res.body.code, res.body.errors?.[0]]).toMatchObject([
+          400,
+          'VALIDATION_FAILED',
+          { field, code: 'REQUIRED' },
+        ]);
+      }
+      const none = await promote(fromNineA({ studentIds: [] }));
+      expect([none.status, none.body.errors?.[0]]).toMatchObject([
+        400,
+        { field: 'studentIds', code: 'REQUIRED' },
+      ]);
+      expect((await history(diya)).length).toBe(1);
+    });
+
+    describe('while another change to the same students commits', () => {
+      /**
+       * Holds the student's row as a change to them does, starts `request` so that it waits for it, runs `change` in the
+       * holding transaction and commits; the request then runs on what the change left.
+       */
+      const racing = async <T>(
+        student: SchoolStudent,
+        request: () => PromiseLike<T>,
+        change: (tx: Parameters<Parameters<DatabaseService['transaction']>[1]>[0]) => Promise<void>,
+      ): Promise<T> => {
+        let waiting: Promise<T> | undefined;
+        let settled = false;
+        await database.transaction(tenant([first]), async (tx) => {
+          await sql`select id from students where id = ${student.id} for update`.execute(tx);
+          waiting = Promise.resolve(request());
+          void waiting.then(() => {
+            settled = true;
+            return true;
+          });
+          await new Promise((resolve) => setTimeout(resolve, 700));
+          expect(settled).toBe(false);
+          await change(tx);
+        });
+        return waiting!;
+      };
+
+      it('leaves out a student who was moved to another section meanwhile, instead of closing a placement that is closed', async () => {
+        const res = await racing(
+          diya,
+          () => promote(fromNineA({ studentIds: [diya.id, ravi.id] })),
+          async (tx) => {
+            // STU-08: the old placement ends and a new one begins in 9B.
+            await sql`update student_section_placements set end_date = '2026-08-01'
+              where student_enrolment_id in (select id from student_enrolments where student_id = ${diya.id})`.execute(
+              tx,
+            );
+            await sql`insert into student_section_placements (society_id, institution_id, academic_year_id,
+                student_enrolment_id, class_id, section_id, roll_number, start_date)
+              select society_id, institution_id, academic_year_id, student_enrolment_id, class_id,
+                ${nineB.sectionId}, '9', '2026-08-02'
+              from student_section_placements
+              where student_enrolment_id in (select id from student_enrolments where student_id = ${diya.id})`.execute(
+              tx,
+            );
+          },
+        );
+        expect([res.status, res.body.code]).toEqual([200, 'PROMOTED']);
+        expect(res.body.data).toEqual({
+          promotedCount: 1,
+          skipped: [{ studentId: diya.id, reason: 'NOT_IN_SOURCE' }],
+        });
+        expect(await history(diya)).toMatchObject([
+          { year: year1, section_id: nineA.sectionId, end_date: '2026-08-01' },
+          { year: year1, section_id: nineB.sectionId, roll_number: '9', end_date: null },
+        ]);
+        expect((await profile(ravi)).placement.academicYearId).toBe(year2);
+      });
+
+      it('promotes a student once when two promotions of the class to later years run at the same time', async () => {
+        const year3 = await kit.year(owner.token, first, {
+          name: '2028-2029',
+          startDate: '2028-06-01',
+          endDate: '2029-03-31',
+        });
+        const toYear3 = { ...tenA, academicYearId: year3 };
+        const answers = await racing(
+          diya,
+          () => Promise.all([promote(fromNineA()), promote(fromNineA(target(toYear3)))]),
+          async () => undefined,
+        );
+        expect(answers.map((res) => res.status)).toEqual([200, 200]);
+        // One call got the locks first and promoted both students; the other found the old placements closed.
+        expect(answers.map((res) => res.body.data.promotedCount).toSorted()).toEqual([0, 2]);
+        for (const student of [diya, ravi]) {
+          const rows = await history(student);
+          expect(rows.filter((row) => row.status === 1 && row.end_date === null)).toHaveLength(1);
+          expect(rows.filter((row) => row.outcome === 1)).toHaveLength(1);
+        }
+      });
+    });
+
     it('is for the Owner and the Admins of the Institution, and no teacher, Super Admin or stranger', async () => {
       expect((await promote(fromNineA(), randomUUID(), institutionAdmin.token)).status).toBe(200);
       const teacher = await kit.staff(

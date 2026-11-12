@@ -1,8 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayNotEmpty,
   ArrayUnique,
   IsArray,
   IsBoolean,
+  IsDefined,
   IsString,
   IsUUID,
   MaxLength,
@@ -23,18 +25,21 @@ export class PromotionTargetDto {
     nullable: true,
     description: 'An active academic year of the Institution that begins after the source year',
   })
+  @IsDefined()
   @ValidateIf((_dto, value: unknown) => value !== null)
   @LowerCaseUuid()
   @IsUUID()
   toAcademicYearId!: string | null;
 
   @ApiProperty({ format: 'uuid', nullable: true, description: 'The same class repeats it' })
+  @IsDefined()
   @ValidateIf((_dto, value: unknown) => value !== null)
   @LowerCaseUuid()
   @IsUUID()
   toClassId!: string | null;
 
   @ApiProperty({ format: 'uuid', nullable: true, description: 'An open section of the new class' })
+  @IsDefined()
   @ValidateIf((_dto, value: unknown) => value !== null)
   @LowerCaseUuid()
   @IsUUID()
@@ -74,6 +79,7 @@ export class PromoteClassDto extends PromotionTargetDto {
     nullable: true,
     description: '`null` is every section of the class',
   })
+  @IsDefined()
   @ValidateIf((_dto, value: unknown) => value !== null)
   @LowerCaseUuid()
   @IsUUID()
@@ -82,10 +88,12 @@ export class PromoteClassDto extends PromotionTargetDto {
   @ApiPropertyOptional({
     type: [String],
     format: 'uuid',
-    description: 'A subset of the students placed there; all of them when absent. At most 500',
+    description:
+      'A subset of the students placed there (at least one); all of them when absent. At most 500',
   })
   @WhenPresent()
   @IsArray()
+  @ArrayNotEmpty()
   @ArrayUnique()
   @LowerCaseUuid()
   @IsUUID('all', { each: true })
