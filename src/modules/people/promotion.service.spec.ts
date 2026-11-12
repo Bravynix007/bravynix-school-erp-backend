@@ -406,9 +406,9 @@ describe('PromotionService.promoteClass (PRM-01)', () => {
     const deactivated = t.record.mock.calls.filter(
       ([, entry]) => entry.action === 'student.deactivated',
     );
-    expect(deactivated.map(([, entry]) => [entry.entityId, entry.after])).toEqual([
-      ['student-1', { status: 0, inactiveReason: 4 }],
-      ['student-2', { status: 0, inactiveReason: 4 }],
+    expect(deactivated.map(([, entry]) => [entry.entityId, entry.before, entry.after])).toEqual([
+      ['student-1', { status: 1, inactiveReason: null }, { status: 0, inactiveReason: 4 }],
+      ['student-2', { status: 1, inactiveReason: null }, { status: 0, inactiveReason: 4 }],
     ]);
   });
 

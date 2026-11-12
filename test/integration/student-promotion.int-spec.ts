@@ -150,7 +150,9 @@ describe('promotion', () => {
           await sql<{
             status: number;
             inactive_reason: number | null;
-          }>`select status, inactive_reason
+            inactive_at: Date | null;
+            updated_by: string | null;
+          }>`select status, inactive_reason, inactive_at, updated_by
             from students where id = ${student.id}`.execute(tx)
         ).rows[0],
     );
@@ -392,7 +394,12 @@ describe('promotion', () => {
         fromSectionId: null,
         ...nobody,
       });
-      expect(await standing(grad)).toEqual({ status: 0, inactive_reason: 4 });
+      expect(await standing(grad)).toMatchObject({
+        status: 0,
+        inactive_reason: 4,
+        inactive_at: expect.any(Date),
+        updated_by: owner.person,
+      });
       expect((await api('get', `/v1/students/${grad.id}`, owner.token)).body.data).toMatchObject({
         status: 0,
       });
@@ -404,7 +411,7 @@ describe('promotion', () => {
       ]);
       // A student who moves on to the next year stays active.
       await promote(fromNineA());
-      expect(await standing(diya)).toEqual({ status: 1, inactive_reason: null });
+      expect(await standing(diya)).toMatchObject({ status: 1, inactive_reason: null });
     });
 
     it('runs the migration down with a completed student on file: reason 3 replaces 4, and up brings the check back', async () => {
@@ -420,12 +427,12 @@ describe('promotion', () => {
         await down(tx);
         await up(tx);
       });
-      expect(await standing(grad)).toEqual({ status: 0, inactive_reason: 3 });
+      expect(await standing(grad)).toMatchObject({ status: 0, inactive_reason: 3 });
       // Up brought the check back: 4 is allowed again, 5 is not.
       await read((tx) =>
         sql`update students set inactive_reason = 4 where id = ${grad.id}`.execute(tx),
       );
-      expect(await standing(grad)).toEqual({ status: 0, inactive_reason: 4 });
+      expect(await standing(grad)).toMatchObject({ status: 0, inactive_reason: 4 });
       await expect(
         read((tx) =>
           sql`update students set inactive_reason = 5 where id = ${grad.id}`.execute(tx),
@@ -447,7 +454,7 @@ describe('promotion', () => {
       const one = await promoteOne(grad, lower);
       expect([one.status, one.body.code]).toEqual([422, 'TARGET_CLASS_BELOW_SOURCE']);
       expect((await history(grad)).length).toBe(1);
-      expect(await standing(grad)).toEqual({ status: 1, inactive_reason: null });
+      expect(await standing(grad)).toMatchObject({ status: 1, inactive_reason: null });
     });
 
     it('lets a student repeat the class in the next year', async () => {
@@ -667,7 +674,7 @@ describe('promotion', () => {
       expect(res.status).toBe(200);
       // The profile of a deactivated student is still read (STU-03).
       expect(res.body.data).toMatchObject({ id: grad.id, status: 0 });
-      expect(await standing(grad)).toEqual({ status: 0, inactive_reason: 4 });
+      expect(await standing(grad)).toMatchObject({ status: 0, inactive_reason: 4 });
       expect(await history(grad)).toMatchObject([{ outcome: 4, end_date: '2027-03-31' }]);
       expect((await promoteOne(diya, nobody)).body.code).toBe('NOT_FINAL_CLASS');
     });
