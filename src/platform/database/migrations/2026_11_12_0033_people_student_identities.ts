@@ -14,8 +14,8 @@ import { sql, type Kysely } from 'kysely';
  *   (a transfer, which warns and never blocks).
  * - `app_student_aadhaar_elsewhere(institution, hash)` answers that question. Row-level security shows an Institution
  *   Admin no other Institution's rows, so a definer function reads them and answers the one boolean. It looks only in
- *   the caller's own Society (a Society the caller is not in is never asked about), like the functions of migrations
- *   0011 and 0031 it acts as Super Admin for the read, puts the caller's settings back before it returns, has a fixed
+ *   the caller's own Society (a Society the caller is not in is never asked about). Like the functions of migrations
+ *   0011 and 0031, it acts as Super Admin for the read, puts the caller's settings back before it returns, has a fixed
  *   search_path, and only the app role may call it.
  *
  * The table uses the Institution-level policy of the other student tables (DDD 15.3).
