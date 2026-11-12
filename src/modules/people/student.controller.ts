@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { CurrentPrincipal } from '../../common/auth/current-principal.decorator.js';
@@ -6,13 +6,19 @@ import { Policy } from '../../common/auth/policy.decorator.js';
 import { RoleCode } from '../../common/auth/roles.js';
 import { ApiResult } from '../../common/http/api-result.js';
 import { UuidParamPipe } from '../../common/http/uuid-param.pipe.js';
-import { CreateStudentDto, ListStudentsQueryDto } from './student.dto.js';
+import {
+  CreateStudentDto,
+  DeactivateStudentQueryDto,
+  ListStudentsQueryDto,
+  MoveStudentDto,
+  UpdateStudentDto,
+} from './student.dto.js';
 import type { StudentResource, StudentSummary } from './student.resource.js';
 import { StudentService } from './student.service.js';
 
 const ADMINS = [RoleCode.SocietyOwner, RoleCode.InstitutionAdmin];
 
-/** STU-01 to STU-03 (API design 9.6): the students of an Institution. */
+/** STU-01 to STU-05 and STU-08 (API design 9.6): the students of an Institution. */
 @ApiTags('Students')
 @Controller('students')
 export class StudentController {
@@ -58,5 +64,50 @@ export class StudentController {
     @Param('studentId', UuidParamPipe) studentId: string,
   ): Promise<StudentResource> {
     return this.students.get(principal, studentId);
+  }
+
+  @Policy({
+    roles: ADMINS,
+    scope: 'institution',
+    operationId: 'STU-04',
+    rule: 'Edits an active student’s personal and contact fields by version; the class, section and guardians change on their own endpoints',
+  })
+  @Patch(':studentId')
+  update(
+    @CurrentPrincipal() principal: Principal,
+    @Param('studentId', UuidParamPipe) studentId: string,
+    @Body() body: UpdateStudentDto,
+  ): Promise<StudentResource> {
+    return this.students.update(principal, studentId, body);
+  }
+
+  @Policy({
+    roles: ADMINS,
+    scope: 'institution',
+    operationId: 'STU-05',
+    rule: 'Deactivates a student with a reason in the query (left, mistake, other); the Admission ID and the roll number are free again and the guardians lose the child',
+  })
+  @Delete(':studentId')
+  deactivate(
+    @CurrentPrincipal() principal: Principal,
+    @Param('studentId', UuidParamPipe) studentId: string,
+    @Query() query: DeactivateStudentQueryDto,
+  ): Promise<{ id: string; status: 0 }> {
+    return this.students.deactivate(principal, studentId, query);
+  }
+
+  @Policy({
+    roles: ADMINS,
+    scope: 'institution',
+    operationId: 'STU-08',
+    rule: 'Moves a student to another section of their class, or changes their roll number, from a date; the old placement ends the day before and a full section is a warning',
+  })
+  @Patch(':studentId/placement')
+  move(
+    @CurrentPrincipal() principal: Principal,
+    @Param('studentId', UuidParamPipe) studentId: string,
+    @Body() body: MoveStudentDto,
+  ): Promise<ApiResult<StudentResource>> {
+    return this.students.move(principal, studentId, body);
   }
 }

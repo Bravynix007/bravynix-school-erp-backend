@@ -57,3 +57,10 @@ export function nextIstMidnight(instant: Date): Date {
   const midnightIst = Date.parse(`${istDay}T00:00:00.000Z`) - IST_OFFSET_MS;
   return new Date(midnightIst + 24 * 60 * 60_000);
 }
+
+/** The calendar day before `date` (`YYYY-MM-DD`): the last day a record ends on when another begins on `date`. */
+export function dayBefore(date: string): string {
+  return new Date(Date.parse(`${date}T00:00:00.000Z`) - 24 * 60 * 60_000)
+    .toISOString()
+    .slice(0, 10);
+}

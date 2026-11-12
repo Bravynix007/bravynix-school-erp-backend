@@ -1,5 +1,11 @@
 import { body, problems } from '../../../test/support/dto-validation.js';
-import { CreateStudentDto, ListStudentsQueryDto } from './student.dto.js';
+import {
+  CreateStudentDto,
+  DeactivateStudentQueryDto,
+  ListStudentsQueryDto,
+  MoveStudentDto,
+  UpdateStudentDto,
+} from './student.dto.js';
 
 const id = '0192f3b0-0000-7000-8000-000000000001';
 const guardian = {
@@ -135,6 +141,111 @@ describe('CreateStudentDto', () => {
       field,
       code,
     });
+  });
+});
+
+describe('UpdateStudentDto', () => {
+  it('needs the version, and takes any field or none', async () => {
+    expect(await problems(body(UpdateStudentDto, { version: 1 }))).toEqual([]);
+    expect(
+      await problems(
+        body(UpdateStudentDto, {
+          version: 2,
+          firstName: 'Diya',
+          lastName: null,
+          gender: null,
+          dateOfBirth: null,
+          bloodGroup: null,
+          nationality: null,
+          photoFileId: null,
+          admissionNo: null,
+          admissionDate: null,
+          contactEmail: null,
+          mobile: { countryCode: '91', number: '9876501234' },
+          alternateNumber: null,
+          address: { line1: null, cityId: null },
+        }),
+      ),
+    ).toEqual([]);
+    expect(await problems(body(UpdateStudentDto, { firstName: 'Diya' }))).toContainEqual({
+      field: 'version',
+      code: 'INVALID_TYPE',
+    });
+  });
+
+  it.each([
+    [{ firstName: null }, 'firstName'],
+    [{ mobile: null }, 'mobile'],
+  ])('does not let %j be cleared', async (change, field) => {
+    expect(
+      (await problems(body(UpdateStudentDto, { version: 1, ...change }))).map((p) => p.field),
+    ).toContain(field);
+  });
+
+  it('refuses a name or an Admission ID of only spaces', async () => {
+    expect(
+      await problems(body(UpdateStudentDto, { version: 1, firstName: '   ', admissionNo: '  ' })),
+    ).toEqual([
+      { field: 'firstName', code: 'INVALID_FORMAT' },
+      { field: 'admissionNo', code: 'INVALID_FORMAT' },
+    ]);
+  });
+
+  it.each([
+    [{ institutionId: id }, 'institutionId'],
+    [{ enrolment: valid.enrolment }, 'enrolment'],
+    [{ guardians: [guardian] }, 'guardians'],
+    [{ status: 0 }, 'status'],
+  ])('does not take %j here', async (change, field) => {
+    expect(await problems(body(UpdateStudentDto, { version: 1, ...change }))).toContainEqual({
+      field,
+      code: 'FIELD_NOT_ALLOWED',
+    });
+  });
+});
+
+describe('DeactivateStudentQueryDto', () => {
+  it.each(['1', '2', '3'])('takes the reason %s, which arrives as a string', async (reason) => {
+    expect(await problems(body(DeactivateStudentQueryDto, { reason }))).toEqual([]);
+  });
+
+  it.each([
+    [{}, 'INVALID_TYPE'],
+    [{ reason: '0' }, 'INVALID_CODE'],
+    [{ reason: '4' }, 'INVALID_CODE'],
+    [{ reason: 'left' }, 'INVALID_TYPE'],
+    [{ reason: '' }, 'INVALID_CODE'],
+  ])('refuses %j', async (value, code) => {
+    expect(await problems(body(DeactivateStudentQueryDto, value))).toEqual([
+      { field: 'reason', code },
+    ]);
+  });
+});
+
+describe('MoveStudentDto', () => {
+  it('takes the section, the roll number and the day, together or alone, or none', async () => {
+    expect(await problems(body(MoveStudentDto, {}))).toEqual([]);
+    expect(await problems(body(MoveStudentDto, { sectionId: id }))).toEqual([]);
+    expect(await problems(body(MoveStudentDto, { rollNumber: '15' }))).toEqual([]);
+    expect(
+      await problems(
+        body(MoveStudentDto, { sectionId: id, rollNumber: '15', effectiveDate: '2026-07-01' }),
+      ),
+    ).toEqual([]);
+  });
+
+  it.each([
+    [{ sectionId: null }, 'sectionId', 'INVALID_FORMAT'],
+    [{ sectionId: 'x' }, 'sectionId', 'INVALID_FORMAT'],
+    [{ rollNumber: null }, 'rollNumber', 'INVALID_TYPE'],
+    [{ rollNumber: '' }, 'rollNumber', 'TOO_SHORT'],
+    [{ rollNumber: '   ' }, 'rollNumber', 'INVALID_FORMAT'],
+    [{ rollNumber: 'x'.repeat(21) }, 'rollNumber', 'TOO_LONG'],
+    [{ effectiveDate: null }, 'effectiveDate', 'INVALID_TYPE'],
+    [{ effectiveDate: '2026-02-30' }, 'effectiveDate', 'INVALID_FORMAT'],
+    [{ classId: id }, 'classId', 'FIELD_NOT_ALLOWED'],
+  ])('refuses %j', async (value, field, code) => {
+    expect(await problems(body(MoveStudentDto, value))).toContainEqual({ field, code });
   });
 });
 

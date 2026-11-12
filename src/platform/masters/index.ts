@@ -1,5 +1,6 @@
 export {
   MasterReferences,
+  placeOf,
   type ClassCategoryRef,
   type PlaceIds,
   type PredefinedClassRef,

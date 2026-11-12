@@ -5,10 +5,16 @@ import type { AuditValues } from '../../platform/audit/index.js';
 import type { GuardianDto } from './student.dto.js';
 import type { GuardianRow, PlacedRow, StudentRow } from './student.repository.js';
 
-/** What a new student's dates and guardians must satisfy beyond the shape of the body (PRD 7.6, DDD 9.6). */
-export interface StudentRuleInput {
+/** The dates of a student's record that must agree with each other (PRD 7.6). */
+export interface StudentDatesInput {
   dateOfBirth?: string | null;
   admissionDate?: string | null;
+  /** The first day of the child's current enrolment: the admission is on or before it (STU-04). */
+  enrolledDate?: string;
+}
+
+/** What a new student's dates and guardians must satisfy beyond the shape of the body (PRD 7.6, DDD 9.6). */
+export interface StudentRuleInput extends StudentDatesInput {
   guardians: readonly Pick<GuardianDto, 'isPrimary' | 'email'>[];
 }
 
@@ -16,19 +22,42 @@ export interface StudentRuleInput {
 const EARLIEST_BIRTH = '1900-01-01';
 
 /**
- * 400 `INVALID_VALUE` on every field that breaks a rule, in the order of the form: the date of birth is from 1900 and
- * before `today`, the admission date is not before the date of birth, and no two guardians share an email (one email
- * is one person, so the second would be the same login twice). Then 422 `PRIMARY_GUARDIAN_REQUIRED` unless exactly
- * one guardian is primary. Dates are `YYYY-MM-DD`, so they compare as text.
+ * The date problems: the date of birth is from 1900 and before `today`, the admission is not before it, and, when the
+ * enrolment is known, not after the day the child started in their class.
  */
-export function requireValidStudent(input: StudentRuleInput, today: string): void {
+function dateProblems(input: StudentDatesInput, today: string): FieldError[] {
   const problems: FieldError[] = [];
   if (input.dateOfBirth && (input.dateOfBirth >= today || input.dateOfBirth < EARLIEST_BIRTH)) {
     problems.push(fieldError('dateOfBirth', FieldErrorCode.INVALID_VALUE));
   }
   if (input.dateOfBirth && input.admissionDate && input.admissionDate < input.dateOfBirth) {
     problems.push(fieldError('admissionDate', FieldErrorCode.INVALID_VALUE));
+  } else if (
+    input.enrolledDate &&
+    input.admissionDate &&
+    input.admissionDate > input.enrolledDate
+  ) {
+    problems.push(fieldError('admissionDate', FieldErrorCode.INVALID_VALUE));
   }
+  return problems;
+}
+
+/**
+ * 400 `INVALID_VALUE` on a date that breaks a rule: the date of birth is from 1900 and before `today`, and the
+ * admission date is not before it. STU-04 checks the dates as they will stand, the stored one for a field not sent.
+ */
+export function requireValidDates(input: StudentDatesInput, today: string): void {
+  const problems = dateProblems(input, today);
+  if (problems.length > 0) throw AppException.validation(problems);
+}
+
+/**
+ * 400 `INVALID_VALUE` on every field that breaks a rule, in the order of the form: the dates as above, and no two
+ * guardians share an email (one email is one person, so the second would be the same login twice). Then 422
+ * `PRIMARY_GUARDIAN_REQUIRED` unless exactly one guardian is primary. Dates are `YYYY-MM-DD`, so they compare as text.
+ */
+export function requireValidStudent(input: StudentRuleInput, today: string): void {
+  const problems = dateProblems(input, today);
   const seen = new Set<string>();
   input.guardians.forEach((guardian, index) => {
     const email = guardian.email?.toLowerCase();
@@ -43,9 +72,58 @@ export function requireValidStudent(input: StudentRuleInput, today: string): voi
   }
 }
 
+/**
+ * STU-08: the last day a move can take effect: today, or the day the current placement begins when that is later (a
+ * child placed from a later day, as one admitted ahead, is corrected in place), and never after the year ends.
+ */
+export function latestMoveDate(currentStart: string, today: string, yearEnd: string): string {
+  const latest = today > currentStart ? today : currentStart;
+  return latest < yearEnd ? latest : yearEnd;
+}
+
+/**
+ * STU-08: the move takes effect on a day that is not before the current placement began (the old row must keep at
+ * least its first day) and not after `latestMoveDate`. 400 `INVALID_VALUE` on `effectiveDate` otherwise.
+ */
+export function requireValidMoveDate(
+  effectiveDate: string,
+  currentStart: string,
+  today: string,
+  yearEnd: string,
+): void {
+  if (
+    effectiveDate > latestMoveDate(currentStart, today, yearEnd) ||
+    effectiveDate < currentStart
+  ) {
+    throw AppException.validation([fieldError('effectiveDate', FieldErrorCode.INVALID_VALUE)]);
+  }
+}
+
 /** `******3210`: enough to tell which number, not enough to use it. */
 const maskPhone = (number: string): string =>
   `${'*'.repeat(Math.max(number.length - 4, 0))}${number.slice(-4)}`;
+
+/** How a deactivation ended the enrolment and the placement: the dates and the enrolment's status and outcome. */
+export interface EnrolmentEnding {
+  placementEnd: string;
+  /** 1 Active (the child left), 0 Cancelled. */
+  status: number;
+  left: string | null;
+  outcome: number | null;
+}
+
+/**
+ * What the audit entry of a deactivation says about the enrolment and the placement, so the entry shows what became of
+ * them: before the deactivation they are open and active, after it they carry the dates and the outcome.
+ */
+export function enrolmentAuditView(ending: EnrolmentEnding | undefined): AuditValues {
+  return {
+    placementEndDate: ending?.placementEnd ?? null,
+    enrolmentStatus: ending?.status ?? 1,
+    enrolmentLeftDate: ending?.left ?? null,
+    enrolmentOutcome: ending?.outcome ?? null,
+  };
+}
 
 /**
  * What the audit log keeps of a student (DDD 9.12): names, codes, dates and where the child sits. The email, the
@@ -78,6 +156,7 @@ export function studentAuditView(
     classId: placed?.class_id ?? null,
     sectionId: placed?.section_id ?? null,
     rollNumber: placed?.roll_number ?? null,
+    placementStartDate: placed?.start_date ?? null,
     guardians: guardians.map((guardian) => ({
       firstName: guardian.first_name,
       lastName: guardian.last_name,
@@ -88,5 +167,6 @@ export function studentAuditView(
       isEmergencyContact: guardian.is_emergency_contact,
     })),
     status: row.status,
+    inactiveReason: row.inactive_reason,
   };
 }

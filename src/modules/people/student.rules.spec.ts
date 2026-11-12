@@ -1,6 +1,13 @@
 import { AppException } from '../../common/http/app-exception.js';
 import type { GuardianRow, PlacedRow, StudentRow } from './student.repository.js';
-import { requireValidStudent, studentAuditView } from './student.rules.js';
+import {
+  enrolmentAuditView,
+  latestMoveDate,
+  requireValidDates,
+  requireValidMoveDate,
+  requireValidStudent,
+  studentAuditView,
+} from './student.rules.js';
 
 const primary = { isPrimary: true, email: null };
 const other = { isPrimary: false, email: null };
@@ -116,6 +123,7 @@ const student = (overrides: Partial<StudentRow> = {}): StudentRow =>
     city_id: null,
     pincode: '560001',
     status: 1,
+    inactive_reason: null,
     ...overrides,
   }) as StudentRow;
 
@@ -170,6 +178,7 @@ describe('studentAuditView', () => {
       classId: 'class-1',
       sectionId: 'section-1',
       rollNumber: '14',
+      placementStartDate: '2026-06-01',
       guardians: [
         {
           firstName: 'Ravi',
@@ -182,6 +191,7 @@ describe('studentAuditView', () => {
         },
       ],
       status: 1,
+      inactiveReason: null,
     });
   });
 
@@ -220,5 +230,154 @@ describe('studentAuditView', () => {
       rollNumber: null,
       guardians: [expect.objectContaining({ hasLogin: false })],
     });
+  });
+});
+
+const refused = (work: () => void) => {
+  try {
+    work();
+  } catch (error) {
+    if (error instanceof AppException) {
+      return {
+        status: error.status as number,
+        fields: (error.options.errors ?? []).map(({ field, code }) => ({ field, code })),
+      };
+    }
+    throw error;
+  }
+  return null;
+};
+
+describe('requireValidDates', () => {
+  it('passes dates that agree, and no dates', () => {
+    expect(refused(() => requireValidDates({}, '2026-11-11'))).toBeNull();
+    expect(
+      refused(() =>
+        requireValidDates({ dateOfBirth: '2014-03-09', admissionDate: '2026-06-01' }, '2026-11-11'),
+      ),
+    ).toBeNull();
+  });
+
+  it('refuses a date of birth that is today or later, or before 1900, and an admission before birth', () => {
+    for (const dateOfBirth of ['2026-11-11', '1899-12-31']) {
+      expect(refused(() => requireValidDates({ dateOfBirth }, '2026-11-11'))).toEqual({
+        status: 400,
+        fields: [{ field: 'dateOfBirth', code: 'INVALID_VALUE' }],
+      });
+    }
+    expect(
+      refused(() =>
+        requireValidDates({ dateOfBirth: '2014-03-09', admissionDate: '2014-03-08' }, '2026-11-11'),
+      )?.fields,
+    ).toEqual([{ field: 'admissionDate', code: 'INVALID_VALUE' }]);
+  });
+});
+
+const admittedOn = (admissionDate: string) =>
+  refused(() => requireValidDates({ admissionDate, enrolledDate: '2026-06-01' }, '2026-11-11'));
+
+describe('requireValidDates and the day the enrolment began', () => {
+  it('takes an admission on or before the first day in the class, and refuses one after it', () => {
+    expect(admittedOn('2026-06-01')).toBeNull();
+    expect(admittedOn('2026-05-20')).toBeNull();
+    expect(admittedOn('2026-06-02')?.fields).toEqual([
+      { field: 'admissionDate', code: 'INVALID_VALUE' },
+    ]);
+    expect(admittedOn('2099-01-01')?.fields).toEqual([
+      { field: 'admissionDate', code: 'INVALID_VALUE' },
+    ]);
+  });
+
+  it('does not look at the enrolment when there is none or no admission date', () => {
+    expect(
+      refused(() => requireValidDates({ admissionDate: '2099-01-01' }, '2026-11-11')),
+    ).toBeNull();
+    expect(
+      refused(() =>
+        requireValidDates({ admissionDate: null, enrolledDate: '2026-06-01' }, '2026-11-11'),
+      ),
+    ).toBeNull();
+  });
+
+  it('reports the admission once when it is before the birth and after the enrolment', () => {
+    expect(
+      refused(() =>
+        requireValidDates(
+          { dateOfBirth: '2014-03-09', admissionDate: '2014-03-08', enrolledDate: '2013-01-01' },
+          '2026-11-11',
+        ),
+      )?.fields,
+    ).toEqual([{ field: 'admissionDate', code: 'INVALID_VALUE' }]);
+  });
+});
+
+describe('enrolmentAuditView', () => {
+  it('shows an open, active enrolment before the deactivation and the ending after it', () => {
+    expect(enrolmentAuditView(undefined)).toEqual({
+      placementEndDate: null,
+      enrolmentStatus: 1,
+      enrolmentLeftDate: null,
+      enrolmentOutcome: null,
+    });
+    expect(
+      enrolmentAuditView({ placementEnd: '2026-11-11', status: 1, left: '2026-11-11', outcome: 3 }),
+    ).toEqual({
+      placementEndDate: '2026-11-11',
+      enrolmentStatus: 1,
+      enrolmentLeftDate: '2026-11-11',
+      enrolmentOutcome: 3,
+    });
+    expect(
+      enrolmentAuditView({ placementEnd: '2026-11-11', status: 0, left: null, outcome: null }),
+    ).toMatchObject({ enrolmentStatus: 0, enrolmentLeftDate: null });
+  });
+});
+
+describe('requireValidMoveDate', () => {
+  const END = '2027-03-31';
+  it('takes today, the day the placement began, and any day between', () => {
+    for (const day of ['2026-11-11', '2026-11-05', '2026-11-08']) {
+      expect(refused(() => requireValidMoveDate(day, '2026-11-05', '2026-11-11', END))).toBeNull();
+    }
+  });
+
+  it('refuses a day in the future and a day before the placement began', () => {
+    for (const day of ['2026-11-12', '2026-11-04']) {
+      expect(refused(() => requireValidMoveDate(day, '2026-11-05', '2026-11-11', END))).toEqual({
+        status: 400,
+        fields: [{ field: 'effectiveDate', code: 'INVALID_VALUE' }],
+      });
+    }
+  });
+
+  it('takes the first day of a placement that begins later, and no other day', () => {
+    expect(
+      refused(() => requireValidMoveDate('2026-12-01', '2026-12-01', '2026-11-11', END)),
+    ).toBeNull();
+    for (const day of ['2026-11-11', '2026-12-02']) {
+      expect(
+        refused(() => requireValidMoveDate(day, '2026-12-01', '2026-11-11', END)),
+      ).not.toBeNull();
+    }
+  });
+
+  it('refuses a day after the year ended, even when today is later', () => {
+    expect(
+      refused(() => requireValidMoveDate('2027-03-31', '2026-06-15', '2027-04-05', END)),
+    ).toBeNull();
+    expect(
+      refused(() => requireValidMoveDate('2027-04-01', '2026-06-15', '2027-04-05', END)),
+    ).toEqual({
+      status: 400,
+      fields: [{ field: 'effectiveDate', code: 'INVALID_VALUE' }],
+    });
+  });
+});
+
+describe('latestMoveDate', () => {
+  it('is today, the later first day of the placement, or the end of the year, whichever comes first', () => {
+    expect(latestMoveDate('2026-06-15', '2026-11-11', '2027-03-31')).toBe('2026-11-11');
+    expect(latestMoveDate('2026-12-01', '2026-11-11', '2027-03-31')).toBe('2026-12-01');
+    expect(latestMoveDate('2026-06-15', '2027-04-05', '2027-03-31')).toBe('2027-03-31');
   });
 });

@@ -9,7 +9,12 @@ import type { MasterReferences } from '../../platform/masters/index.js';
 import type { InstitutionDirectory, ScopeService } from '../../platform/tenancy/index.js';
 import type { AcademicYearDirectory, SectionDirectory } from '../academic-setup/index.js';
 import { StudentContext } from './student-context.js';
-import type { CreateStudentDto, ListStudentsQueryDto } from './student.dto.js';
+import type {
+  CreateStudentDto,
+  ListStudentsQueryDto,
+  MoveStudentDto,
+  UpdateStudentDto,
+} from './student.dto.js';
 import type {
   GuardianRow,
   NewGuardian,
@@ -88,6 +93,8 @@ const row = (overrides: Partial<StudentRow> = {}): StudentRow =>
     address_line_1: null,
     address_line_2: null,
     alternate_number: null,
+    inactive_reason: null,
+    inactive_at: null,
     ...overrides,
   }) as StudentRow;
 
@@ -136,6 +143,18 @@ function build(found: StudentRow | null = row()) {
       ),
     );
   const guardians = vi.fn<StudentRepository['guardians']>().mockResolvedValue([]);
+  const update = vi
+    .fn<StudentRepository['update']>()
+    .mockImplementation((_tx, _id, changes) =>
+      Promise.resolve(row({ ...(changes as Partial<StudentRow>), version: 2 })),
+    );
+  const openPlacement = vi.fn<StudentRepository['openPlacement']>().mockResolvedValue(placedRow);
+  const updatePlacement = vi
+    .fn<StudentRepository['updatePlacement']>()
+    .mockResolvedValue(undefined);
+  const updateEnrolment = vi
+    .fn<StudentRepository['updateEnrolment']>()
+    .mockResolvedValue(undefined);
   const placedNow = vi.fn<StudentRepository['placedNow']>().mockResolvedValue(placedRow);
   const sectionCount = vi.fn<StudentRepository['sectionCount']>().mockResolvedValue(1);
   const page = vi
@@ -182,6 +201,10 @@ function build(found: StudentRow | null = row()) {
     insertPlacement,
     insertGuardians,
     guardians,
+    update,
+    openPlacement,
+    updatePlacement,
+    updateEnrolment,
     placedNow,
     sectionCount,
     page,
@@ -228,6 +251,10 @@ function build(found: StudentRow | null = row()) {
     insertPlacement,
     insertGuardians,
     guardians,
+    update,
+    openPlacement,
+    updatePlacement,
+    updateEnrolment,
     placedNow,
     sectionCount,
     page,
@@ -245,6 +272,11 @@ function build(found: StudentRow | null = row()) {
 
 const query = (fields: object = {}) =>
   Object.assign({ page: 2, limit: 20 }, fields) as ListStudentsQueryDto;
+
+const move = (fields: object = {}) => fields as MoveStudentDto;
+const openAt = (start: string): PlacedRow => ({ ...placedRow, start_date: start });
+
+const change = (fields: object = {}) => ({ version: 1, ...fields }) as UpdateStudentDto;
 
 describe('StudentService', () => {
   describe('create (STU-02)', () => {
@@ -593,6 +625,486 @@ describe('StudentService', () => {
       const u = build();
       u.requireInstitution.mockRejectedValueOnce(AppException.notFound());
       expect((await fail(u.service.get(owner, 'student-1'))).status).toBe(404);
+    });
+  });
+
+  describe('update (STU-04)', () => {
+    it('writes only what changed, stamps the author, and audits the before and after', async () => {
+      const t = build(row({ last_name: 'Shetty', nationality: 'Indian' }));
+      const student = await t.service.update(
+        owner,
+        'student-1',
+        change({
+          firstName: 'Diya',
+          lastName: 'Rao',
+          nationality: 'Indian',
+          contactEmail: 'Diya@Example.com',
+          mobile: { countryCode: '91', number: '9000000001' },
+          address: { line1: '12 Lake Road' },
+        }),
+      );
+      expect(t.update).toHaveBeenCalledWith(expect.anything(), 'student-1', {
+        last_name: 'Rao',
+        contact_email: 'diya@example.com',
+        mobile_number: '9000000001',
+        address_line_1: '12 Lake Road',
+        updated_by: 'owner-1',
+      });
+      expect(student.version).toBe(2);
+      expect(t.record).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          action: 'student.updated',
+          institutionId: 'institution-1',
+          entityType: 'student',
+          entityId: 'student-1',
+          before: expect.objectContaining({ lastName: 'Shetty' }),
+          after: expect.objectContaining({ lastName: 'Rao' }),
+        }),
+      );
+    });
+
+    it('clears an optional field with null, and the email with it', async () => {
+      const t = build(row({ last_name: 'Shetty', contact_email: 'a@example.com' }));
+      await t.service.update(owner, 'student-1', change({ lastName: null, contactEmail: null }));
+      expect(t.update.mock.calls[0]![2]).toMatchObject({ last_name: null, contact_email: null });
+    });
+
+    it('clears the whole address with null, and leaves it alone when it is not sent', async () => {
+      const t = build(
+        row({
+          address_line_1: '12 Lake Road',
+          address_line_2: null,
+          country_id: null,
+          state_id: null,
+          pincode: '560001',
+          city_id: 'city-1',
+        }),
+      );
+      await t.service.update(owner, 'student-1', change({ address: null }));
+      expect(t.update.mock.calls[0]![2]).toEqual({
+        address_line_1: null,
+        pincode: null,
+        city_id: null,
+        updated_by: 'owner-1',
+      });
+      const untouched = build(row({ address_line_1: '12 Lake Road' }));
+      await untouched.service.update(owner, 'student-1', change({ firstName: 'Diya' }));
+      expect(untouched.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses an admission date after the day the child started in their class, as the add does', async () => {
+      const t = build();
+      t.placedNow.mockResolvedValue({ ...placedRow, enrolled_date: '2026-06-01' });
+      const refused = await fail(
+        t.service.update(owner, 'student-1', change({ admissionDate: '2026-06-02' })),
+      );
+      expect(refused.status).toBe(400);
+      expect(refused.fields).toEqual([expect.objectContaining({ field: 'admissionDate' })]);
+      expect(t.update).not.toHaveBeenCalled();
+      const fine = build();
+      fine.placedNow.mockResolvedValue({ ...placedRow, enrolled_date: '2026-06-01' });
+      await fine.service.update(owner, 'student-1', change({ admissionDate: '2026-06-01' }));
+      expect(fine.update.mock.calls[0]![2]).toMatchObject({ admission_date: '2026-06-01' });
+    });
+
+    it('writes nothing for a request that changes nothing, and still answers with the profile', async () => {
+      const t = build();
+      const student = await t.service.update(owner, 'student-1', change({ firstName: 'Diya' }));
+      expect(t.update).not.toHaveBeenCalled();
+      expect(t.record).not.toHaveBeenCalled();
+      expect(student).toMatchObject({ id: 'student-1', version: 1 });
+    });
+
+    it('is 409 for a stale version before anything else is looked at', async () => {
+      const t = build(row({ version: 3 }));
+      const refused = await fail(
+        t.service.update(owner, 'student-1', change({ dateOfBirth: '2999-01-01' })),
+      );
+      expect(refused.status).toBe(409);
+      expect(refused.code).toBe('VERSION_CONFLICT');
+    });
+
+    it('is 404 for a deactivated student, and for an Institution the caller does not reach', async () => {
+      const t = build(row({ status: 0 }));
+      expect((await fail(t.service.update(owner, 'student-1', change()))).status).toBe(404);
+      const u = build();
+      u.requireInstitution.mockRejectedValueOnce(AppException.notFound());
+      expect((await fail(u.service.update(owner, 'student-1', change()))).status).toBe(404);
+    });
+
+    it('checks the dates as they will stand: a date not sent keeps its stored value', async () => {
+      const t = build(row({ date_of_birth: '2014-03-09' }));
+      const refused = await fail(
+        t.service.update(owner, 'student-1', change({ admissionDate: '2010-01-01' })),
+      );
+      expect(refused.status).toBe(400);
+      expect(refused.fields).toEqual([expect.objectContaining({ field: 'admissionDate' })]);
+      expect(t.update).not.toHaveBeenCalled();
+    });
+
+    it('looks at a place and a photo only when they change', async () => {
+      const t = build(row({ country_id: 'country-1', state_id: 'state-1' }));
+      await t.service.update(owner, 'student-1', change({ address: { countryId: 'country-1' } }));
+      expect(t.requirePlace).not.toHaveBeenCalled();
+      expect(t.requireReady).not.toHaveBeenCalled();
+      await t.service.update(
+        owner,
+        'student-1',
+        change({ address: { cityId: 'city-1' }, photoFileId: 'file-1' }),
+      );
+      expect(t.requirePlace).toHaveBeenCalledWith(
+        expect.anything(),
+        { countryId: 'country-1', stateId: 'state-1', cityId: 'city-1' },
+        'address',
+        { countryId: 'country-1', stateId: 'state-1' },
+      );
+      expect(t.requireReady).toHaveBeenCalledWith(
+        expect.anything(),
+        'file-1',
+        expect.objectContaining({ institutionId: 'institution-1' }),
+        'photoFileId',
+      );
+    });
+
+    it('answers a taken Admission ID, and a photo another child holds, in the words of the API', async () => {
+      const t = build();
+      t.update.mockRejectedValueOnce(unique('uq_students_institution_admission_no'));
+      expect(
+        (await fail(t.service.update(owner, 'student-1', change({ admissionNo: 'GVS-1' })))).code,
+      ).toBe('ADMISSION_NO_TAKEN');
+      t.update.mockRejectedValueOnce(unique('uq_students_photo'));
+      const refused = await fail(
+        t.service.update(owner, 'student-1', change({ photoFileId: 'file-1' })),
+      );
+      expect(refused.status).toBe(400);
+      expect(refused.fields).toEqual([expect.objectContaining({ field: 'photoFileId' })]);
+    });
+  });
+
+  describe('deactivate (STU-05)', () => {
+    it('ends the placement today, ends the enrolment as left, and records why', async () => {
+      const t = build();
+      expect(await t.service.deactivate(owner, 'student-1', { reason: 1 })).toEqual({
+        id: 'student-1',
+        status: 0,
+      });
+      expect(t.updatePlacement).toHaveBeenCalledWith(expect.anything(), 'placement-1', {
+        end_date: '2026-11-11',
+        updated_by: 'owner-1',
+      });
+      expect(t.updateEnrolment).toHaveBeenCalledWith(expect.anything(), 'enrolment-1', {
+        left_date: '2026-11-11',
+        outcome: 3,
+        updated_by: 'owner-1',
+      });
+      expect(t.update).toHaveBeenCalledWith(expect.anything(), 'student-1', {
+        status: 0,
+        inactive_reason: 1,
+        inactive_at: new Date('2026-11-11T04:30:00.000Z'),
+        updated_by: 'owner-1',
+      });
+      expect(t.record).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          action: 'student.deactivated',
+          before: expect.objectContaining({ status: 1, inactiveReason: null }),
+          after: expect.objectContaining({ status: 0, inactiveReason: 1 }),
+        }),
+      );
+    });
+
+    it('cancels the enrolment of a record made by mistake instead of closing it', async () => {
+      const t = build();
+      await t.service.deactivate(owner, 'student-1', { reason: 2 });
+      expect(t.updateEnrolment).toHaveBeenCalledWith(expect.anything(), 'enrolment-1', {
+        status: 0,
+        updated_by: 'owner-1',
+      });
+    });
+
+    it('cancels an enrolment that has not begun, whatever the reason, and ends its placement on its first day', async () => {
+      for (const reason of [1, 2, 3]) {
+        const t = build();
+        t.openPlacement.mockResolvedValueOnce({
+          ...placedRow,
+          start_date: '2026-12-01',
+          enrolled_date: '2026-12-01',
+        });
+        await t.service.deactivate(owner, 'student-1', { reason });
+        expect(t.updatePlacement.mock.calls[0]![2]).toMatchObject({ end_date: '2026-12-01' });
+        expect(t.updateEnrolment).toHaveBeenCalledWith(expect.anything(), 'enrolment-1', {
+          status: 0,
+          updated_by: 'owner-1',
+        });
+        expect(t.update.mock.calls[0]![2]).toMatchObject({ status: 0, inactive_reason: reason });
+      }
+    });
+
+    it('never ends a placement or an enrolment before it began', async () => {
+      const t = build();
+      t.openPlacement.mockResolvedValueOnce({
+        ...placedRow,
+        start_date: '2026-11-11',
+        enrolled_date: '2026-11-11',
+      });
+      t.openYear.mockResolvedValueOnce({
+        open: true,
+        startDate: '2026-06-01',
+        endDate: '2027-03-31',
+      });
+      await t.service.deactivate(owner, 'student-1', { reason: 3 });
+      expect(t.updatePlacement.mock.calls[0]![2]).toMatchObject({ end_date: '2026-11-11' });
+      expect(t.updateEnrolment.mock.calls[0]![2]).toMatchObject({ left_date: '2026-11-11' });
+    });
+
+    it('ends both on the last day of the year once the year has ended but not been promoted', async () => {
+      const t = build();
+      t.openYear.mockResolvedValueOnce({
+        open: true,
+        startDate: '2026-06-01',
+        endDate: '2026-09-30',
+      });
+      await t.service.deactivate(owner, 'student-1', { reason: 1 });
+      expect(t.openYear).toHaveBeenCalledWith(expect.anything(), 'year-1', 'institution-1');
+      expect(t.updatePlacement.mock.calls[0]![2]).toMatchObject({ end_date: '2026-09-30' });
+      expect(t.updateEnrolment.mock.calls[0]![2]).toMatchObject({
+        left_date: '2026-09-30',
+        outcome: 3,
+      });
+    });
+
+    it('records what became of the enrolment and the placement in the audit entry', async () => {
+      const t = build();
+      await t.service.deactivate(owner, 'student-1', { reason: 1 });
+      expect(t.record.mock.calls[0]![1]).toMatchObject({
+        before: {
+          placementEndDate: null,
+          enrolmentStatus: 1,
+          enrolmentLeftDate: null,
+          enrolmentOutcome: null,
+        },
+        after: {
+          placementEndDate: '2026-11-11',
+          enrolmentStatus: 1,
+          enrolmentLeftDate: '2026-11-11',
+          enrolmentOutcome: 3,
+        },
+      });
+      const mistake = build();
+      await mistake.service.deactivate(owner, 'student-1', { reason: 2 });
+      expect(mistake.record.mock.calls[0]![1]).toMatchObject({
+        after: { enrolmentStatus: 0, enrolmentLeftDate: null, enrolmentOutcome: null },
+      });
+    });
+
+    it('is 404 when the student is already deactivated, or not at an Institution the caller reaches', async () => {
+      const t = build(row({ status: 0 }));
+      expect((await fail(t.service.deactivate(owner, 'student-1', { reason: 1 }))).status).toBe(
+        404,
+      );
+      expect(t.update).not.toHaveBeenCalled();
+      const u = build();
+      u.requireInstitution.mockRejectedValueOnce(AppException.notFound());
+      expect((await fail(u.service.deactivate(owner, 'student-1', { reason: 1 }))).status).toBe(
+        404,
+      );
+    });
+  });
+
+  describe('move (STU-08)', () => {
+    it('closes the open placement the day before and opens the next, with the new section and roll number', async () => {
+      const t = build();
+      t.openPlacement.mockResolvedValue(openAt('2026-06-01'));
+      t.placeOf.mockResolvedValue({
+        classId: 'class-1',
+        institutionId: 'institution-1',
+        active: true,
+        capacity: null,
+      });
+      const moved = await t.service.move(
+        owner,
+        'student-1',
+        move({ sectionId: 'section-2', rollNumber: '3', effectiveDate: '2026-11-01' }),
+      );
+      expect(t.updatePlacement).toHaveBeenCalledWith(expect.anything(), 'placement-1', {
+        end_date: '2026-10-31',
+        updated_by: 'owner-1',
+      });
+      expect(t.insertPlacement).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          society_id: 'society-1',
+          institution_id: 'institution-1',
+          created_by: 'owner-1',
+          academic_year_id: 'year-1',
+          student_enrolment_id: 'enrolment-1',
+          class_id: 'class-1',
+          section_id: 'section-2',
+          roll_number: '3',
+          start_date: '2026-11-01',
+        }),
+      );
+      expect(moved.data.placement).toMatchObject({
+        sectionId: 'section-2',
+        rollNumber: '3',
+        startDate: '2026-11-01',
+      });
+      expect(moved.options).toMatchObject({ status: 200, code: 'OK', meta: null });
+      expect(t.record).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          action: 'student.placement_changed',
+          before: expect.objectContaining({ sectionId: 'section-1', rollNumber: '14' }),
+          after: expect.objectContaining({ sectionId: 'section-2', rollNumber: '3' }),
+        }),
+      );
+    });
+
+    it('takes today as the day, and keeps what is not sent', async () => {
+      const t = build();
+      t.openPlacement.mockResolvedValue(openAt('2026-06-01'));
+      await t.service.move(owner, 'student-1', move({ rollNumber: '15' }));
+      expect(t.updatePlacement.mock.calls[0]![2]).toMatchObject({ end_date: '2026-11-10' });
+      expect(t.insertPlacement.mock.calls[0]![1]).toMatchObject({
+        section_id: 'section-1',
+        roll_number: '15',
+        start_date: '2026-11-11',
+      });
+    });
+
+    it('corrects the placement in place on the day it began, with nothing to close', async () => {
+      const t = build();
+      t.openPlacement.mockResolvedValue(openAt('2026-11-11'));
+      await t.service.move(owner, 'student-1', move({ rollNumber: '15' }));
+      expect(t.insertPlacement).not.toHaveBeenCalled();
+      expect(t.updatePlacement).toHaveBeenCalledWith(expect.anything(), 'placement-1', {
+        section_id: 'section-1',
+        roll_number: '15',
+        updated_by: 'owner-1',
+      });
+    });
+
+    it('writes nothing for a request that changes nothing', async () => {
+      const t = build();
+      const moved = await t.service.move(
+        owner,
+        'student-1',
+        move({ sectionId: 'section-1', rollNumber: '14', effectiveDate: '2999-01-01' }),
+      );
+      await t.service.move(owner, 'student-1', move());
+      expect(t.updatePlacement).not.toHaveBeenCalled();
+      expect(t.insertPlacement).not.toHaveBeenCalled();
+      expect(t.record).not.toHaveBeenCalled();
+      expect(moved.data.placement).toMatchObject({ sectionId: 'section-1', rollNumber: '14' });
+    });
+
+    it('refuses a day in the future or before the current placement began', async () => {
+      const t = build();
+      t.openPlacement.mockResolvedValue(openAt('2026-11-05'));
+      for (const effectiveDate of ['2026-11-12', '2026-11-04']) {
+        const refused = await fail(
+          t.service.move(owner, 'student-1', move({ rollNumber: '15', effectiveDate })),
+        );
+        expect(refused.status).toBe(400);
+        expect(refused.fields).toEqual([expect.objectContaining({ field: 'effectiveDate' })]);
+      }
+      expect(t.updatePlacement).not.toHaveBeenCalled();
+    });
+
+    it('corrects in place, on its first day, a placement that begins later (a child admitted ahead)', async () => {
+      const t = build();
+      t.openPlacement.mockResolvedValue(openAt('2026-12-01'));
+      const moved = await t.service.move(owner, 'student-1', move({ rollNumber: '15' }));
+      expect(t.insertPlacement).not.toHaveBeenCalled();
+      expect(t.updatePlacement).toHaveBeenCalledWith(
+        expect.anything(),
+        'placement-1',
+        expect.objectContaining({ roll_number: '15' }),
+      );
+      expect(moved.data.placement).toMatchObject({ rollNumber: '15', startDate: '2026-12-01' });
+    });
+
+    it('never opens a placement after the year ended: the default day is the last of the year', async () => {
+      const t = build();
+      t.openPlacement.mockResolvedValue(openAt('2026-06-01'));
+      t.openYear.mockResolvedValue({ open: true, startDate: '2026-06-01', endDate: '2026-11-01' });
+      await t.service.move(owner, 'student-1', move({ rollNumber: '15' }));
+      expect(t.updatePlacement.mock.calls[0]![2]).toMatchObject({ end_date: '2026-10-31' });
+      expect(t.insertPlacement.mock.calls[0]![1]).toMatchObject({ start_date: '2026-11-01' });
+      const refused = await fail(
+        t.service.move(owner, 'student-1', move({ rollNumber: '16', effectiveDate: '2026-11-05' })),
+      );
+      expect(refused.status).toBe(400);
+      expect(refused.fields).toEqual([expect.objectContaining({ field: 'effectiveDate' })]);
+    });
+
+    it('is 404 for another Institution’s section, 422 for a section of another class or one that is closed, and 422 for a year that is closed', async () => {
+      const t = build();
+      t.openPlacement.mockResolvedValue(openAt('2026-06-01'));
+      const place = {
+        classId: 'class-1',
+        institutionId: 'institution-1',
+        active: true,
+        capacity: null,
+      };
+      t.placeOf.mockResolvedValueOnce({ ...place, institutionId: 'institution-2' });
+      expect(
+        (await fail(t.service.move(owner, 'student-1', move({ sectionId: 'x' })))).status,
+      ).toBe(404);
+      t.placeOf.mockResolvedValueOnce({ ...place, classId: 'class-2' });
+      expect((await fail(t.service.move(owner, 'student-1', move({ sectionId: 'x' })))).code).toBe(
+        'SECTION_NOT_IN_CLASS',
+      );
+      t.placeOf.mockResolvedValueOnce({ ...place, active: false });
+      expect((await fail(t.service.move(owner, 'student-1', move({ sectionId: 'x' })))).code).toBe(
+        'INACTIVE_SECTION',
+      );
+      t.openYear.mockResolvedValueOnce({
+        open: false,
+        startDate: '2026-06-01',
+        endDate: '2027-03-31',
+      });
+      expect((await fail(t.service.move(owner, 'student-1', move({ sectionId: 'x' })))).code).toBe(
+        'YEAR_NOT_ACTIVE',
+      );
+      expect(t.updatePlacement).not.toHaveBeenCalled();
+    });
+
+    it('answers a taken roll number in the words of the API', async () => {
+      const t = build();
+      t.openPlacement.mockResolvedValue(openAt('2026-06-01'));
+      t.insertPlacement.mockRejectedValueOnce(unique('uq_placements_roll'));
+      const refused = await fail(t.service.move(owner, 'student-1', move({ rollNumber: '1' })));
+      expect(refused.status).toBe(409);
+      expect(refused.code).toBe('ROLL_NUMBER_TAKEN');
+    });
+
+    it('warns, and still moves, when the section is now over its capacity', async () => {
+      const t = build();
+      t.openPlacement.mockResolvedValue(openAt('2026-06-01'));
+      t.placeOf.mockResolvedValue({
+        classId: 'class-1',
+        institutionId: 'institution-1',
+        active: true,
+        capacity: 1,
+      });
+      t.sectionCount.mockResolvedValue(2);
+      const moved = await t.service.move(owner, 'student-1', move({ sectionId: 'section-2' }));
+      expect(moved.options.status).toBe(200);
+      expect(moved.options.meta).toEqual({ warnings: ['SECTION_OVER_CAPACITY'] });
+    });
+
+    it('is 404 for a deactivated student and for one with no open placement', async () => {
+      const t = build(row({ status: 0 }));
+      expect(
+        (await fail(t.service.move(owner, 'student-1', move({ rollNumber: '2' })))).status,
+      ).toBe(404);
+      const u = build();
+      u.openPlacement.mockResolvedValue(undefined);
+      expect(
+        (await fail(u.service.move(owner, 'student-1', move({ rollNumber: '2' })))).status,
+      ).toBe(404);
     });
   });
 });

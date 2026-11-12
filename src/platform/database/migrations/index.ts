@@ -30,6 +30,7 @@ import * as m0028 from './2026_11_10_0028_people_admin_grants.js';
 import * as m0029 from './2026_11_10_0029_people_assignments.js';
 import * as m0030 from './2026_11_10_0030_people_identity_documents.js';
 import * as m0031 from './2026_11_11_0031_people_students_core.js';
+import * as m0032 from './2026_11_11_0032_people_students_lifecycle.js';
 
 /**
  * Every migration, in order. Listed explicitly (not read from disk) so the
@@ -71,6 +72,7 @@ const migrations: Record<string, Migration> = {
   '2026_11_10_0029_people_assignments': m0029,
   '2026_11_10_0030_people_identity_documents': m0030,
   '2026_11_11_0031_people_students_core': m0031,
+  '2026_11_11_0032_people_students_lifecycle': m0032,
 };
 
 export const migrationProvider: MigrationProvider = {

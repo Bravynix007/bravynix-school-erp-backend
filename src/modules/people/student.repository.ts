@@ -1,5 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { sql, type ExpressionBuilder, type Insertable, type Selectable } from 'kysely';
+import {
+  sql,
+  type ExpressionBuilder,
+  type Insertable,
+  type Selectable,
+  type Updateable,
+} from 'kysely';
 import { containsPattern, type SortKey } from '../../common/pagination/pagination.js';
 import type { Database, Tx } from '../../platform/database/index.js';
 import type {
@@ -18,6 +24,9 @@ export type EnrolmentRow = Selectable<StudentEnrolmentsTable>;
 export type NewEnrolment = Insertable<StudentEnrolmentsTable>;
 export type PlacementRow = Selectable<StudentSectionPlacementsTable>;
 export type NewPlacement = Insertable<StudentSectionPlacementsTable>;
+export type StudentChanges = Updateable<StudentsTable>;
+export type PlacementChanges = Updateable<StudentSectionPlacementsTable>;
+export type EnrolmentChanges = Updateable<StudentEnrolmentsTable>;
 
 /** A student's placement with the enrolment it belongs to: where the child sits, and since when. */
 export interface PlacedRow {
@@ -69,12 +78,22 @@ const SORT_COLUMN = {
 /** Queries on the student tables; every one runs in the caller's transaction, under row-level security. */
 @Injectable()
 export class StudentRepository {
-  find(tx: Tx, id: string): Promise<StudentRow | undefined> {
-    return tx.selectFrom('students').selectAll().where('id', '=', id).executeTakeFirst();
+  async find(tx: Tx, id: string, lock = false): Promise<StudentRow | undefined> {
+    const query = tx.selectFrom('students').selectAll().where('id', '=', id);
+    return (lock ? query.forUpdate() : query).executeTakeFirst();
   }
 
   insert(tx: Tx, values: NewStudent): Promise<StudentRow> {
     return tx.insertInto('students').values(values).returningAll().executeTakeFirstOrThrow();
+  }
+
+  update(tx: Tx, id: string, changes: StudentChanges): Promise<StudentRow> {
+    return tx
+      .updateTable('students')
+      .set(changes)
+      .where('id', '=', id)
+      .returningAll()
+      .executeTakeFirstOrThrow();
   }
 
   insertEnrolment(tx: Tx, values: NewEnrolment): Promise<EnrolmentRow> {
@@ -91,6 +110,15 @@ export class StudentRepository {
       .values(values)
       .returningAll()
       .executeTakeFirstOrThrow();
+  }
+
+  /** Ends or cancels an enrolment: the day the child left and the outcome, or `status` 0 for one made by mistake. */
+  async updateEnrolment(tx: Tx, id: string, changes: EnrolmentChanges): Promise<void> {
+    await tx.updateTable('student_enrolments').set(changes).where('id', '=', id).execute();
+  }
+
+  async updatePlacement(tx: Tx, id: string, changes: PlacementChanges): Promise<void> {
+    await tx.updateTable('student_section_placements').set(changes).where('id', '=', id).execute();
   }
 
   async insertGuardians(tx: Tx, rows: NewGuardian[]): Promise<GuardianRow[]> {
@@ -110,17 +138,34 @@ export class StudentRepository {
       .execute();
   }
 
-  /** The placement the student sits in now, or the latest they had: the one a profile shows. */
+  /**
+   * The placement the student sits in now, or the latest they had: the one a profile shows. A deactivated student
+   * keeps showing the last one, though an enrolment made by mistake is cancelled.
+   */
   placedNow(tx: Tx, studentId: string): Promise<PlacedRow | undefined> {
     return tx
       .selectFrom('student_section_placements as p')
       .innerJoin('student_enrolments as e', 'e.id', 'p.student_enrolment_id')
       .select(PLACED_COLUMNS)
       .where('e.student_id', '=', studentId)
-      .where('e.status', '=', 1)
       .orderBy('p.start_date', 'desc')
       .orderBy('p.id', 'desc')
       .limit(1)
+      .executeTakeFirst();
+  }
+
+  /**
+   * The placement that is open now: the one STU-08 closes. None for a student without an active enrolment or whose
+   * placement was closed.
+   */
+  openPlacement(tx: Tx, studentId: string): Promise<PlacedRow | undefined> {
+    return tx
+      .selectFrom('student_section_placements as p')
+      .innerJoin('student_enrolments as e', 'e.id', 'p.student_enrolment_id')
+      .select(PLACED_COLUMNS)
+      .where('e.student_id', '=', studentId)
+      .where('e.status', '=', 1)
+      .where('p.end_date', 'is', null)
       .executeTakeFirst();
   }
 
@@ -147,7 +192,6 @@ export class StudentRepository {
             .innerJoin('student_enrolments as e', 'e.id', 'p.student_enrolment_id')
             .select(PLACED_COLUMNS)
             .whereRef('e.student_id', '=', 'students.id')
-            .where('e.status', '=', 1)
             .$if(filter.academicYearId !== undefined, (qb) =>
               qb.where('p.academic_year_id', '=', filter.academicYearId!),
             )

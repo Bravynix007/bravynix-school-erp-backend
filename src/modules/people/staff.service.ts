@@ -28,7 +28,7 @@ import {
   PersonDirectory,
   type ChangeEmailDto,
 } from '../../platform/identity/index.js';
-import { MasterReferences } from '../../platform/masters/index.js';
+import { MasterReferences, placeOf, type PlaceIds } from '../../platform/masters/index.js';
 import { SubjectDirectory } from '../academic-setup/index.js';
 import { InstitutionDirectory, ScopeService } from '../../platform/tenancy/index.js';
 import {
@@ -791,9 +791,9 @@ export class StaffService {
       classCategoryId?: string | null;
       designationId?: string | null;
       photoFileId?: string | null;
-      place?: Place;
+      place?: PlaceIds;
     },
-    where: { institutionId: string; currentPlace?: Place },
+    where: { institutionId: string; currentPlace?: PlaceIds },
   ): Promise<void> {
     if (links.classCategoryId) {
       await this.masters.requireShown(
@@ -872,19 +872,4 @@ export class StaffService {
 /** Do two lists hold the same IDs, whatever their order? */
 function sameIds(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((id) => b.includes(id));
-}
-
-type Place = { countryId?: string | null; stateId?: string | null; cityId?: string | null };
-
-/** The place columns of a stored record or of a set of changes, as the master check names them. */
-function placeOf(row: {
-  country_id?: string | null;
-  state_id?: string | null;
-  city_id?: string | null;
-}): Place {
-  return {
-    ...(row.country_id === undefined ? {} : { countryId: row.country_id }),
-    ...(row.state_id === undefined ? {} : { stateId: row.state_id }),
-    ...(row.city_id === undefined ? {} : { cityId: row.city_id }),
-  };
 }
