@@ -9,6 +9,8 @@ import type { GuardianRow, PlacedRow, StudentRow } from './student.repository.js
 export interface StudentDatesInput {
   dateOfBirth?: string | null;
   admissionDate?: string | null;
+  /** The first day of the child's current enrolment: the admission is on or before it (STU-04). */
+  enrolledDate?: string;
 }
 
 /** What a new student's dates and guardians must satisfy beyond the shape of the body (PRD 7.6, DDD 9.6). */
@@ -19,13 +21,22 @@ export interface StudentRuleInput extends StudentDatesInput {
 /** The earliest year a date of birth can be, as for staff (a typing slip, not a person). */
 const EARLIEST_BIRTH = '1900-01-01';
 
-/** The date problems: the date of birth is from 1900 and before `today`, and the admission is not before it. */
+/**
+ * The date problems: the date of birth is from 1900 and before `today`, the admission is not before it, and, when the
+ * enrolment is known, not after the day the child started in their class.
+ */
 function dateProblems(input: StudentDatesInput, today: string): FieldError[] {
   const problems: FieldError[] = [];
   if (input.dateOfBirth && (input.dateOfBirth >= today || input.dateOfBirth < EARLIEST_BIRTH)) {
     problems.push(fieldError('dateOfBirth', FieldErrorCode.INVALID_VALUE));
   }
   if (input.dateOfBirth && input.admissionDate && input.admissionDate < input.dateOfBirth) {
+    problems.push(fieldError('admissionDate', FieldErrorCode.INVALID_VALUE));
+  } else if (
+    input.enrolledDate &&
+    input.admissionDate &&
+    input.admissionDate > input.enrolledDate
+  ) {
     problems.push(fieldError('admissionDate', FieldErrorCode.INVALID_VALUE));
   }
   return problems;
@@ -97,6 +108,28 @@ const maskPhone = (number: string): string =>
  * address lines and the guardians' numbers and emails are personal data the entry does not need, so they are left out;
  * a phone number shows as its last four digits.
  */
+/** How a deactivation ended the enrolment and the placement: the dates and the enrolment's status and outcome. */
+export interface EnrolmentEnding {
+  placementEnd: string;
+  /** 1 Active (the child left), 0 Cancelled. */
+  status: number;
+  left: string | null;
+  outcome: number | null;
+}
+
+/**
+ * What the audit entry of a deactivation says about the enrolment and the placement, so the entry shows what became of
+ * them: before the deactivation they are open and active, after it they carry the dates and the outcome.
+ */
+export function enrolmentAuditView(ending: EnrolmentEnding | undefined): AuditValues {
+  return {
+    placementEndDate: ending?.placementEnd ?? null,
+    enrolmentStatus: ending?.status ?? 1,
+    enrolmentLeftDate: ending?.left ?? null,
+    enrolmentOutcome: ending?.outcome ?? null,
+  };
+}
+
 export function studentAuditView(
   row: StudentRow,
   placed: PlacedRow | undefined,
@@ -123,6 +156,7 @@ export function studentAuditView(
     classId: placed?.class_id ?? null,
     sectionId: placed?.section_id ?? null,
     rollNumber: placed?.roll_number ?? null,
+    placementStartDate: placed?.start_date ?? null,
     guardians: guardians.map((guardian) => ({
       firstName: guardian.first_name,
       lastName: guardian.last_name,

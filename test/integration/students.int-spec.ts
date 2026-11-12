@@ -115,6 +115,20 @@ describe('students: add, read and list', () => {
         ),
       )
     ).rows[0]!;
+  const rowOf = async (id: string) =>
+    (
+      await database.transaction(tenant(), (tx) =>
+        sql<{
+          status: number;
+          inactive_reason: number | null;
+          address_line_1: string | null;
+          city_id: string | null;
+          pincode: string | null;
+        }>`select status, inactive_reason, address_line_1, city_id, pincode from students where id = ${id}`.execute(
+          tx,
+        ),
+      )
+    ).rows[0]!;
   const openPlacements = async (id: string) =>
     (
       await database.transaction(tenant(), (tx) =>
@@ -151,8 +165,8 @@ describe('students: add, read and list', () => {
   };
   const patch = (id: string, fields: object, token = owner.token) =>
     api('patch', `/v1/students/${id}`, token, fields);
-  const deactivate = (id: string, reason: number | undefined = 1, token = owner.token) =>
-    api('delete', `/v1/students/${id}`, token, reason === undefined ? {} : { reason });
+  const deactivate = (id: string, reason: number | string | undefined = 1, token = owner.token) =>
+    api('delete', `/v1/students/${id}${reason === undefined ? '' : `?reason=${reason}`}`, token);
   const deactivateRow = (id: string) =>
     refused(
       sql`update students set status = 0, inactive_reason = 3, inactive_at = now() where id = ${id}`,
@@ -260,7 +274,7 @@ describe('students: add, read and list', () => {
     second = await kit.institution(owner.token, categoryId);
     institutionAdmin = await fixtures.institutionAdmin(societyA, [first]);
     otherOwner = await fixtures.owner(await kit.society(admin));
-    year = await kit.year(owner.token, first);
+    year = await kit.year(owner.token, first, { startDate: '2026-04-01' });
     classNine = await kit.klass(owner.token, first, classes.find((c) => c.code === 'C09')!.id);
     classTen = await kit.klass(owner.token, first, classes.find((c) => c.code === 'C10')!.id);
     sectionA = await kit.section(
@@ -501,7 +515,7 @@ describe('students: add, read and list', () => {
       expect(early.status).toBe(201);
       expect(early.body.data).toMatchObject({
         admissionDate: '2020-01-01',
-        placement: { enrolledDate: '2026-06-01', startDate: '2026-06-01' },
+        placement: { enrolledDate: '2026-04-01', startDate: '2026-04-01' },
       });
       const late = await add({ admissionDate: '2027-09-01', ...roll('2') });
       expect([late.status, late.body.errors?.[0]?.field, late.body.errors?.[0]?.code]).toEqual([
@@ -767,9 +781,7 @@ describe('students: add, read and list', () => {
       const two = await added({ admissionNo: 'GVS-6', ...roll('2') });
       const taken = await patch(two.id, { version: 1, admissionNo: 'gvs-5' });
       expect([taken.status, taken.body.code]).toEqual([409, 'ADMISSION_NO_TAKEN']);
-      expect(
-        (await api('delete', `/v1/students/${one.id}`, owner.token, { reason: 1 })).status,
-      ).toBe(200);
+      expect((await deactivate(one.id)).status).toBe(200);
       expect((await patch(two.id, { version: 1, admissionNo: 'GVS-5' })).status).toBe(200);
     });
 
@@ -798,7 +810,7 @@ describe('students: add, read and list', () => {
       ] as const) {
         expect((await patch(id, { version: 1, lastName: 'X' }, token)).status).toBe(404);
       }
-      await api('delete', `/v1/students/${student.id}`, owner.token, { reason: 3 });
+      await deactivate(student.id, 3);
       expect((await patch(student.id, { version: 2, lastName: 'X' })).status).toBe(404);
     });
 
@@ -880,16 +892,18 @@ describe('students: add, read and list', () => {
 
     it('needs a reason of 1, 2 or 3', async () => {
       const student = await added();
-      for (const reason of [undefined, 0, 4, '1']) {
-        const res = await api(
-          'delete',
-          `/v1/students/${student.id}`,
-          owner.token,
-          reason === undefined ? {} : { reason },
-        );
-        expect(res.status).toBe(400);
+      const none = await api('delete', `/v1/students/${student.id}`, owner.token);
+      expect([none.status, none.body.errors?.[0]?.field]).toEqual([400, 'reason']);
+      for (const reason of [0, 4, 'left', '']) {
+        const res = await deactivate(student.id, reason);
+        expect([reason, res.status]).toEqual([reason, 400]);
         expect(res.body.errors?.[0]?.field).toBe('reason');
       }
+      // A body is not read: the reason is the query's.
+      const bodyOnly = await api('delete', `/v1/students/${student.id}`, owner.token, {
+        reason: 1,
+      });
+      expect(bodyOnly.status).toBe(400);
       expect((await api('get', `/v1/students/${student.id}`, owner.token)).body.data).toMatchObject(
         { status: 1 },
       );
@@ -1042,7 +1056,7 @@ describe('students: add, read and list', () => {
       const taken = await move(two.id, { rollNumber: '1' });
       expect([taken.status, taken.body.code]).toEqual([409, 'ROLL_NUMBER_TAKEN']);
       expect(await placements(two.id)).toHaveLength(1);
-      await api('delete', `/v1/students/${one.id}`, owner.token, { reason: 1 });
+      await deactivate(one.id);
       expect((await move(two.id, { rollNumber: '1' })).status).toBe(200);
     });
 
@@ -1091,8 +1105,146 @@ describe('students: add, read and list', () => {
         400,
         [{ field: 'classId', code: 'FIELD_NOT_ALLOWED' }],
       ]);
-      await api('delete', `/v1/students/${student.id}`, owner.token, { reason: 1 });
+      await deactivate(student.id);
       expect((await move(student.id, { rollNumber: '9' })).status).toBe(404);
+    });
+  });
+
+  describe('what Code Review found in STU-04, STU-05 and STU-08', () => {
+    it('lets only one of two edits of one version win, and only one of two deactivations', async () => {
+      const student = await added();
+      const edits = await Promise.all([
+        patch(student.id, { version: 1, firstName: 'Anu' }),
+        patch(student.id, { version: 1, firstName: 'Banu' }),
+      ]);
+      expect(edits.map((res) => res.status).toSorted()).toEqual([200, 409]);
+      const other = await added(roll('2'));
+      const gone = await Promise.all([deactivate(other.id), deactivate(other.id)]);
+      expect(gone.map((res) => res.status).toSorted()).toEqual([200, 404]);
+      expect(
+        await audit(other.id).then((e) => e.filter((x) => x.action === 'student.deactivated')),
+      ).toHaveLength(1);
+    });
+
+    it('ends a student of a year that has ended on the last day of the year, not today', async () => {
+      const student = await sinceMay();
+      await refused(
+        sql`update student_enrolments set enrolled_date = '2026-05-01' where student_id = ${student.id}`,
+      );
+      await refused(sql`update academic_years set end_date = '2026-05-15' where id = ${year}`);
+      expect((await deactivate(student.id, 1)).status).toBe(200);
+      expect(await enrolmentOf(student.id)).toEqual({
+        status: 1,
+        left_date: '2026-05-15',
+        outcome: 3,
+      });
+      expect((await placements(student.id)).map((p) => p.end_date)).toEqual(['2026-05-15']);
+      const entry = (await audit(student.id)).find((e) => e.action === 'student.deactivated')!;
+      expect(entry.new_values).toMatchObject({
+        placementEndDate: '2026-05-15',
+        enrolmentLeftDate: '2026-05-15',
+        enrolmentOutcome: 3,
+      });
+    });
+
+    it('cancels an enrolment that has not begun, whatever the reason, so no day counts the child present', async () => {
+      for (const reason of [1, 3]) {
+        const student = await added({ admissionDate: '2026-07-01', ...roll(`${reason}`) });
+        expect((await deactivate(student.id, reason)).status).toBe(200);
+        expect(await enrolmentOf(student.id)).toEqual({
+          status: 0,
+          left_date: null,
+          outcome: null,
+        });
+        expect(await openPlacements(student.id)).toBe(0);
+        expect((await rowOf(student.id)).inactive_reason).toBe(reason);
+        const entry = (await audit(student.id)).find((e) => e.action === 'student.deactivated')!;
+        expect(entry.new_values).toMatchObject({ enrolmentStatus: 0 });
+        expect(entry.new_values).not.toHaveProperty('enrolmentLeftDate');
+      }
+    });
+
+    it('is refused by the database for a deactivated record with no reason, and an active one with only a time', async () => {
+      const student = await added();
+      await expect(
+        refused(sql`update students set status = 0, inactive_at = now() where id = ${student.id}`),
+      ).rejects.toThrow(/ck_students_inactive/);
+      await expect(
+        refused(sql`update students set inactive_at = now() where id = ${student.id}`),
+      ).rejects.toThrow(/ck_students_inactive/);
+      await expect(
+        refused(sql`update students set status = 0, inactive_reason = 2 where id = ${student.id}`),
+      ).rejects.toThrow(/ck_students_inactive/);
+    });
+
+    it('checks the admission date against a stored date of birth, and against the day the child started', async () => {
+      const student = await added({ admissionDate: '2026-04-10', dateOfBirth: '2012-01-01' });
+      const later = await patch(student.id, { version: 1, dateOfBirth: '2026-05-01' });
+      expect(later.status).toBe(400);
+      expect(fieldCodes(later)).toEqual([{ field: 'admissionDate', code: 'INVALID_VALUE' }]);
+      for (const admissionDate of ['2099-01-01', '2026-04-11']) {
+        const res = await patch(student.id, { version: 1, admissionDate });
+        expect([admissionDate, res.status]).toEqual([admissionDate, 400]);
+        expect(fieldCodes(res)).toEqual([{ field: 'admissionDate', code: 'INVALID_VALUE' }]);
+      }
+      const earlier = await patch(student.id, { version: 1, admissionDate: '2026-04-02' });
+      expect(earlier.status).toBe(200);
+    });
+
+    it('clears the whole address with null, and leaves it alone when it is not sent', async () => {
+      const student = await added({
+        address: { line1: '4 Temple Street', ...place, pincode: '560001' },
+      });
+      expect(
+        (await patch(student.id, { version: 1, firstName: 'Diyaa' })).body.data.address,
+      ).toMatchObject({
+        line1: '4 Temple Street',
+        pincode: '560001',
+      });
+      const cleared = await patch(student.id, { version: 2, address: null });
+      expect(cleared.status).toBe(200);
+      expect(cleared.body.data).toMatchObject({
+        version: 3,
+        address: {
+          line1: null,
+          line2: null,
+          countryId: null,
+          stateId: null,
+          cityId: null,
+          pincode: null,
+        },
+      });
+      expect(await rowOf(student.id)).toMatchObject({ address_line_1: null, pincode: null });
+    });
+
+    it('records from which day a move took effect, and the start of the placement it left', async () => {
+      const student = await sinceMay();
+      await move(student.id, { sectionId: sectionB, rollNumber: '3', effectiveDate: '2026-05-20' });
+      const entry = (await audit(student.id)).find(
+        (e) => e.action === 'student.placement_changed',
+      )!;
+      expect(entry.old_values).toMatchObject({
+        sectionId: sectionA,
+        placementStartDate: '2026-05-01',
+      });
+      expect(entry.new_values).toMatchObject({
+        sectionId: sectionB,
+        placementStartDate: '2026-05-20',
+      });
+    });
+
+    it('lets no update of a student table, even without a WHERE, move a row to another Institution', async () => {
+      await added();
+      for (const table of [
+        'students',
+        'student_guardians',
+        'student_enrolments',
+        'student_section_placements',
+      ]) {
+        await expect(
+          refused(sql.raw(`update ${table} set institution_id = '${second}'`)),
+        ).rejects.toThrow(/row-level security/);
+      }
     });
   });
 

@@ -28,7 +28,7 @@ import { StudentContext } from './student-context.js';
 import {
   STUDENT_SORT_FIELDS,
   type CreateStudentDto,
-  type DeactivateStudentDto,
+  type DeactivateStudentQueryDto,
   type ListStudentsQueryDto,
   type MoveStudentDto,
   type StudentEnrolmentDto,
@@ -52,7 +52,9 @@ import {
   requireValidDates,
   requireValidMoveDate,
   requireValidStudent,
+  enrolmentAuditView,
   studentAuditView,
+  type EnrolmentEnding,
 } from './student.rules.js';
 
 const ADMISSION_NO = 'uq_students_institution_admission_no';
@@ -304,14 +306,18 @@ export class StudentService {
       .transaction(context.tenant, async (tx) => {
         const current = await this.context.lockedActive(tx, id);
         requireVersion(current, body.version);
+        const placed = await this.students.placedNow(tx, id);
         requireValidDates(
           {
             dateOfBirth: body.dateOfBirth === undefined ? current.date_of_birth : body.dateOfBirth,
             admissionDate:
               body.admissionDate === undefined ? current.admission_date : body.admissionDate,
+            enrolledDate: placed?.enrolled_date,
           },
           today,
         );
+        // `address: null` clears the six columns; an address sent field by field changes only those.
+        const address = body.address === null ? NO_ADDRESS : body.address;
         const wanted: StudentChanges = {
           ...(body.firstName === undefined ? {} : { first_name: body.firstName }),
           last_name: body.lastName,
@@ -326,15 +332,14 @@ export class StudentService {
           country_code: body.mobile?.countryCode,
           mobile_number: body.mobile?.number,
           alternate_number: body.alternateNumber,
-          address_line_1: body.address?.line1,
-          address_line_2: body.address?.line2,
-          country_id: body.address?.countryId,
-          state_id: body.address?.stateId,
-          city_id: body.address?.cityId,
-          pincode: body.address?.pincode,
+          address_line_1: address?.line1,
+          address_line_2: address?.line2,
+          country_id: address?.countryId,
+          state_id: address?.stateId,
+          city_id: address?.cityId,
+          pincode: address?.pincode,
         };
         const changes = changedColumns(current, wanted) as StudentChanges;
-        const placed = await this.students.placedNow(tx, id);
         const guardians = await this.students.guardians(tx, id);
         if (Object.keys(changes).length === 0) return { row: current, placed, guardians };
 
@@ -379,13 +384,15 @@ export class StudentService {
   /**
    * STU-05: deactivates a student with a reason; nothing is deleted. The Admission ID and the roll number are free
    * again, because the open placement ends today, and the enrolment ends with the child: left today (outcome Left),
-   * or cancelled when the record was made by mistake. The guardians keep their rows but lose the child, as the
-   * section blocks and the parent's reads look only at active students. 404 when already deactivated.
+   * or cancelled when the record was made by mistake or the enrolment had not begun (it never took effect, so
+   * attendance leaves the child out, DDD 13.2). Both dates stay inside the year, so a year that has ended but not been
+   * promoted ends them on its last day. The guardians keep their rows but lose the child, as the section blocks and
+   * the parent's reads look only at active students. 404 when already deactivated.
    */
   async deactivate(
     principal: Principal,
     id: string,
-    body: DeactivateStudentDto,
+    body: DeactivateStudentQueryDto,
   ): Promise<{ id: string; status: 0 }> {
     const context = await this.context.of(principal, id);
     const today = this.clock.todayIst();
@@ -393,15 +400,30 @@ export class StudentService {
       const current = await this.context.lockedActive(tx, id);
       const placed = await this.students.openPlacement(tx, id);
       const guardians = await this.students.guardians(tx, id);
+      let ending: EnrolmentEnding | undefined;
       if (placed) {
+        const year = await this.years.openYear(tx, placed.academic_year_id, context.institutionId);
+        const inYear = (day: string) => (year ? earlier(day, year.endDate) : day);
+        const cancelled = body.reason === MADE_BY_MISTAKE || placed.enrolled_date > today;
+        ending = cancelled
+          ? {
+              placementEnd: inYear(later(today, placed.start_date)),
+              status: 0,
+              left: null,
+              outcome: null,
+            }
+          : {
+              placementEnd: inYear(later(today, placed.start_date)),
+              status: 1,
+              left: inYear(later(today, placed.enrolled_date)),
+              outcome: ENROLMENT_LEFT,
+            };
         await this.students.updatePlacement(tx, placed.placement_id, {
-          end_date: later(today, placed.start_date),
+          end_date: ending.placementEnd,
           ...updateStamp(principal.personId),
         });
         await this.students.updateEnrolment(tx, placed.enrolment_id, {
-          ...(body.reason === MADE_BY_MISTAKE
-            ? { status: 0 }
-            : { left_date: later(today, placed.enrolled_date), outcome: ENROLMENT_LEFT }),
+          ...(cancelled ? { status: 0 } : { left_date: ending.left, outcome: ending.outcome }),
           ...updateStamp(principal.personId),
         });
       }
@@ -416,8 +438,11 @@ export class StudentService {
         institutionId: row.institution_id,
         entityType: 'student',
         entityId: id,
-        before: studentAuditView(current, placed, guardians),
-        after: studentAuditView(row, placed, guardians),
+        before: {
+          ...studentAuditView(current, placed, guardians),
+          ...enrolmentAuditView(undefined),
+        },
+        after: { ...studentAuditView(row, placed, guardians), ...enrolmentAuditView(ending) },
       });
     });
     return { id, status: 0 };
@@ -585,6 +610,17 @@ export class StudentService {
 
 /** The later of two `YYYY-MM-DD` days: a record never ends before it began. */
 const later = (a: string, b: string): string => (a > b ? a : b);
+const earlier = (a: string, b: string): string => (a < b ? a : b);
+
+/** What `address: null` writes: every part of the address empty. */
+const NO_ADDRESS = {
+  line1: null,
+  line2: null,
+  countryId: null,
+  stateId: null,
+  cityId: null,
+  pincode: null,
+};
 
 const warnings = (...codes: string[]): WarningMeta => ({ warnings: codes });
 
