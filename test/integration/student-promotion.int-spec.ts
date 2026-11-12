@@ -89,6 +89,31 @@ describe('promotion', () => {
     work: (tx: Parameters<Parameters<DatabaseService['transaction']>[1]>[0]) => Promise<T>,
     institutionIds = [first, second],
   ) => database.transaction(tenant(institutionIds), work);
+  /**
+   * Holds the student's row as a change to them does, starts `send` so that it waits for it, runs `change` in the
+   * holding transaction and commits; the call then runs on what the change left.
+   */
+  const racing = async <T>(
+    student: SchoolStudent,
+    send: () => PromiseLike<T>,
+    change: (tx: Parameters<Parameters<DatabaseService['transaction']>[1]>[0]) => Promise<void>,
+  ): Promise<T> => {
+    let waiting: Promise<T> | undefined;
+    let settled = false;
+    await database.transaction(tenant([first]), async (tx) => {
+      await sql`select id from students where id = ${student.id} for update`.execute(tx);
+      waiting = Promise.resolve(send());
+      void waiting.then(() => {
+        settled = true;
+        return true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      expect(settled).toBe(false);
+      await change(tx);
+    });
+    return waiting!;
+  };
+
   /** Every enrolment of the student with its placements, oldest year first. */
   const history = (student: SchoolStudent) =>
     read(
@@ -417,31 +442,6 @@ describe('promotion', () => {
     });
 
     describe('while another change to the same students commits', () => {
-      /**
-       * Holds the student's row as a change to them does, starts `request` so that it waits for it, runs `change` in the
-       * holding transaction and commits; the request then runs on what the change left.
-       */
-      const racing = async <T>(
-        student: SchoolStudent,
-        request: () => PromiseLike<T>,
-        change: (tx: Parameters<Parameters<DatabaseService['transaction']>[1]>[0]) => Promise<void>,
-      ): Promise<T> => {
-        let waiting: Promise<T> | undefined;
-        let settled = false;
-        await database.transaction(tenant([first]), async (tx) => {
-          await sql`select id from students where id = ${student.id} for update`.execute(tx);
-          waiting = Promise.resolve(request());
-          void waiting.then(() => {
-            settled = true;
-            return true;
-          });
-          await new Promise((resolve) => setTimeout(resolve, 700));
-          expect(settled).toBe(false);
-          await change(tx);
-        });
-        return waiting!;
-      };
-
       it('leaves out a student who was moved to another section meanwhile, instead of closing a placement that is closed', async () => {
         const res = await racing(
           diya,
