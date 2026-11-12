@@ -4,6 +4,10 @@ import request from 'supertest';
 import { DatabaseService } from '../../src/platform/database/index.js';
 import { createPool } from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
+import {
+  down,
+  up,
+} from '../../src/platform/database/migrations/2026_11_12_0037_people_student_completed_reason.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { personaByKey } from '../../src/seeds/two-worlds.js';
 import { apiCaller } from '../support/api.js';
@@ -401,6 +405,32 @@ describe('promotion', () => {
       // A student who moves on to the next year stays active.
       await promote(fromNineA());
       expect(await standing(diya)).toEqual({ status: 1, inactive_reason: null });
+    });
+
+    it('runs the migration down with a completed student on file: reason 3 replaces 4, and up brings the check back', async () => {
+      const grad = await admit(tenAYear1, '7');
+      await promote({
+        institutionId: first,
+        fromAcademicYearId: year1,
+        fromClassId: class10,
+        fromSectionId: null,
+        ...nobody,
+      });
+      await ownerDb.transaction().execute(async (tx) => {
+        await down(tx);
+        await up(tx);
+      });
+      expect(await standing(grad)).toEqual({ status: 0, inactive_reason: 3 });
+      // Up brought the check back: 4 is allowed again, 5 is not.
+      await read((tx) =>
+        sql`update students set inactive_reason = 4 where id = ${grad.id}`.execute(tx),
+      );
+      expect(await standing(grad)).toEqual({ status: 0, inactive_reason: 4 });
+      await expect(
+        read((tx) =>
+          sql`update students set inactive_reason = 5 where id = ${grad.id}`.execute(tx),
+        ),
+      ).rejects.toThrow(/ck_students_inactive/);
     });
 
     it('refuses a target class below the source class, for PRM-01 and for STU-09, and changes nothing', async () => {

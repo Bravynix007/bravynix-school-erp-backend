@@ -104,8 +104,9 @@ const tooLarge = () => new AppException(HttpStatus.PAYLOAD_TOO_LARGE, ErrorCode.
  * Completed with no target) and its placement on the old year's last day; the new enrolment and placement begin on
  * the new year's first day. A student who completes the final class has finished school there, so the record is
  * deactivated with reason 4 (Completed), as STU-05 would, and the guardians lose the child. A target class below the
- * source class is refused (`TARGET_CLASS_BELOW_SOURCE`); the same class is a repeat. A student who holds an enrolment in the target year already is skipped, so a repeat is
- * harmless. Fee accounts are not made here (the Fees phase backfills them).
+ * source class is refused (`TARGET_CLASS_BELOW_SOURCE`); the same class is a repeat. A student who holds an
+ * enrolment in the target year already is skipped, so a repeat is harmless. Fee accounts are not made here (the Fees
+ * phase backfills them).
  */
 @Injectable()
 export class PromotionService {

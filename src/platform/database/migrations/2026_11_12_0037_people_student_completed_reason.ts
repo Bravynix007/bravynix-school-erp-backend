@@ -22,7 +22,11 @@ export async function down(db: Kysely<unknown>): Promise<void> {
   if (process.env.NODE_ENV === 'production') {
     throw new Error('Refusing to drop the Completed deactivation reason in production');
   }
+  // The table forces row-level security and this role sets no tenant, so the update would see no row and the new check
+  // would then fail: lift the force for the update, inside this migration's own transaction.
+  await sql`alter table students no force row level security`.execute(db);
   await sql`update students set inactive_reason = 3 where inactive_reason = 4`.execute(db);
+  await sql`alter table students force row level security`.execute(db);
   await sql`
     alter table students
       drop constraint ck_students_inactive,
