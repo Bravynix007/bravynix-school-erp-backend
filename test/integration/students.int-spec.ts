@@ -540,7 +540,7 @@ describe('students: add, read and list', () => {
       ]);
     });
 
-    it('refuses what the body may not say: no guardian, six guardians, blank names, future birth, and the fields of later slices', async () => {
+    it('refuses what the body may not say: no guardian, six guardians, blank names, future birth, a bank field and the fields of later slices', async () => {
       const six = Array.from({ length: 6 }, (_, i) => guardian({ isPrimary: i === 0 }));
       const cases: [object, string][] = [
         [{ guardians: [] }, 'guardians'],
@@ -552,7 +552,7 @@ describe('students: add, read and list', () => {
         [{ dateOfBirth: '2014-03-09', admissionDate: '2010-01-01' }, 'admissionDate'],
         [{ gender: 4 }, 'gender'],
         [{ bloodGroup: 'C+' }, 'bloodGroup'],
-        [{ identity: { aadhaarNumber: '234567890124' } }, 'identity'],
+        [{ identity: { bankAccount: '1' } }, 'identity.bankAccount'],
         [{ fromEnquiryId: newId() }, 'fromEnquiryId'],
         [{ mobile: undefined }, 'mobile'],
       ];

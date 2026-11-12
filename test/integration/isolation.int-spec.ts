@@ -215,6 +215,7 @@ describe('tenant isolation', () => {
         'staff_subjects',
         'student_enrolments',
         'student_guardians',
+        'student_identities',
         'student_section_placements',
         'students',
         'subjects',

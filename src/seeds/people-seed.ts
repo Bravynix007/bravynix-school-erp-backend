@@ -206,6 +206,12 @@ async function writeStudentsIn(tx: Kysely<unknown>): Promise<void> {
         ${sectionId}, ${rollNumber}, '2026-06-01')
       on conflict (id) do nothing
     `.execute(tx);
+    // No number is seeded (nothing here is a real person's): the row stands for a child whose identity is not set yet.
+    await sql`
+      insert into student_identities (student_id, society_id, institution_id)
+      values (${child.id}, ${societyId}, ${home.id})
+      on conflict (student_id) do nothing
+    `.execute(tx);
     for (const [position, parent] of guardians.entries()) {
       const [parentFirst, ...parentRest] = parent.displayName.split(' ');
       await sql`

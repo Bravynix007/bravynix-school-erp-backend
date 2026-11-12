@@ -1,6 +1,7 @@
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { ApiResult } from '../../common/http/api-result.js';
 import { AppException } from '../../common/http/app-exception.js';
+import { ErrorCode } from '../../common/http/error-codes.js';
 import { FixedClock } from '../../common/time/clock.js';
 import type { AuditService } from '../../platform/audit/index.js';
 import type { DatabaseService, Tx } from '../../platform/database/index.js';
@@ -11,6 +12,11 @@ import type { InstitutionDirectory, ScopeService } from '../../platform/tenancy/
 import type { AcademicYearDirectory, SectionDirectory } from '../academic-setup/index.js';
 import type { StudentClassroomService } from './student-classroom.service.js';
 import { StudentContext } from './student-context.js';
+import {
+  StudentIdentityRepository,
+  type StudentIdentityRow,
+} from './student-identity.repository.js';
+import { StudentIdentityService } from './student-identity.service.js';
 import type {
   CreateStudentDto,
   ListStudentsQueryDto,
@@ -162,6 +168,11 @@ function build(found: StudentRow | null = row()) {
   const page = vi
     .fn<StudentRepository['page']>()
     .mockResolvedValue({ rows: [{ ...row(), ...placedRow }], total: 41 });
+  const identityFind = vi.fn<StudentIdentityRepository['find']>().mockResolvedValue(undefined);
+  const seal = vi.fn<StudentIdentityService['seal']>().mockReturnValue(undefined);
+  const writeIdentity = vi
+    .fn<StudentIdentityService['write']>()
+    .mockResolvedValue({ row: undefined, elsewhere: false });
   const requirePlace = vi.fn<MasterReferences['requirePlace']>().mockResolvedValue(undefined);
   const requireReady = vi.fn<FileDirectory['requireReady']>().mockResolvedValue(undefined);
   const openYear = vi.fn<AcademicYearDirectory['openYear']>().mockResolvedValue({
@@ -249,6 +260,8 @@ function build(found: StudentRow | null = row()) {
     { record } as unknown as AuditService,
     new FixedClock('2026-11-11T04:30:00.000Z'),
     { list: classroomList, get: classroomGet } as unknown as StudentClassroomService,
+    { find: identityFind } as unknown as StudentIdentityRepository,
+    { seal, write: writeIdentity } as unknown as StudentIdentityService,
   );
   return {
     service,
@@ -267,6 +280,9 @@ function build(found: StudentRow | null = row()) {
     placedNow,
     sectionCount,
     page,
+    identityFind,
+    seal,
+    writeIdentity,
     requirePlace,
     requireReady,
     openYear,
@@ -513,6 +529,105 @@ describe('StudentService', () => {
       expect(created.options.meta).toBeNull();
     });
 
+    describe('with an identity', () => {
+      const sealed = {
+        ciphertext: Buffer.from('sealed'),
+        keyVersion: 1,
+        hmac: Buffer.alloc(32, 7),
+        last4: '9012',
+      };
+      const stored = {
+        aadhaar_last4: '9012',
+        birth_certificate_number: 'BC-1',
+      } as StudentIdentityRow;
+
+      it('seals the number for the new student before anything is written, writes both numbers in the same transaction and shows them masked', async () => {
+        const t = build();
+        t.seal.mockReturnValue(sealed);
+        t.writeIdentity.mockResolvedValue({ row: stored, elsewhere: false });
+        const identity = { aadhaarNumber: '2345 6789 9012', birthCertificateNumber: 'BC-1' };
+        const created = await t.service.create(owner, body({ identity }));
+        const studentId = t.insert.mock.calls[0]![1].id;
+        expect(t.seal).toHaveBeenCalledWith(studentId, identity);
+        expect(t.seal.mock.invocationCallOrder[0]).toBeLessThan(
+          t.transaction.mock.invocationCallOrder[0]!,
+        );
+        expect(t.writeIdentity).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({ id: studentId }),
+          sealed,
+          'BC-1',
+          'owner-1',
+        );
+        expect(created.data).toMatchObject({
+          identity: { aadhaarMasked: 'XXXX XXXX 9012', birthCertificateNumber: 'BC-1' },
+        });
+        expect(created.options.meta).toBeNull();
+      });
+
+      it('writes nothing about an identity that is not sent, and shows none', async () => {
+        const t = build();
+        const created = await t.service.create(owner, body());
+        expect(t.seal).toHaveBeenCalledWith(expect.any(String), undefined);
+        expect(created.data).toMatchObject({
+          identity: { aadhaarMasked: null, birthCertificateNumber: null },
+        });
+      });
+
+      it.each([
+        [false, null],
+        [true, { warnings: ['AADHAAR_EXISTS_IN_SOCIETY'] }],
+      ])(
+        'with a number held at another Institution of the Society (%s) answers meta %j',
+        async (elsewhere, meta) => {
+          const t = build();
+          t.writeIdentity.mockResolvedValue({ row: stored, elsewhere });
+          const created = await t.service.create(owner, body());
+          expect(created.options.meta).toEqual(meta);
+        },
+      );
+
+      it('lists both warnings when the section is over its capacity too', async () => {
+        const t = build();
+        t.placeOf.mockResolvedValue({
+          classId: 'class-1',
+          institutionId: 'institution-1',
+          active: true,
+          capacity: 1,
+        });
+        t.sectionCount.mockResolvedValue(2);
+        t.writeIdentity.mockResolvedValue({ row: stored, elsewhere: true });
+        const created = await t.service.create(owner, body());
+        expect(created.options.meta).toEqual({
+          warnings: ['SECTION_OVER_CAPACITY', 'AADHAAR_EXISTS_IN_SOCIETY'],
+        });
+      });
+
+      it('is 422 for a number that is not an Aadhaar number before a transaction opens, and mails nobody', async () => {
+        const t = build();
+        t.seal.mockImplementation(() => {
+          throw new AppException(422, 'INVALID_AADHAAR');
+        });
+        expect(
+          await fail(t.service.create(owner, body({ identity: { aadhaarNumber: '123' } }))),
+        ).toMatchObject({ status: 422, code: 'INVALID_AADHAAR' });
+        expect(t.transaction).not.toHaveBeenCalled();
+        expect(t.order).not.toContain('welcome');
+      });
+
+      it('is 409 when another student of the Institution holds the number, and mails nobody', async () => {
+        const t = build();
+        t.writeIdentity.mockRejectedValue(
+          AppException.conflict(ErrorCode.AADHAAR_DUPLICATE_IN_INSTITUTION),
+        );
+        expect(await fail(t.service.create(owner, body()))).toMatchObject({
+          status: 409,
+          code: 'AADHAAR_DUPLICATE_IN_INSTITUTION',
+        });
+        expect(t.order).not.toContain('welcome');
+      });
+    });
+
     it('says which number is taken: the Admission ID, the roll number', async () => {
       const t = build();
       t.insert.mockRejectedValueOnce(unique('uq_students_institution_admission_no'));
@@ -654,6 +769,21 @@ describe('StudentService', () => {
         placement: { sectionId: 'section-1' },
         guardians: [],
       });
+    });
+
+    it('shows the identity masked: the Aadhaar number by its last four digits, never whole', async () => {
+      const t = build();
+      t.identityFind.mockResolvedValue({
+        aadhaar_last4: '9012',
+        aadhaar_ciphertext: Buffer.from('sealed'),
+        birth_certificate_number: null,
+      } as StudentIdentityRow);
+      const student = await t.service.get(owner, 'student-1');
+      expect(t.identityFind).toHaveBeenCalledWith(expect.anything(), 'student-1');
+      expect(student).toMatchObject({
+        identity: { aadhaarMasked: 'XXXX XXXX 9012', birthCertificateNumber: null },
+      });
+      expect(JSON.stringify(student)).not.toContain('sealed');
     });
 
     it('is 404 for a student who is not there, and for an Institution the caller does not reach', async () => {

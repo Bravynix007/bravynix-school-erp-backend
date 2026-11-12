@@ -1,7 +1,7 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { RoleCode } from '../../common/auth/roles.js';
-import { ApiResult, type WarningMeta } from '../../common/http/api-result.js';
+import { ApiResult, warnings } from '../../common/http/api-result.js';
 import { AppException } from '../../common/http/app-exception.js';
 import { authorIdsOf } from '../../common/http/author-stamps.js';
 import { changedColumns } from '../../common/http/changed-columns.js';
@@ -26,6 +26,11 @@ import { InstitutionDirectory, ScopeService } from '../../platform/tenancy/index
 import { AcademicYearDirectory, SectionDirectory } from '../academic-setup/index.js';
 import { StudentClassroomService } from './student-classroom.service.js';
 import { StudentContext } from './student-context.js';
+import {
+  StudentIdentityRepository,
+  type StudentIdentityRow,
+} from './student-identity.repository.js';
+import { AADHAAR_EXISTS_IN_SOCIETY, StudentIdentityService } from './student-identity.service.js';
 import {
   STUDENT_SORT_FIELDS,
   type CreateStudentDto,
@@ -105,6 +110,8 @@ export class StudentService {
     private readonly audit: AuditService,
     private readonly clock: Clock,
     private readonly classroom: StudentClassroomService,
+    private readonly identities: StudentIdentityRepository,
+    private readonly identity: StudentIdentityService,
   ) {}
 
   /**
@@ -119,6 +126,8 @@ export class StudentService {
     const context = await this.scope.requireInstitution(principal, body.institutionId);
     const today = this.clock.todayIst();
     requireValidStudent(body, today);
+    const id = newId();
+    const aadhaar = this.identity.seal(id, body.identity);
     const created = await this.database
       .transaction(context.tenant, async (tx) => {
         await this.requireReferences(tx, body, context.institutionId);
@@ -145,7 +154,6 @@ export class StudentService {
           guardians.push({ guardian, person });
         }
 
-        const id = newId();
         const base = {
           society_id: context.societyId,
           institution_id: context.institutionId,
@@ -208,6 +216,13 @@ export class StudentService {
             is_emergency_contact: guardian.isEmergencyContact,
           })),
         );
+        const written = await this.identity.write(
+          tx,
+          row,
+          aadhaar,
+          body.identity?.birthCertificateNumber,
+          principal.personId,
+        );
         const placed: PlacedRow = {
           placement_id: placement.id,
           enrolment_id: enrolment.id,
@@ -230,6 +245,8 @@ export class StudentService {
           row,
           placed,
           guardianRows,
+          identity: written.row,
+          elsewhere: written.elsewhere,
           emails: guardians.flatMap(({ person }) => (person ? [person.email] : [])),
           societyName: society.get(context.institutionId)?.societyName ?? null,
           overCapacity: await this.overCapacity(tx, body.enrolment, capacity),
@@ -241,11 +258,20 @@ export class StudentService {
     for (const email of created.emails) {
       this.accounts.welcomeAs({ email }, RoleCode.StudentParent, created.societyName);
     }
-    const resource = await this.resource(created.row, created.placed, created.guardianRows);
+    const resource = await this.resource(
+      created.row,
+      created.placed,
+      created.guardianRows,
+      created.identity,
+    );
+    const caution = [
+      ...(created.overCapacity ? [SECTION_OVER_CAPACITY] : []),
+      ...(created.elsewhere ? [AADHAAR_EXISTS_IN_SOCIETY] : []),
+    ];
     return new ApiResult(resource, {
       status: HttpStatus.CREATED,
       code: ResultCode.CREATED,
-      meta: created.overCapacity ? warnings(SECTION_OVER_CAPACITY) : null,
+      meta: caution.length > 0 ? warnings(...caution) : null,
     });
   }
 
@@ -295,9 +321,10 @@ export class StudentService {
         row,
         placed: await this.students.placedNow(tx, id),
         guardians: await this.students.guardians(tx, id),
+        identity: await this.identities.find(tx, id),
       };
     });
-    return this.resource(found.row, found.placed, found.guardians);
+    return this.resource(found.row, found.placed, found.guardians, found.identity);
   }
 
   /**
@@ -347,7 +374,8 @@ export class StudentService {
         };
         const changes = changedColumns(current, wanted) as StudentChanges;
         const guardians = await this.students.guardians(tx, id);
-        if (Object.keys(changes).length === 0) return { row: current, placed, guardians };
+        const identity = await this.identities.find(tx, id);
+        if (Object.keys(changes).length === 0) return { row: current, placed, guardians, identity };
 
         const placeChanged =
           'country_id' in changes || 'state_id' in changes || 'city_id' in changes;
@@ -379,12 +407,12 @@ export class StudentService {
           before: studentAuditView(current, placed, guardians),
           after: studentAuditView(row, placed, guardians),
         });
-        return { row, placed, guardians };
+        return { row, placed, guardians, identity };
       })
       .catch((error: unknown) => {
         throw translate(error);
       });
-    return this.resource(updated.row, updated.placed, updated.guardians);
+    return this.resource(updated.row, updated.placed, updated.guardians, updated.identity);
   }
 
   /**
@@ -475,10 +503,11 @@ export class StudentService {
         const open = await this.students.openPlacement(tx, id);
         if (!open) throw AppException.notFound();
         const guardians = await this.students.guardians(tx, id);
+        const identity = await this.identities.find(tx, id);
         const sectionId = body.sectionId ?? open.section_id;
         const rollNumber = body.rollNumber ?? open.roll_number;
         if (sectionId === open.section_id && rollNumber === open.roll_number) {
-          return { row, placed: open, guardians, overCapacity: false };
+          return { row, placed: open, guardians, identity, overCapacity: false };
         }
         const { capacity, endDate: yearEnd } = await this.requirePlace(
           tx,
@@ -531,6 +560,7 @@ export class StudentService {
           row,
           placed,
           guardians,
+          identity,
           overCapacity: await this.overCapacity(
             tx,
             { academicYearId: open.academic_year_id, sectionId },
@@ -541,7 +571,7 @@ export class StudentService {
       .catch((error: unknown) => {
         throw translate(error);
       });
-    const resource = await this.resource(moved.row, moved.placed, moved.guardians);
+    const resource = await this.resource(moved.row, moved.placed, moved.guardians, moved.identity);
     return new ApiResult(resource, {
       status: HttpStatus.OK,
       code: ResultCode.OK,
@@ -553,8 +583,15 @@ export class StudentService {
     row: StudentRow,
     placed: PlacedRow | undefined,
     guardians: readonly GuardianRow[],
+    identity: StudentIdentityRow | undefined,
   ): Promise<StudentResource> {
-    return studentResource(row, placed, guardians, await this.people.describe(authorIdsOf([row])));
+    return studentResource(
+      row,
+      placed,
+      guardians,
+      identity,
+      await this.people.describe(authorIdsOf([row])),
+    );
   }
 
   /** The photo is a Ready file of this Institution; the place is a chain of the platform masters (400 otherwise). */
@@ -627,8 +664,6 @@ const NO_ADDRESS = {
   cityId: null,
   pincode: null,
 };
-
-const warnings = (...codes: string[]): WarningMeta => ({ warnings: codes });
 
 /**
  * The first day of the enrolment and placement: inside the year (DATABASE_DESIGN, `enrolled_date` is the first day in

@@ -131,8 +131,15 @@ describe('CreateStudentDto', () => {
       'guardians[0].isEmergencyContact',
       'INVALID_TYPE',
     ],
+    [{ identity: { aadhaarNumber: 234567890124 } }, 'identity.aadhaarNumber', 'INVALID_TYPE'],
+    [
+      { identity: { birthCertificateNumber: '   ' } },
+      'identity.birthCertificateNumber',
+      'INVALID_FORMAT',
+    ],
+    [{ identity: { bankAccount: '1' } }, 'identity.bankAccount', 'FIELD_NOT_ALLOWED'],
+    [{ identity: 'x' }, 'identity', 'INVALID_TYPE'],
     // Not built yet: refused, never quietly dropped.
-    [{ identity: { aadhaarNumber: '234567890124' } }, 'identity', 'FIELD_NOT_ALLOWED'],
     [{ fromEnquiryId: id }, 'fromEnquiryId', 'FIELD_NOT_ALLOWED'],
     [{ status: 0 }, 'status', 'FIELD_NOT_ALLOWED'],
     [{ societyId: id }, 'societyId', 'FIELD_NOT_ALLOWED'],

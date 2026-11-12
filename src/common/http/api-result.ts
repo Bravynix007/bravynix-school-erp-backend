@@ -23,6 +23,9 @@ export interface WarningMeta {
 
 export type ResultMeta = ListMeta | WarningMeta;
 
+/** The meta of a write that went through with these warnings. */
+export const warnings = (...codes: string[]): WarningMeta => ({ warnings: codes });
+
 /** The response envelope every endpoint returns (API design 7.1). */
 export interface ApiEnvelope<T = unknown> {
   success: boolean;

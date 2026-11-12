@@ -23,6 +23,7 @@ import {
   type IdentityResource,
   type RevealResource,
 } from './identity.resource.js';
+import { sameNumber } from './identity.rules.js';
 import { StaffContext } from './staff-context.js';
 import { StaffRepository, type StaffRow } from './staff.repository.js';
 
@@ -160,13 +161,4 @@ export class StaffIdentityService {
     });
     return { field: body.field, value, revealedAt: this.clock.now().toISOString() };
   }
-}
-
-/** True when the request leaves the stored number as it is: the same hash, or no number on either side. */
-function sameNumber(
-  stored: { aadhaar_hmac: Buffer | null } | undefined,
-  claim: ProtectedAadhaar | null,
-): boolean {
-  const had = stored?.aadhaar_hmac ?? null;
-  return had === null || claim === null ? had === claim : had.equals(claim.hmac);
 }

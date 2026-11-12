@@ -71,7 +71,7 @@ const people = new Map([
 
 describe('studentResource', () => {
   it('gives the record, where the child sits, the guardians and the stamps', () => {
-    expect(studentResource(student(), placed, [guardian()], people)).toEqual({
+    expect(studentResource(student(), placed, [guardian()], undefined, people)).toEqual({
       id: 'student-1',
       institutionId: 'institution-1',
       admissionNo: 'GVS-1',
@@ -118,6 +118,7 @@ describe('studentResource', () => {
           hasLogin: true,
         },
       ],
+      identity: { aadhaarMasked: null, birthCertificateNumber: null },
       status: 1,
       version: 3,
       createdBy: { id: 'owner-1', displayName: 'Asha Rao', roleName: 'Society Owner' },
@@ -132,6 +133,7 @@ describe('studentResource', () => {
       student({ country_code: null, mobile_number: null }),
       undefined,
       [],
+      undefined,
       people,
     );
     expect(resource).toMatchObject({ mobile: null, placement: null, guardians: [] });

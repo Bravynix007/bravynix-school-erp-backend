@@ -22,6 +22,9 @@ import { StaffRepository } from './staff.repository.js';
 import { StaffService } from './staff.service.js';
 import { StudentClassroomService } from './student-classroom.service.js';
 import { StudentContext } from './student-context.js';
+import { StudentIdentityController } from './student-identity.controller.js';
+import { StudentIdentityRepository } from './student-identity.repository.js';
+import { StudentIdentityService } from './student-identity.service.js';
 import { StudentController } from './student.controller.js';
 import { StudentRepository } from './student.repository.js';
 import { StudentService } from './student.service.js';
@@ -42,6 +45,7 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
     InstitutionAdminController,
     TeachingAssignmentController,
     StudentController,
+    StudentIdentityController,
   ],
   providers: [
     StaffRepository,
@@ -58,6 +62,8 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
     StudentContext,
     StudentService,
     StudentClassroomService,
+    StudentIdentityRepository,
+    StudentIdentityService,
     PeopleTeachingStaff,
     { provide: TeachingStaff, useExisting: PeopleTeachingStaff },
     PeopleSectionStudents,
