@@ -1,10 +1,13 @@
 import { Global, Module } from '@nestjs/common';
 import { AcademicSetupModule, SectionStudents, TeachingStaff } from '../academic-setup/index.js';
 import { FileReaders, FilesModule } from '../../platform/files/index.js';
+import { IdempotencyModule } from '../../platform/idempotency/index.js';
 import { MastersModule } from '../../platform/masters/index.js';
 import { AchievementController } from './achievement.controller.js';
 import { AchievementRepository } from './achievement.repository.js';
 import { AchievementService } from './achievement.service.js';
+import { PromotionController } from './promotion.controller.js';
+import { PromotionService } from './promotion.service.js';
 import { AssignmentRepository } from './assignment.repository.js';
 import { AssignmentService } from './assignment.service.js';
 import { DocumentController } from './document.controller.js';
@@ -44,7 +47,7 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
  */
 @Global()
 @Module({
-  imports: [MastersModule, FilesModule, AcademicSetupModule],
+  imports: [MastersModule, FilesModule, AcademicSetupModule, IdempotencyModule],
   controllers: [
     StaffController,
     StaffIdentityController,
@@ -57,6 +60,7 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
     StudentIdentityController,
     GuardianController,
     AchievementController,
+    PromotionController,
   ],
   providers: [
     StaffRepository,
@@ -71,6 +75,7 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
     DocumentService,
     AchievementRepository,
     AchievementService,
+    PromotionService,
     StudentRepository,
     StudentContext,
     StudentService,

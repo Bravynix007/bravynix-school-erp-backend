@@ -40,8 +40,8 @@ export function renumber(oldRolls: readonly string[], taken: readonly string[]):
   const highest = Math.max(0, ...taken.filter((roll) => NUMBER.test(roll)).map(Number));
   const order = oldRolls
     .map((roll, index) => ({ roll, index }))
-    .sort((a, b) => compareRollNumbers(a.roll, b.roll) || a.index - b.index);
-  const numbered = new Array<string>(oldRolls.length);
+    .toSorted((a, b) => compareRollNumbers(a.roll, b.roll) || a.index - b.index);
+  const numbered = Array.from<string>({ length: oldRolls.length });
   for (const [position, { index }] of order.entries())
     numbered[index] = String(highest + position + 1);
   return numbered;

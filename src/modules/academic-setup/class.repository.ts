@@ -72,9 +72,13 @@ export class ClassRepository {
 
   /**
    * Whether the class is the last of its Institution: no active class of the Institution comes after it in the order
-   * of the predefined classes (the order of the lists). `undefined` for a class the caller cannot see.
+   * of the predefined classes (the order of the lists), with the Institution it belongs to. `undefined` for a class the
+   * caller cannot see.
    */
-  async isLast(tx: Tx, id: string): Promise<boolean | undefined> {
+  async isLast(
+    tx: Tx,
+    id: string,
+  ): Promise<{ institutionId: string; isLast: boolean } | undefined> {
     const row = await tx
       .selectFrom('classes as c')
       .innerJoin('predefined_classes as p', 'p.id', 'c.predefined_class_id')
@@ -96,7 +100,9 @@ export class ClassRepository {
       .select('c.institution_id')
       .where('c.id', '=', id)
       .executeTakeFirst();
-    return row === undefined ? undefined : Boolean(row.is_last);
+    return row === undefined
+      ? undefined
+      : { institutionId: row.institution_id, isLast: Boolean(row.is_last) };
   }
 
   /** The classes with these IDs, with their names, in the order of the lists. */

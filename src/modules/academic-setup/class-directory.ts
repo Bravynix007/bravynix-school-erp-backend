@@ -13,9 +13,10 @@ export class ClassDirectory {
 
   /**
    * Whether this class is the last one the Institution runs, so a student leaving it has completed school there
-   * (DDD 9.6, outcome 4); `undefined` when the caller cannot see the class.
+   * (DDD 9.6, outcome 4); `undefined` when the caller cannot see the class or it belongs to another Institution.
    */
-  isLast(tx: Tx, classId: string): Promise<boolean | undefined> {
-    return this.classes.isLast(tx, classId);
+  async isLast(tx: Tx, classId: string, institutionId: string): Promise<boolean | undefined> {
+    const found = await this.classes.isLast(tx, classId);
+    return found?.institutionId === institutionId ? found.isLast : undefined;
   }
 }

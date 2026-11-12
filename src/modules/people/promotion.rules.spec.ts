@@ -20,7 +20,7 @@ describe('oldPlacementEnd', () => {
 
 describe('compareRollNumbers', () => {
   it('puts numbers in numeric order before the rest', () => {
-    expect(['10', 'A1', '9', 'a0', '2'].sort(compareRollNumbers)).toEqual([
+    expect(['10', 'A1', '9', 'a0', '2'].toSorted(compareRollNumbers)).toEqual([
       '2',
       '9',
       '10',
