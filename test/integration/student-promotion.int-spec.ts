@@ -696,6 +696,14 @@ describe('promotion', () => {
       expect((await promoteOne(diya, nobody)).body.code).toBe('NOT_FINAL_CLASS');
     });
 
+    it('is 422 YEAR_NOT_ACTIVE once the year the student is enrolled in is closed, and changes nothing', async () => {
+      expect((await promote(fromNineA())).status).toBe(200);
+      expect((await api('delete', `/v1/academic-years/${year2}`, owner.token)).status).toBe(200);
+      const res = await correct(diya, into(nineA));
+      expect([res.status, res.body.code]).toEqual([422, 'YEAR_NOT_ACTIVE']);
+      expect((await profile(diya)).placement).toMatchObject({ classId: class10 });
+    });
+
     it('is 404 for a deactivated student, a stranger’s and another Institution’s, and 400 for half a target', async () => {
       await api('delete', `/v1/students/${ravi.id}?reason=1`, owner.token);
       expect((await promoteOne(ravi, target(tenA))).status).toBe(404);
@@ -785,6 +793,24 @@ describe('promotion', () => {
           after: expect.objectContaining({ classId: class10, rollNumber: '4' }),
         },
       ]);
+      // The section the student left on the way is kept in the audit: the correction rewrites it.
+      const [entry] = await readAuditRows<{ old_values: Record<string, unknown> }>(
+        ownerDb,
+        sql`action = 'student.class_corrected' and entity_id = ${early.id}`,
+      );
+      expect(entry!.old_values).toMatchObject({
+        classId: class9,
+        sectionId: nineB.sectionId,
+        otherPlacements: [
+          {
+            classId: class9,
+            sectionId: nineA.sectionId,
+            rollNumber: '9',
+            startDate: '2026-05-01',
+            endDate: '2026-05-09',
+          },
+        ],
+      });
     });
 
     it('refuses a class below the one the student left, and changes nothing', async () => {
@@ -798,7 +824,7 @@ describe('promotion', () => {
       ]);
     });
 
-    it('is 422 for the class the student is in, a section of another class and a year that is closed, and 409 for a roll number in use', async () => {
+    it('is 422 for the class the student is in and a section of another class, and 409 for a roll number in use', async () => {
       expect((await correct(diya, into(nineB))).body.code).toBe('CLASS_UNCHANGED');
       expect(
         (await correct(diya, { classId: class10, sectionId: nineB.sectionId })).body.code,
@@ -831,15 +857,25 @@ describe('promotion', () => {
       expect((await correct(diya, into(tenAYear1), institutionAdmin.token)).status).toBe(200);
     });
 
-    it('runs the migration down and up, and the key stays deferrable', async () => {
+    it('runs the migration down and up: the key is checked at once after down, and deferrable, not initially deferred, after up', async () => {
+      const key = async () =>
+        (
+          await sql<{ condeferrable: boolean; condeferred: boolean }>`
+            select condeferrable, condeferred from pg_constraint where conname = 'fk_placements_enrolment_class'
+          `.execute(ownerDb)
+        ).rows;
       await ownerDb.transaction().execute(async (tx) => {
         await migrateDown(tx);
+        expect(
+          (
+            await sql<{ condeferrable: boolean }>`
+              select condeferrable from pg_constraint where conname = 'fk_placements_enrolment_class'
+            `.execute(tx)
+          ).rows,
+        ).toEqual([{ condeferrable: false }]);
         await migrateUp(tx);
       });
-      const { rows } = await sql<{ condeferrable: boolean }>`
-        select condeferrable from pg_constraint where conname = 'fk_placements_enrolment_class'
-      `.execute(ownerDb);
-      expect(rows).toEqual([{ condeferrable: true }]);
+      expect(await key()).toEqual([{ condeferrable: true, condeferred: false }]);
     });
   });
 });

@@ -634,6 +634,12 @@ export class StudentService {
         const stamp = updateStamp(principal.personId);
         const rollNumber = body.rollNumber ?? open.roll_number;
         const place = { class_id: body.classId, section_id: body.sectionId };
+        // The class and section these had are kept in the audit, as the rewrite below leaves no other record of them.
+        const others = await this.students.otherPlacements(
+          tx,
+          open.enrolment_id,
+          open.placement_id,
+        );
         await this.students.deferPlacementClassKey(tx);
         await this.students.updateEnrolment(tx, open.enrolment_id, {
           class_id: body.classId,
@@ -661,6 +667,14 @@ export class StudentService {
           before: {
             ...studentAuditView(row, open, guardians),
             previousOutcome: previous?.outcome ?? null,
+            otherPlacements: others.map((placement) => ({
+              id: placement.id,
+              classId: placement.class_id,
+              sectionId: placement.section_id,
+              rollNumber: placement.roll_number,
+              startDate: placement.start_date,
+              endDate: placement.end_date,
+            })),
           },
           after: { ...studentAuditView(row, placed, guardians), previousOutcome: outcome ?? null },
         });

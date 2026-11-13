@@ -173,6 +173,7 @@ function build(found: StudentRow | null = row()) {
   const deferPlacementClassKey = vi
     .fn<StudentRepository['deferPlacementClassKey']>()
     .mockResolvedValue(undefined);
+  const otherPlacements = vi.fn<StudentRepository['otherPlacements']>().mockResolvedValue([]);
   const updateOtherPlacements = vi
     .fn<StudentRepository['updateOtherPlacements']>()
     .mockResolvedValue(undefined);
@@ -236,6 +237,7 @@ function build(found: StudentRow | null = row()) {
     updatePlacement,
     updateEnrolment,
     deferPlacementClassKey,
+    otherPlacements,
     updateOtherPlacements,
     previousEnrolment,
     placedNow,
@@ -299,6 +301,7 @@ function build(found: StudentRow | null = row()) {
     updatePlacement,
     updateEnrolment,
     deferPlacementClassKey,
+    otherPlacements,
     updateOtherPlacements,
     previousEnrolment,
     isBelow,
@@ -1154,6 +1157,41 @@ describe('StudentService', () => {
       );
     });
 
+    it('keeps in the audit the placements it rewrites as they were, read before they change', async () => {
+      const t = build();
+      inClass2(t);
+      const earlier = {
+        id: 'placement-0',
+        class_id: 'class-1',
+        section_id: 'section-0',
+        roll_number: '9',
+        start_date: '2026-05-01',
+        end_date: '2026-05-09',
+      };
+      t.otherPlacements.mockResolvedValue([earlier]);
+      await t.service.correctClass(owner, 'student-1', correct());
+      expect(t.otherPlacements).toHaveBeenCalledExactlyOnceWith(
+        expect.anything(),
+        'enrolment-1',
+        'placement-1',
+      );
+      expect(t.otherPlacements.mock.invocationCallOrder[0]).toBeLessThan(
+        t.updateOtherPlacements.mock.invocationCallOrder[0]!,
+      );
+      expect(t.record.mock.calls.at(-1)![1].before).toMatchObject({
+        otherPlacements: [
+          {
+            id: 'placement-0',
+            classId: 'class-1',
+            sectionId: 'section-0',
+            rollNumber: '9',
+            startDate: '2026-05-01',
+            endDate: '2026-05-09',
+          },
+        ],
+      });
+    });
+
     it('keeps the roll number when none is sent', async () => {
       const t = build();
       inClass2(t);
@@ -1213,6 +1251,8 @@ describe('StudentService', () => {
       t.sectionCount.mockResolvedValue(2);
       const done = await t.service.correctClass(owner, 'student-1', correct());
       expect(done.options.meta).toEqual({ warnings: ['SECTION_OVER_CAPACITY'] });
+      // The count is of the section the student is put in, in the year they are enrolled in.
+      expect(t.sectionCount.mock.calls[0]!.slice(1)).toEqual(['year-1', 'section-9']);
     });
 
     it('is 409 ROLL_NUMBER_TAKEN when the roll number is held in the section', async () => {

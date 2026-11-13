@@ -233,6 +233,14 @@ describe('StudentRepository', () => {
       expect(queries[0]!.sql).toBe('set constraints fk_placements_enrolment_class deferred');
     });
 
+    it('reads the placements of the enrolment other than the open one, oldest first', async () => {
+      const { tx, queries } = recorder();
+      expect(await repository.otherPlacements(tx, 'enrolment-1', 'placement-1')).toEqual([]);
+      expect(queries[0]!.sql).toContain('where "student_enrolment_id" = $1 and "id" != $2');
+      expect(queries[0]!.sql).toContain('order by "start_date"');
+      expect(queries[0]!.parameters).toEqual(['enrolment-1', 'placement-1']);
+    });
+
     it('changes the placements of the enrolment other than the open one', async () => {
       const { tx, queries } = recorder();
       await repository.updateOtherPlacements(tx, 'enrolment-1', 'placement-1', {
