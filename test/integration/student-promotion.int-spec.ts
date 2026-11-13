@@ -4,6 +4,10 @@ import request from 'supertest';
 import { DatabaseService } from '../../src/platform/database/index.js';
 import { createPool } from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
+import {
+  down,
+  up,
+} from '../../src/platform/database/migrations/2026_11_12_0037_people_student_completed_reason.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { personaByKey } from '../../src/seeds/two-worlds.js';
 import { apiCaller } from '../support/api.js';
@@ -137,6 +141,20 @@ describe('promotion', () => {
           from student_enrolments e join student_section_placements p on p.student_enrolment_id = e.id
           where e.student_id = ${student.id} order by p.start_date`.execute(tx)
         ).rows,
+    );
+  /** Whether the student is deactivated, and why (`inactive_reason`). */
+  const standing = (student: SchoolStudent) =>
+    read(
+      async (tx) =>
+        (
+          await sql<{
+            status: number;
+            inactive_reason: number | null;
+            inactive_at: Date | null;
+            updated_by: string | null;
+          }>`select status, inactive_reason, inactive_at, updated_by
+            from students where id = ${student.id}`.execute(tx)
+        ).rows[0],
     );
   const counts = async (classId: string) =>
     Object.fromEntries(
@@ -367,6 +385,89 @@ describe('promotion', () => {
       expect(await counts(class10)).toEqual({ [tenAYear1.sectionId]: 0 });
     });
 
+    it('deactivates the students who complete the final class, as Completed, and nobody else', async () => {
+      const grad = await admit(tenAYear1, '7');
+      await promote({
+        institutionId: first,
+        fromAcademicYearId: year1,
+        fromClassId: class10,
+        fromSectionId: null,
+        ...nobody,
+      });
+      expect(await standing(grad)).toMatchObject({
+        status: 0,
+        inactive_reason: 4,
+        inactive_at: expect.any(Date),
+        updated_by: owner.person,
+      });
+      expect((await api('get', `/v1/students/${grad.id}`, owner.token)).body.data).toMatchObject({
+        status: 0,
+      });
+      const listed = (await api('get', `/v1/students?institutionId=${first}`, owner.token)).body
+        .data as unknown as { id: string }[];
+      expect(listed.map((s) => s.id)).not.toContain(grad.id);
+      expect(await audits(sql`action = 'student.deactivated'`)).toEqual([
+        { entityId: grad.id, after: { status: 0, inactiveReason: 4 } },
+      ]);
+      // A student who moves on to the next year stays active.
+      await promote(fromNineA());
+      expect(await standing(diya)).toMatchObject({ status: 1, inactive_reason: null });
+    });
+
+    it('runs the migration down with a completed student on file: reason 3 replaces 4, and up brings the check back', async () => {
+      const grad = await admit(tenAYear1, '7');
+      await promote({
+        institutionId: first,
+        fromAcademicYearId: year1,
+        fromClassId: class10,
+        fromSectionId: null,
+        ...nobody,
+      });
+      await ownerDb.transaction().execute(async (tx) => {
+        await down(tx);
+        await up(tx);
+      });
+      expect(await standing(grad)).toMatchObject({ status: 0, inactive_reason: 3 });
+      // Down lifted the force on the table for its update, and put it back: tenants stay apart.
+      const forced = await sql<{ relforcerowsecurity: boolean }>`
+        select relforcerowsecurity from pg_class where relname = 'students'`.execute(ownerDb);
+      expect(forced.rows).toEqual([{ relforcerowsecurity: true }]);
+      // Up brought the check back: 4 is allowed again, 5 is not.
+      await read((tx) =>
+        sql`update students set inactive_reason = 4 where id = ${grad.id}`.execute(tx),
+      );
+      expect(await standing(grad)).toMatchObject({ status: 0, inactive_reason: 4 });
+      await expect(
+        read((tx) =>
+          sql`update students set inactive_reason = 5 where id = ${grad.id}`.execute(tx),
+        ),
+      ).rejects.toThrow(/ck_students_inactive/);
+    });
+
+    it('refuses a target class below the source class, for PRM-01 and for STU-09, and changes nothing', async () => {
+      const grad = await admit(tenAYear1, '7');
+      const lower = { ...target({ ...nineA, academicYearId: year2 }) };
+      const res = await promote({
+        institutionId: first,
+        fromAcademicYearId: year1,
+        fromClassId: class10,
+        fromSectionId: null,
+        ...lower,
+      });
+      expect([res.status, res.body.code]).toEqual([422, 'TARGET_CLASS_BELOW_SOURCE']);
+      const one = await promoteOne(grad, lower);
+      expect([one.status, one.body.code]).toEqual([422, 'TARGET_CLASS_BELOW_SOURCE']);
+      expect((await history(grad)).length).toBe(1);
+      expect(await standing(grad)).toMatchObject({ status: 1, inactive_reason: null });
+    });
+
+    it('lets a student repeat the class in the next year', async () => {
+      const again = { ...target({ ...nineA, academicYearId: year2 }) };
+      const res = await promote(fromNineA(again));
+      expect(res.status).toBe(200);
+      expect(await history(diya)).toMatchObject([{ outcome: 2 }, { class_id: class9 }]);
+    });
+
     it.each([
       [
         'completing a class that is not the last',
@@ -575,6 +676,9 @@ describe('promotion', () => {
       const grad = await admit(tenAYear1, '7');
       const res = await promoteOne(grad, nobody);
       expect(res.status).toBe(200);
+      // The profile of a deactivated student is still read (STU-03).
+      expect(res.body.data).toMatchObject({ id: grad.id, status: 0 });
+      expect(await standing(grad)).toMatchObject({ status: 0, inactive_reason: 4 });
       expect(await history(grad)).toMatchObject([{ outcome: 4, end_date: '2027-03-31' }]);
       expect((await promoteOne(diya, nobody)).body.code).toBe('NOT_FINAL_CLASS');
     });

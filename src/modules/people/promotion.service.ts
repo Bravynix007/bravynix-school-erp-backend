@@ -3,6 +3,7 @@ import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { ApiResult, warnings } from '../../common/http/api-result.js';
 import { AppException } from '../../common/http/app-exception.js';
 import { ErrorCode, FieldErrorCode, ResultCode } from '../../common/http/error-codes.js';
+import { Clock } from '../../common/time/clock.js';
 import { fieldError } from '../../common/validation/field-error.js';
 import { AuditService } from '../../platform/audit/index.js';
 import {
@@ -20,7 +21,13 @@ import {
   SectionDirectory,
 } from '../academic-setup/index.js';
 import type { PromoteClassDto, PromoteStudentDto, PromotionTargetDto } from './promotion.dto.js';
-import { MAX_PROMOTED_AT_ONCE, oldPlacementEnd, outcomeOf, renumber } from './promotion.rules.js';
+import {
+  INACTIVE_COMPLETED,
+  MAX_PROMOTED_AT_ONCE,
+  oldPlacementEnd,
+  outcomeOf,
+  renumber,
+} from './promotion.rules.js';
 import { StudentContext } from './student-context.js';
 import { StudentRepository, type PromotableRow } from './student.repository.js';
 import type { StudentResource } from './student.resource.js';
@@ -95,8 +102,11 @@ const tooLarge = () => new AppException(HttpStatus.PAYLOAD_TOO_LARGE, ErrorCode.
  * STU-09 and PRM-01 (API design 10.7): one student, or a whole class or section, moves to the next academic year. All
  * or nothing in one transaction. The old enrolment ends with its outcome (Promoted, Repeating in the same class,
  * Completed with no target) and its placement on the old year's last day; the new enrolment and placement begin on
- * the new year's first day. A student who holds an enrolment in the target year already is skipped, so a repeat is
- * harmless. Fee accounts are not made here (the Fees phase backfills them).
+ * the new year's first day. A student who completes the final class has finished school there, so the record is
+ * deactivated with reason 4 (Completed), as STU-05 would, and the guardians lose the child. A target class below the
+ * source class is refused (`TARGET_CLASS_BELOW_SOURCE`); the same class is a repeat. A student who holds an
+ * enrolment in the target year already is skipped, so a repeat is harmless. Fee accounts are not made here (the Fees
+ * phase backfills them).
  */
 @Injectable()
 export class PromotionService {
@@ -111,6 +121,7 @@ export class PromotionService {
     private readonly sections: SectionDirectory,
     private readonly audit: AuditService,
     private readonly idempotency: IdempotencyService,
+    private readonly clock: Clock,
   ) {}
 
   /**
@@ -269,6 +280,28 @@ export class PromotionService {
       }
     }
 
+    if (plan.to === null && promoted.length > 0) {
+      await this.students.markCompleted(
+        tx,
+        promoted.map((row) => row.student_id),
+        {
+          inactive_reason: INACTIVE_COMPLETED,
+          inactive_at: this.clock.now(),
+          ...updateStamp(plan.personId),
+        },
+      );
+      for (const row of promoted) {
+        await this.audit.record(tx, {
+          action: 'student.deactivated',
+          institutionId: plan.institutionId,
+          entityType: 'student',
+          entityId: row.student_id,
+          before: { status: 1, inactiveReason: null },
+          after: { status: 0, inactiveReason: INACTIVE_COMPLETED },
+        });
+      }
+    }
+
     if (promoted.length > 0) {
       await this.audit.record(tx, {
         action: 'student.promoted',
@@ -319,6 +352,16 @@ export class PromotionService {
       throw AppException.businessRule(ErrorCode.SECTION_NOT_IN_CLASS);
     }
     if (!section.active) throw AppException.businessRule(ErrorCode.INACTIVE_SECTION);
+    if (to.classId !== plan.from.classId) {
+      const below = await this.classes.isBelow(
+        tx,
+        to.classId,
+        plan.from.classId,
+        plan.institutionId,
+      );
+      if (below === undefined) throw AppException.notFound();
+      if (below) throw AppException.businessRule(ErrorCode.TARGET_CLASS_BELOW_SOURCE);
+    }
     const names = await this.sections.names(tx, [to.sectionId]);
     const named = names.get(to.sectionId);
     return {

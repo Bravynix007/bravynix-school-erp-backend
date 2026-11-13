@@ -166,7 +166,7 @@ export class StudentController {
     roles: ADMINS,
     scope: 'institution',
     operationId: 'STU-09',
-    rule: 'Promotes one active student of an Institution the caller reaches to a class and section of the next academic year, or completes the final class; the old placement ends on the old year’s last day and the student is 409 ALREADY_ENROLLED when already in the new year',
+    rule: 'Promotes one active student of an Institution the caller reaches to a class and section of the next academic year, or completes the final class, which also deactivates the student; the old placement ends on the old year’s last day, a lower class is refused, and the student is 409 ALREADY_ENROLLED when already in the new year',
   })
   @Post(':studentId/promote')
   @HttpCode(HttpStatus.OK)

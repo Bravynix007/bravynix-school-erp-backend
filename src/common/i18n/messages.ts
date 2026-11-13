@@ -112,6 +112,7 @@ const en: Catalogue = {
   NO_CURRENT_PLACEMENT: 'The student is not in a class this year',
   TARGET_YEAR_NOT_AFTER_SOURCE: 'The new academic year must begin after the current one',
   NOT_FINAL_CLASS: 'Only the last class of the Institution can be completed',
+  TARGET_CLASS_BELOW_SOURCE: 'A student cannot be promoted to a lower class',
   // Files (API design 15)
   ALREADY_CONFIRMED: 'This file has already been confirmed',
   FILE_TOO_LARGE: 'The file is larger than 5 MB',

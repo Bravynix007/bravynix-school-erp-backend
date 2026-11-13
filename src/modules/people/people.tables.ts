@@ -213,7 +213,10 @@ export interface StudentsTable extends StudentOwned {
   state_id: string | null;
   city_id: string | null;
   pincode: string | null;
-  /** Why a deactivated student left: 1 Left the Institution, 2 Created by mistake, 3 Other. Empty while active. */
+  /**
+   * Why a deactivated student left: 1 Left the Institution, 2 Created by mistake, 3 Other, 4 Completed the final class
+   * (set by promotion only). Empty while active.
+   */
   inactive_reason: number | null;
   inactive_at: Date | null;
   /** Set with `access_blocked_by` when the guardians' access to this child is blocked (STU-06); both empty otherwise. */

@@ -1,5 +1,6 @@
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { AppException } from '../../common/http/app-exception.js';
+import type { Clock } from '../../common/time/clock.js';
 import type { AuditService } from '../../platform/audit/index.js';
 import type { DatabaseService, Tx } from '../../platform/database/index.js';
 import type { IdempotencyService } from '../../platform/idempotency/index.js';
@@ -67,6 +68,7 @@ interface Options {
   rows?: PromotableRow[];
   enrolled?: string[];
   isLast?: boolean | undefined;
+  below?: boolean | undefined;
   targetYear?: { open: boolean; startDate: string; endDate: string } | undefined;
   targetSection?: {
     classId: string;
@@ -132,6 +134,11 @@ function build(options: Options = {}) {
   const isLast = vi
     .fn<ClassDirectory['isLast']>()
     .mockResolvedValue('isLast' in options ? options.isLast : false);
+  const isBelow = vi
+    .fn<ClassDirectory['isBelow']>()
+    .mockResolvedValue('below' in options ? options.below : false);
+  const markCompleted = vi.fn<StudentRepository['markCompleted']>().mockResolvedValue();
+  const now = new Date('2027-03-31T10:00:00Z');
   const placeOf = vi.fn<SectionDirectory['placeOf']>().mockImplementation((_tx, id) =>
     Promise.resolve(
       id === 'section-1'
@@ -178,6 +185,7 @@ function build(options: Options = {}) {
     insertEnrolment,
     insertPlacement,
     openPlacement,
+    markCompleted,
   } as unknown as StudentRepository;
   const scope = { requireInstitution, forPrincipal } as unknown as ScopeService;
   const service = new PromotionService(
@@ -187,10 +195,11 @@ function build(options: Options = {}) {
     new StudentContext(database, students, scope),
     scope,
     { openYear } as unknown as AcademicYearDirectory,
-    { isLast } as unknown as ClassDirectory,
+    { isLast, isBelow } as unknown as ClassDirectory,
     { placeOf, names } as unknown as SectionDirectory,
     { record } as unknown as AuditService,
     { run } as unknown as IdempotencyService,
+    { now: () => now } as unknown as Clock,
   );
   return {
     service,
@@ -202,6 +211,9 @@ function build(options: Options = {}) {
     insertEnrolment,
     insertPlacement,
     openPlacement,
+    markCompleted,
+    isBelow,
+    now,
     record,
     run,
     openYear,
@@ -209,6 +221,11 @@ function build(options: Options = {}) {
     get,
   };
 }
+
+/** The target section is one of the source class, as it is for a student who repeats the class. */
+const inClass1: Options = {
+  targetSection: { classId: 'class-1', institutionId: 'institution-1', active: true, capacity: 40 },
+};
 
 const attempt = () => targetOf({ ...target, toClassId: null, toSectionId: null });
 
@@ -374,6 +391,59 @@ describe('PromotionService.promoteClass (PRM-01)', () => {
     expect(t.enrolledIn).not.toHaveBeenCalled();
   });
 
+  it('deactivates the students who complete the final class, as Completed, and says so in the audit', async () => {
+    const t = build({ isLast: true });
+    await t.service.promoteClass(admin, 'k', batch({ ...nobody }));
+    expect(t.markCompleted).toHaveBeenCalledExactlyOnceWith(
+      expect.anything(),
+      ['student-1', 'student-2'],
+      {
+        inactive_reason: 4,
+        inactive_at: t.now,
+        updated_by: 'admin-1',
+      },
+    );
+    const deactivated = t.record.mock.calls.filter(
+      ([, entry]) => entry.action === 'student.deactivated',
+    );
+    expect(deactivated.map(([, entry]) => [entry.entityId, entry.before, entry.after])).toEqual([
+      ['student-1', { status: 1, inactiveReason: null }, { status: 0, inactiveReason: 4 }],
+      ['student-2', { status: 1, inactiveReason: null }, { status: 0, inactiveReason: 4 }],
+    ]);
+  });
+
+  it('deactivates nobody who is promoted, repeats, or is skipped', async () => {
+    const promoted = build();
+    await promoted.service.promoteClass(admin, 'k', batch());
+    const repeat = build(inClass1);
+    await repeat.service.promoteClass(admin, 'k', batch({ toClassId: 'class-1' }));
+    const skipped = build({ isLast: true, rows: [] });
+    await skipped.service.promoteClass(admin, 'k', batch({ ...nobody }));
+    for (const t of [promoted, repeat, skipped]) expect(t.markCompleted).not.toHaveBeenCalled();
+  });
+
+  it('lets a student stay in the same class (a repeat) without asking about the order of the classes', async () => {
+    const t = build({ below: true, ...inClass1 });
+    await t.service.promoteClass(admin, 'k', batch({ toClassId: 'class-1' }));
+    expect(t.isBelow).not.toHaveBeenCalled();
+    expect(t.updateEnrolment).toHaveBeenCalledWith(
+      expect.anything(),
+      'enrolment-1',
+      expect.objectContaining({ outcome: 2 }),
+    );
+  });
+
+  it('asks whether the target class is below the source class, in the Institution', async () => {
+    const t = build();
+    await t.service.promoteClass(admin, 'k', batch());
+    expect(t.isBelow).toHaveBeenCalledWith(
+      expect.anything(),
+      'class-2',
+      'class-1',
+      'institution-1',
+    );
+  });
+
   it.each([
     [
       'a class that is not the last cannot be completed',
@@ -426,6 +496,14 @@ describe('PromotionService.promoteClass (PRM-01)', () => {
       422,
       'INACTIVE_SECTION',
     ],
+    [
+      'a target class below the source class',
+      { below: true },
+      {},
+      422,
+      'TARGET_CLASS_BELOW_SOURCE',
+    ],
+    ['a target class the caller cannot see', { below: undefined }, {}, 404, 'NOT_FOUND'],
     [
       'a section of another Institution',
       {
@@ -549,12 +627,30 @@ describe('PromotionService.promoteStudent (STU-09)', () => {
 
   it('completes the final class for a student with no target', async () => {
     const t = build({ rows: [row(1)], isLast: true });
-    await t.service.promoteStudent(admin, 'student-1', { ...nobody } as PromoteStudentDto);
+    const result = await t.service.promoteStudent(admin, 'student-1', {
+      ...nobody,
+    } as PromoteStudentDto);
     expect(t.updateEnrolment).toHaveBeenCalledWith(
       expect.anything(),
       'enrolment-1',
       expect.objectContaining({ outcome: 4 }),
     );
     expect(t.insertEnrolment).not.toHaveBeenCalled();
+    expect(t.markCompleted).toHaveBeenCalledExactlyOnceWith(
+      expect.anything(),
+      ['student-1'],
+      expect.anything(),
+    );
+    // The profile of a deactivated student is still read (STU-03), and shows the placement they finished.
+    expect(result.data).toEqual({ id: 'student-1' });
+  });
+
+  it('refuses a target class below the source class', async () => {
+    const t = build({ below: true });
+    expect(await refusal(t.service.promoteStudent(admin, 'student-1', one))).toMatchObject({
+      status: 422,
+      code: 'TARGET_CLASS_BELOW_SOURCE',
+    });
+    expect(t.updatePlacement).not.toHaveBeenCalled();
   });
 });

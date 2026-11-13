@@ -124,6 +124,19 @@ export class StudentRepository {
       .executeTakeFirstOrThrow();
   }
 
+  /** Deactivates the students who completed the final class; the caller holds their rows locked. */
+  async markCompleted(
+    tx: Tx,
+    ids: readonly string[],
+    values: Pick<StudentChanges, 'inactive_reason' | 'inactive_at' | 'updated_by'>,
+  ): Promise<void> {
+    await tx
+      .updateTable('students')
+      .set({ ...values, status: 0 })
+      .where('id', 'in', ids)
+      .execute();
+  }
+
   insertEnrolment(tx: Tx, values: NewEnrolment): Promise<EnrolmentRow> {
     return tx
       .insertInto('student_enrolments')
