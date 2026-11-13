@@ -541,6 +541,10 @@ describe('a student’s block and documents', () => {
         await up(tx);
       });
       expect(await listed(diya)).toEqual([]);
+      // Down lifted the force on documents to delete the student documents, and put it back.
+      const forced = await sql<{ relforcerowsecurity: boolean }>`
+        select relforcerowsecurity from pg_class where relname = 'documents'`.execute(ownerDb);
+      expect(forced.rows).toEqual([{ relforcerowsecurity: true }]);
       const kept = await api('get', `/v1/staff/${teacher.id}/documents`, owner.token);
       expect((kept.body.data as unknown as { id: string }[]).map((d) => d.id)).toEqual([
         letter.body.data.id,

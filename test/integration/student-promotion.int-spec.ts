@@ -428,6 +428,10 @@ describe('promotion', () => {
         await up(tx);
       });
       expect(await standing(grad)).toMatchObject({ status: 0, inactive_reason: 3 });
+      // Down lifted the force on the table for its update, and put it back: tenants stay apart.
+      const forced = await sql<{ relforcerowsecurity: boolean }>`
+        select relforcerowsecurity from pg_class where relname = 'students'`.execute(ownerDb);
+      expect(forced.rows).toEqual([{ relforcerowsecurity: true }]);
       // Up brought the check back: 4 is allowed again, 5 is not.
       await read((tx) =>
         sql`update students set inactive_reason = 4 where id = ${grad.id}`.execute(tx),
