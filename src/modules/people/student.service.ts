@@ -11,6 +11,7 @@ import { newId } from '../../common/ids/ids.js';
 import { pageMeta, pageOffset, parseSort } from '../../common/pagination/pagination.js';
 import { Clock, dayBefore } from '../../common/time/clock.js';
 import { fieldError } from '../../common/validation/field-error.js';
+import type { PhoneDto } from '../../common/validation/phone.dto.js';
 import { AuditService } from '../../platform/audit/index.js';
 import {
   DatabaseService,
@@ -22,7 +23,11 @@ import {
 import { FileDirectory, FilePurpose } from '../../platform/files/index.js';
 import { AccountDirectory, PersonDirectory } from '../../platform/identity/index.js';
 import { MasterReferences, placeOf } from '../../platform/masters/index.js';
-import { InstitutionDirectory, ScopeService } from '../../platform/tenancy/index.js';
+import {
+  InstitutionDirectory,
+  ScopeService,
+  type InstitutionContext,
+} from '../../platform/tenancy/index.js';
 import {
   AcademicYearDirectory,
   ClassDirectory,
@@ -75,7 +80,7 @@ const ROLL_NUMBER = 'uq_placements_roll';
 const ONE_PHOTO_PER_CHILD = 'uq_students_photo';
 
 /** A unique violation on the Admission ID, the roll number or the photo, in the words of the API (API design 12). */
-function translate(error: unknown): unknown {
+export function translate(error: unknown): unknown {
   if (isDuplicateOn(error, ADMISSION_NO))
     return AppException.conflict(ErrorCode.ADMISSION_NO_TAKEN);
   if (isDuplicateOn(error, ROLL_NUMBER)) return AppException.conflict(ErrorCode.ROLL_NUMBER_TAKEN);
@@ -88,6 +93,29 @@ function translate(error: unknown): unknown {
 /** STU-05 reason 2, and the enrolment outcome 3 Left (DDD 9.6). */
 const MADE_BY_MISTAKE = 2;
 const ENROLMENT_LEFT = 3;
+
+/** A student to add: STU-02's body, or a row of the CSV import, which has no mobile number of the student's own. */
+export type NewStudent = Omit<CreateStudentDto, 'mobile'> & { mobile: PhoneDto | null };
+
+/** The ID, the day and the sealed Aadhaar number a student is added with (`prepare`). */
+export type PreparedStudent = {
+  id: string;
+  today: string;
+  aadhaar: ReturnType<StudentIdentityService['seal']>;
+};
+
+/** What `addWithin` made, for the answer of STU-02 and for what follows the commit. */
+export interface AddedStudent {
+  row: StudentRow;
+  placed: PlacedRow;
+  guardianRows: GuardianRow[];
+  identity: StudentIdentityRow | undefined;
+  elsewhere: boolean;
+  /** The guardian logins linked or made, to be sent their welcome mail once the transaction has committed. */
+  emails: string[];
+  societyName: string | null;
+  overCapacity: boolean;
+}
 
 /** The warning of STU-02 when the section now holds more students than its capacity (PRD 7.3). */
 const SECTION_OVER_CAPACITY = 'SECTION_OVER_CAPACITY';
@@ -131,155 +159,183 @@ export class StudentService {
    */
   async create(principal: Principal, body: CreateStudentDto): Promise<ApiResult<StudentResource>> {
     const context = await this.scope.requireInstitution(principal, body.institutionId);
-    const today = this.clock.todayIst();
-    requireValidStudent(body, today);
-    const id = newId();
-    const aadhaar = this.identity.seal(id, body.identity);
-    const created = await this.database
-      .transaction(context.tenant, async (tx) => {
-        await this.requireReferences(tx, body, context.institutionId);
-        const {
-          capacity,
-          startDate: yearStart,
-          endDate: yearEnd,
-        } = await this.requirePlace(tx, body.enrolment, context.institutionId);
-        const start = placementStart(body.admissionDate ?? null, today, yearStart, yearEnd);
-        const guardians = [];
-        for (const guardian of body.guardians) {
-          const person =
-            guardian.email == null
-              ? null
-              : await this.accounts.linkGuardian(
-                  tx,
-                  {
-                    email: guardian.email,
-                    firstName: guardian.firstName,
-                    lastName: guardian.lastName ?? undefined,
-                  },
-                  principal.personId,
-                );
-          guardians.push({ guardian, person });
-        }
-
-        const base = {
-          society_id: context.societyId,
-          institution_id: context.institutionId,
-          ...insertStamp(principal.personId),
-        };
-        const row = await this.students.insert(tx, {
-          ...base,
-          id,
-          admission_no: body.admissionNo ?? null,
-          first_name: body.firstName,
-          last_name: body.lastName ?? null,
-          gender: body.gender ?? null,
-          date_of_birth: body.dateOfBirth ?? null,
-          blood_group: body.bloodGroup ?? null,
-          nationality: body.nationality ?? null,
-          photo_file_id: body.photoFileId ?? null,
-          admission_date: body.admissionDate ?? null,
-          contact_email: body.contactEmail?.toLowerCase() ?? null,
-          country_code: body.mobile.countryCode,
-          mobile_number: body.mobile.number,
-          alternate_number: body.alternateNumber ?? null,
-          address_line_1: body.address?.line1 ?? null,
-          address_line_2: body.address?.line2 ?? null,
-          country_id: body.address?.countryId ?? null,
-          state_id: body.address?.stateId ?? null,
-          city_id: body.address?.cityId ?? null,
-          pincode: body.address?.pincode ?? null,
-        });
-        const enrolment = await this.students.insertEnrolment(tx, {
-          ...base,
-          academic_year_id: body.enrolment.academicYearId,
-          student_id: id,
-          class_id: body.enrolment.classId,
-          enrolled_date: start,
-        });
-        const placement = await this.students.insertPlacement(tx, {
-          ...base,
-          academic_year_id: body.enrolment.academicYearId,
-          student_enrolment_id: enrolment.id,
-          class_id: body.enrolment.classId,
-          section_id: body.enrolment.sectionId,
-          roll_number: body.enrolment.rollNumber,
-          start_date: start,
-        });
-        const guardianRows = await this.students.insertGuardians(
-          tx,
-          guardians.map(({ guardian, person }) => ({
-            ...base,
-            student_id: id,
-            user_id: person?.id ?? null,
-            first_name: guardian.firstName,
-            last_name: guardian.lastName ?? null,
-            relation: guardian.relation,
-            country_code: guardian.phone.countryCode,
-            phone_number: guardian.phone.number,
-            alternate_phone: guardian.alternatePhone ?? null,
-            email: person?.email ?? null,
-            occupation: guardian.occupation ?? null,
-            is_primary: guardian.isPrimary,
-            is_emergency_contact: guardian.isEmergencyContact,
-          })),
-        );
-        const written = await this.identity.write(
-          tx,
-          row,
-          aadhaar,
-          body.identity?.birthCertificateNumber,
-          principal.personId,
-        );
-        const placed: PlacedRow = {
-          placement_id: placement.id,
-          enrolment_id: enrolment.id,
-          academic_year_id: placement.academic_year_id,
-          class_id: placement.class_id,
-          section_id: placement.section_id,
-          roll_number: placement.roll_number,
-          start_date: placement.start_date,
-          enrolled_date: enrolment.enrolled_date,
-        };
-        await this.audit.record(tx, {
-          action: 'student.created',
-          institutionId: context.institutionId,
-          entityType: 'student',
-          entityId: id,
-          after: studentAuditView(row, placed, guardianRows),
-        });
-        const society = await this.institutions.names(tx, [context.institutionId]);
-        return {
-          row,
-          placed,
-          guardianRows,
-          identity: written.row,
-          elsewhere: written.elsewhere,
-          emails: guardians.flatMap(({ person }) => (person ? [person.email] : [])),
-          societyName: society.get(context.institutionId)?.societyName ?? null,
-          overCapacity: await this.overCapacity(tx, body.enrolment, capacity),
-        };
-      })
+    const prepared = this.prepare(body);
+    const added = await this.database
+      .transaction(context.tenant, (tx) =>
+        this.addWithin(tx, principal.personId, context, body, prepared),
+      )
       .catch((error: unknown) => {
         throw translate(error);
       });
-    for (const email of created.emails) {
-      this.accounts.welcomeAs({ email }, RoleCode.StudentParent, created.societyName);
-    }
+    this.welcome(added);
     const resource = await this.resource(
-      created.row,
-      created.placed,
-      created.guardianRows,
-      created.identity,
+      added.row,
+      added.placed,
+      added.guardianRows,
+      added.identity,
     );
     const caution = [
-      ...(created.overCapacity ? [SECTION_OVER_CAPACITY] : []),
-      ...(created.elsewhere ? [AADHAAR_EXISTS_IN_SOCIETY] : []),
+      ...(added.overCapacity ? [SECTION_OVER_CAPACITY] : []),
+      ...(added.elsewhere ? [AADHAAR_EXISTS_IN_SOCIETY] : []),
     ];
     return new ApiResult(resource, {
       status: HttpStatus.CREATED,
       code: ResultCode.CREATED,
       meta: caution.length > 0 ? warnings(...caution) : null,
     });
+  }
+
+  /**
+   * What a new student needs before a transaction opens: the body satisfies the rules that need no lookup (400, 422
+   * `PRIMARY_GUARDIAN_REQUIRED`), the new ID is made and the Aadhaar number is checked and sealed under it.
+   */
+  prepare(body: NewStudent): PreparedStudent {
+    const today = this.clock.todayIst();
+    requireValidStudent(body, today);
+    const id = newId();
+    return { id, today, aadhaar: this.identity.seal(id, body.identity) };
+  }
+
+  /**
+   * STU-02's work in the caller's transaction, shared with the CSV import, which adds a hundred students in one:
+   * makes the student, enrolment, placement, guardians (and their logins) and audit entry. A unique violation on the
+   * Admission ID or roll number is thrown as the database raised it; `translate` words it.
+   */
+  async addWithin(
+    tx: Tx,
+    by: string,
+    context: InstitutionContext,
+    body: NewStudent,
+    { id, today, aadhaar }: PreparedStudent = this.prepare(body),
+  ): Promise<AddedStudent> {
+    await this.requireReferences(tx, body, context.institutionId);
+    const {
+      capacity,
+      startDate: yearStart,
+      endDate: yearEnd,
+    } = await this.requirePlace(tx, body.enrolment, context.institutionId);
+    const start = placementStart(body.admissionDate ?? null, today, yearStart, yearEnd);
+    const guardians = [];
+    for (const guardian of body.guardians) {
+      const person =
+        guardian.email == null
+          ? null
+          : await this.accounts.linkGuardian(
+              tx,
+              {
+                email: guardian.email,
+                firstName: guardian.firstName,
+                lastName: guardian.lastName ?? undefined,
+              },
+              by,
+            );
+      guardians.push({ guardian, person });
+    }
+
+    const base = {
+      society_id: context.societyId,
+      institution_id: context.institutionId,
+      ...insertStamp(by),
+    };
+    const row = await this.students.insert(tx, {
+      ...base,
+      id,
+      admission_no: body.admissionNo ?? null,
+      first_name: body.firstName,
+      last_name: body.lastName ?? null,
+      gender: body.gender ?? null,
+      date_of_birth: body.dateOfBirth ?? null,
+      blood_group: body.bloodGroup ?? null,
+      nationality: body.nationality ?? null,
+      photo_file_id: body.photoFileId ?? null,
+      admission_date: body.admissionDate ?? null,
+      contact_email: body.contactEmail?.toLowerCase() ?? null,
+      country_code: body.mobile?.countryCode ?? null,
+      mobile_number: body.mobile?.number ?? null,
+      alternate_number: body.alternateNumber ?? null,
+      address_line_1: body.address?.line1 ?? null,
+      address_line_2: body.address?.line2 ?? null,
+      country_id: body.address?.countryId ?? null,
+      state_id: body.address?.stateId ?? null,
+      city_id: body.address?.cityId ?? null,
+      pincode: body.address?.pincode ?? null,
+    });
+    const enrolment = await this.students.insertEnrolment(tx, {
+      ...base,
+      academic_year_id: body.enrolment.academicYearId,
+      student_id: id,
+      class_id: body.enrolment.classId,
+      enrolled_date: start,
+    });
+    const placement = await this.students.insertPlacement(tx, {
+      ...base,
+      academic_year_id: body.enrolment.academicYearId,
+      student_enrolment_id: enrolment.id,
+      class_id: body.enrolment.classId,
+      section_id: body.enrolment.sectionId,
+      roll_number: body.enrolment.rollNumber,
+      start_date: start,
+    });
+    const guardianRows = await this.students.insertGuardians(
+      tx,
+      guardians.map(({ guardian, person }) => ({
+        ...base,
+        student_id: id,
+        user_id: person?.id ?? null,
+        first_name: guardian.firstName,
+        last_name: guardian.lastName ?? null,
+        relation: guardian.relation,
+        country_code: guardian.phone.countryCode,
+        phone_number: guardian.phone.number,
+        alternate_phone: guardian.alternatePhone ?? null,
+        email: person?.email ?? null,
+        occupation: guardian.occupation ?? null,
+        is_primary: guardian.isPrimary,
+        is_emergency_contact: guardian.isEmergencyContact,
+      })),
+    );
+    const written = await this.identity.write(
+      tx,
+      row,
+      aadhaar,
+      body.identity?.birthCertificateNumber,
+      by,
+    );
+    const placed: PlacedRow = {
+      placement_id: placement.id,
+      enrolment_id: enrolment.id,
+      academic_year_id: placement.academic_year_id,
+      class_id: placement.class_id,
+      section_id: placement.section_id,
+      roll_number: placement.roll_number,
+      start_date: placement.start_date,
+      enrolled_date: enrolment.enrolled_date,
+    };
+    await this.audit.record(tx, {
+      action: 'student.created',
+      institutionId: context.institutionId,
+      entityType: 'student',
+      entityId: id,
+      after: studentAuditView(row, placed, guardianRows),
+    });
+    const society = await this.institutions.names(tx, [context.institutionId]);
+    return {
+      row,
+      placed,
+      guardianRows,
+      identity: written.row,
+      elsewhere: written.elsewhere,
+      emails: guardians.flatMap(({ person }) => (person ? [person.email] : [])),
+      societyName: society.get(context.institutionId)?.societyName ?? null,
+      overCapacity: await this.overCapacity(tx, body.enrolment, capacity),
+    };
+  }
+
+  /** The welcome mail of each guardian login a committed `addWithin` linked or made. */
+  welcome(added: Pick<AddedStudent, 'emails' | 'societyName'>): void {
+    for (const email of added.emails) {
+      this.accounts.welcomeAs({ email }, RoleCode.StudentParent, added.societyName);
+    }
   }
 
   /**

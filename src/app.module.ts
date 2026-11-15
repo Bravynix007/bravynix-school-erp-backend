@@ -18,6 +18,7 @@ import { FilesModule } from './platform/files/index.js';
 import { IdentityNumbersModule } from './platform/identity-numbers/index.js';
 import { IdempotencyModule } from './platform/idempotency/idempotency.module.js';
 import { IdentityModule } from './platform/identity/identity.module.js';
+import { JobsModule } from './platform/jobs/index.js';
 import { MastersModule } from './platform/masters/index.js';
 import { NumberingModule } from './platform/numbering/numbering.module.js';
 import { TenancyModule } from './platform/tenancy/tenancy.module.js';
@@ -75,9 +76,10 @@ import { TenancyModule } from './platform/tenancy/tenancy.module.js';
     IdempotencyModule,
     NumberingModule,
     FilesModule,
+    JobsModule,
     IdentityNumbersModule,
     HealthModule,
-    // Platform modules (Notifications, Jobs) are registered here as they are built.
+    // Platform modules (Notifications) are registered here as they are built.
     // Business modules are registered here as they are built.
     AcademicSetupModule,
     PeopleModule,

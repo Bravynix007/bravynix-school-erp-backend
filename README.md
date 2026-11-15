@@ -57,7 +57,8 @@ project's `docs/DEMO_RUNBOOK.md`.
 | `lint`, `lint:boundaries`, `typecheck`, `format` | Static checks                                                                                |
 | `db:migrate`, `db:migrate:down`                  | Applies or rolls back migrations (migration user)                                            |
 | `db:seed [scenario]`                             | Writes test data (`two-worlds`, or `demo`); refused in staging and production                |
-| `demo:reset`, `demo:api`                         | Rebuilds the demo database and its data; runs the API against it                             |
+| `demo:reset`, `demo:api`, `demo:worker`          | Rebuilds the demo database and its data; runs the API, or the background worker, against it  |
+| `worker`                                         | Runs the background worker: it takes queued jobs (the student CSV import) until stopped      |
 | `openapi`                                        | Writes `openapi.json`                                                                        |
 | `policies`                                       | Writes `policies.json`: every endpoint with its role policy, for QA's authorization matrix   |
 

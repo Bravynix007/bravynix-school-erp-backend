@@ -232,5 +232,31 @@ async function writeStudentsIn(tx: Kysely<unknown>): Promise<void> {
       `.execute(tx);
     }
   }
+  // One finished import at each Institution that has students, as IMP-02 and the worker would leave it: the CSV is
+  // Ready (no object is stored behind it), the run is Done with nothing imported, and so is its job.
+  const homes = [...new Set(seededStudents.map((student) => student.home))];
+  for (const [place, home] of homes.entries()) {
+    const societyId = await scopeTo(tx, home.id, 'import');
+    await sql`
+      insert into files
+        (id, society_id, institution_id, storage_bucket, object_key, purpose, content_type, size_bytes,
+         original_filename, file_status, confirmed_at)
+      values (${seedId(4701 + place)}, ${societyId}, ${home.id}, 1,
+        ${`${societyId}/${home.id}/12/seeded-${place.toString()}`}, 12, 'text/csv', 60, 'students.csv', 2, now())
+      on conflict (id) do nothing
+    `.execute(tx);
+    await sql`
+      insert into import_runs
+        (id, society_id, institution_id, file_id, academic_year_id, run_status, total_rows, started_at, finished_at)
+      values (${seedId(4801 + place)}, ${societyId}, ${home.id}, ${seedId(4701 + place)}, ${seededYearId(home.key)}, 3, 0,
+        now(), now())
+      on conflict (id) do nothing
+    `.execute(tx);
+    await sql`
+      insert into jobs (id, society_id, institution_id, kind, job_status, finished_at)
+      values (${seedId(4901 + place)}, ${societyId}, ${home.id}, 'students.import', 3, now())
+      on conflict (id) do nothing
+    `.execute(tx);
+  }
   await clearScope(tx);
 }

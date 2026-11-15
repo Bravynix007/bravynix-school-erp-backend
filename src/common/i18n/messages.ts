@@ -103,6 +103,7 @@ const en: Catalogue = {
   ROLL_NUMBER_TAKEN: 'Another student of this section has this roll number',
   ALREADY_ENROLLED: 'The student is already in a class in that academic year',
   HAS_STUDENTS: 'Students are placed here, so it cannot be deactivated',
+  IMPORT_ALREADY_RUNNING: 'A student import is already running for this Institution',
   SECTION_NOT_IN_CLASS: 'This section does not belong to the class',
   YEAR_NOT_ACTIVE: 'This academic year is not active',
   INACTIVE_SECTION: 'This section is deactivated',
@@ -119,6 +120,13 @@ const en: Catalogue = {
   FILE_TOO_LARGE: 'The file is larger than 5 MB',
   FILE_TYPE_NOT_ALLOWED: 'This type of file is not allowed here',
   UPLOAD_NOT_FOUND: 'The file has not arrived yet; send it and confirm again',
+  FILE_NOT_READY: 'The file is not ready; upload it again and confirm it',
+  CSV_HEADER_INVALID:
+    'The first row must be exactly: Name,RollNumber,Class,Section,GuardianName,GuardianPhone,GuardianEmail',
+  CSV_TOO_LARGE:
+    'The file has more than 5,000 student rows; split it and import the parts one by one',
+  CSV_UNREADABLE: 'The file could not be read as a UTF-8 CSV file',
+  IMPORT_FAILED: 'The import stopped before it could finish; some students may have been added',
   FILE_CHECK_FAILED: 'The file is not what it was said to be and was discarded',
   // Identity numbers (API design 10.8, 10.9)
   INVALID_AADHAAR: 'This is not a valid Aadhaar number',

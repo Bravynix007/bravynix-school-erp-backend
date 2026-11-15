@@ -21,6 +21,7 @@ declare module '../../platform/database/schema.js' {
     student_section_placements: StudentSectionPlacementsTable;
     student_identities: StudentIdentitiesTable;
     student_achievements: StudentAchievementsTable;
+    import_runs: ImportRunsTable;
   }
 }
 
@@ -308,4 +309,34 @@ export interface StudentAchievementsTable {
   description: string;
   /** The staff record that gave it; empty when a Society Owner did. */
   awarded_by_staff_member_id: string | null;
+}
+
+/**
+ * One student CSV import and its result (DDD 9.12, API design 10.8). `processed_rows` is how far the worker has settled
+ * the file, 100 rows at a time in the transaction that made the students. Removed after 7 days with its file.
+ */
+export interface ImportRunsTable {
+  id: string;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  created_by: string | null;
+  society_id: string;
+  institution_id: string;
+  /** 1 students. */
+  import_type: Generated<number>;
+  file_id: string;
+  academic_year_id: string;
+  /** 1 queued, 2 running, 3 completed, 4 failed. */
+  run_status: Generated<number>;
+  /** The data rows of the file; empty until the worker has read it. */
+  total_rows: number | null;
+  imported_rows: Generated<number>;
+  skipped_rows: Generated<number>;
+  processed_rows: Generated<number>;
+  /** Up to 1,000 `{ row, message }`. */
+  row_errors: ColumnType<unknown, string | undefined, string>;
+  over_capacity: Generated<boolean>;
+  /** Why a failed run read no row. */
+  error_code: string | null;
+  started_at: Date | null;
+  finished_at: Date | null;
 }
