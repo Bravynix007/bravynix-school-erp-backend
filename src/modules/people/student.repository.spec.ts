@@ -237,7 +237,7 @@ describe('StudentRepository', () => {
       const { tx, queries } = recorder();
       expect(await repository.otherPlacements(tx, 'enrolment-1', 'placement-1')).toEqual([]);
       expect(queries[0]!.sql).toContain('where "student_enrolment_id" = $1 and "id" != $2');
-      expect(queries[0]!.sql).toContain('order by "start_date"');
+      expect(queries[0]!.sql).toMatch(/order by "start_date"$/);
       expect(queries[0]!.parameters).toEqual(['enrolment-1', 'placement-1']);
     });
 
