@@ -113,6 +113,7 @@ const en: Catalogue = {
   TARGET_YEAR_NOT_AFTER_SOURCE: 'The new academic year must begin after the current one',
   NOT_FINAL_CLASS: 'Only the last class of the Institution can be completed',
   TARGET_CLASS_BELOW_SOURCE: 'A student cannot be promoted to a lower class',
+  CLASS_UNCHANGED: 'The student is in this class already; change the section instead',
   // Files (API design 15)
   ALREADY_CONFIRMED: 'This file has already been confirmed',
   FILE_TOO_LARGE: 'The file is larger than 5 MB',

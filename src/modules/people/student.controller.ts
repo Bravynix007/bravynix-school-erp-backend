@@ -22,6 +22,7 @@ import {
   DeactivateStudentQueryDto,
   ListStudentsQueryDto,
   MoveStudentDto,
+  CorrectStudentClassDto,
   UpdateStudentDto,
 } from './student.dto.js';
 import { PromoteStudentDto } from './promotion.dto.js';
@@ -130,6 +131,21 @@ export class StudentController {
     @Body() body: MoveStudentDto,
   ): Promise<ApiResult<StudentResource>> {
     return this.students.move(principal, studentId, body);
+  }
+
+  @Policy({
+    roles: ADMINS,
+    scope: 'institution',
+    operationId: 'STU-12',
+    rule: 'Puts a student in the class they belong in for the whole year, when it was wrong from the start; a class below the one they left is refused and a full section is a warning',
+  })
+  @Patch(':studentId/class')
+  correctClass(
+    @CurrentPrincipal() principal: Principal,
+    @Param('studentId', UuidParamPipe) studentId: string,
+    @Body() body: CorrectStudentClassDto,
+  ): Promise<ApiResult<StudentResource>> {
+    return this.students.correctClass(principal, studentId, body);
   }
 
   @Policy({

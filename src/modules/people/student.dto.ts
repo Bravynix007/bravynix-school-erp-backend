@@ -342,6 +342,35 @@ export class MoveStudentDto {
   effectiveDate?: string;
 }
 
+/**
+ * STU-12 body: the class, the section of it and the roll number the student has in it for the whole of this year, as
+ * if they had been put there from the start. The roll number stays when it is left out.
+ */
+export class CorrectStudentClassDto {
+  @ApiProperty({ format: 'uuid', description: 'The class the student belongs in' })
+  @LowerCaseUuid()
+  @IsUUID()
+  classId!: string;
+
+  @ApiProperty({ format: 'uuid', description: 'An open section of that class' })
+  @LowerCaseUuid()
+  @IsUUID()
+  sectionId!: string;
+
+  @ApiPropertyOptional({
+    minLength: 1,
+    maxLength: 20,
+    example: '14',
+    description: 'Unique in the section; the current one when left out',
+  })
+  @WhenPresent()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(20)
+  @NotBlank()
+  rollNumber?: string;
+}
+
 export const STUDENT_SORT_FIELDS = ['name', 'admissionNo', 'rollNumber', 'createdAt'] as const;
 export type StudentSortField = (typeof STUDENT_SORT_FIELDS)[number];
 
