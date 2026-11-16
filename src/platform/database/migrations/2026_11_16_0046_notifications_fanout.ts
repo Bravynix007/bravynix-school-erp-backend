@@ -43,7 +43,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     set search_path = pg_catalog, pg_temp
     as $$
     begin
-      if p_society is distinct from nullif(current_setting('app.society_id', true), '')::uuid then
+      if p_society is null or p_society is distinct from nullif(current_setting('app.society_id', true), '')::uuid then
         raise exception 'A fan-out may only be written for the Society of the job' using errcode = '42501';
       end if;
       return query

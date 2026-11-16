@@ -37,6 +37,14 @@ interface ItemBody {
 }
 
 /** The worker writes a notice to its receivers' inboxes and sends the push (SDD 9.3 rule 4, 11.2; DDD 9.8). */
+const message = (token: string, language: string) => ({
+  token,
+  platform: 1,
+  language,
+  title: 'Diya is absent today',
+  body: 'Marked absent in the morning',
+});
+
 describe('a notice reaches its receivers', () => {
   let ownerDb: Kysely<unknown>;
   let t: TestApp;
@@ -49,6 +57,7 @@ describe('a notice reaches its receivers', () => {
   let sender: PushSender;
   let admin: string;
   let societyId: string;
+  let institutionId: string;
   let first: SignedInPerson;
   let second: SignedInPerson;
   let outsider: SignedInPerson;
@@ -72,7 +81,7 @@ describe('a notice reaches its receivers', () => {
   });
   /** Asks for the notice as a module does, in its own transaction, then lets the worker drain the queue. */
   const send = async (value: Notice) => {
-    const job = await database.transaction({ societyId, institutionIds: [] }, (tx) =>
+    const job = await database.transaction({ societyId, institutionIds: [institutionId] }, (tx) =>
       notifications.notify(tx, value, first.person),
     );
     while (await runner.runNext()) {
@@ -82,7 +91,7 @@ describe('a notice reaches its receivers', () => {
   };
   /** Asks for the notice in a transaction of the Society, as a module does. */
   const queue = (value: Notice) =>
-    database.transaction({ societyId, institutionIds: [] }, (tx) =>
+    database.transaction({ societyId, institutionIds: [institutionId] }, (tx) =>
       notifications.notify(tx, value, null),
     );
   const inbox = async (who: SignedInPerson) => {
@@ -90,10 +99,28 @@ describe('a notice reaches its receivers', () => {
     expect(res.status).toBe(200);
     return res.body.data as unknown as ItemBody[];
   };
-  const register = async (who: SignedInPerson, token: string) =>
+  const register = async (who: SignedInPerson, token: string, language = 'en') =>
     expect(
-      (await api('put', '/v1/me/push-device', who.token, { fcmToken: token, platform: 1 })).status,
+      (
+        await api('put', '/v1/me/push-device', who.token, {
+          fcmToken: token,
+          platform: 1,
+          language,
+        })
+      ).status,
     ).toBe(200);
+  /** The rows as their receiver reads them, with the Society and Institution they were written for. */
+  const stored = (who: SignedInPerson) =>
+    database.transaction(
+      { personId: who.person, societyId, institutionIds: [institutionId] },
+      async (tx) =>
+        (
+          await sql<{
+            society_id: string;
+            institution_id: string | null;
+          }>`select society_id, institution_id from inbox_items`.execute(tx)
+        ).rows,
+    );
   const tokens = async () =>
     (
       await sql<{ fcm_token: string }>`
@@ -135,9 +162,8 @@ describe('a notice reaches its receivers', () => {
     societyId = await kit.society(admin);
     first = await fixtures.owner(societyId);
     const categoryId = (await kit.masters(admin, 'class-categories'))[0]!.id;
-    second = await fixtures.institutionAdmin(societyId, [
-      await kit.institution(first.token, categoryId),
-    ]);
+    institutionId = await kit.institution(first.token, categoryId);
+    second = await fixtures.institutionAdmin(societyId, [institutionId]);
     outsider = await fixtures.owner(await kit.society(admin));
   });
 
@@ -149,9 +175,14 @@ describe('a notice reaches its receivers', () => {
 
   it('writes one row for each receiver, at the time of the source event, and nobody else sees it', async () => {
     const value = notice({
+      institutionId,
       receivers: [{ userId: first.person, studentId: null }, { userId: second.person }],
     });
     await send(value);
+    expect(await stored(first)).toEqual([{ society_id: societyId, institution_id: institutionId }]);
+    expect(await stored(second)).toEqual([
+      { society_id: societyId, institution_id: institutionId },
+    ]);
     const [mine] = await inbox(first);
     expect(mine).toMatchObject({
       title: 'Diya is absent today',
@@ -186,18 +217,14 @@ describe('a notice reaches its receivers', () => {
     expect(sent.flat().map((m) => m.token)).toEqual(['fanout-2']);
   });
 
-  it('sends the title and body only, to the phones of the receivers, in their language', async () => {
+  it('sends the title and body only, to the phones of the receivers, each in its own language', async () => {
     await register(first, 'fanout-1');
+    await register(second, 'fanout-2', 'kn');
     await register(outsider, 'fanout-3');
-    await send(notice({ receivers: [{ userId: first.person }] }));
-    expect(sent.flat()).toEqual([
-      {
-        token: 'fanout-1',
-        platform: 1,
-        language: 'en',
-        title: 'Diya is absent today',
-        body: 'Marked absent in the morning',
-      },
+    await send(notice());
+    expect(sent.flat().toSorted((a, b) => a.token.localeCompare(b.token))).toEqual([
+      message('fanout-1', 'en'),
+      message('fanout-2', 'kn'),
     ]);
   });
 
@@ -225,7 +252,7 @@ describe('a notice reaches its receivers', () => {
 
   it('is queued in the caller’s transaction, so a change that is undone sends nothing', async () => {
     await expect(
-      database.transaction({ societyId, institutionIds: [] }, async (tx) => {
+      database.transaction({ societyId, institutionIds: [institutionId] }, async (tx) => {
         await notifications.notify(tx, notice(), first.person);
         throw new Error('the change failed');
       }),
@@ -245,9 +272,19 @@ describe('a notice reaches its receivers', () => {
   it('refuses a write for another Society than the job’s', async () => {
     const other = await kit.society(admin);
     await expect(
-      database.transaction({ societyId, institutionIds: [] }, (tx) =>
+      database.transaction({ societyId, institutionIds: [institutionId] }, (tx) =>
         sql`select * from maintenance.deliver_inbox_items(
           ${other}::uuid, null, 'x:1', now(), 1::smallint, 1::smallint, 't', 'b', null, null, null,
+          ${JSON.stringify([{ userId: first.person, studentId: null }])}::jsonb)`.execute(tx),
+      ),
+    ).rejects.toMatchObject({ code: '42501' });
+  });
+
+  it('refuses a write that names no Society, even when the job has none', async () => {
+    await expect(
+      database.transaction({ institutionIds: [] }, (tx) =>
+        sql`select * from maintenance.deliver_inbox_items(
+          null, null, 'x:1', now(), 1::smallint, 1::smallint, 't', 'b', null, null, null,
           ${JSON.stringify([{ userId: first.person, studentId: null }])}::jsonb)`.execute(tx),
       ),
     ).rejects.toMatchObject({ code: '42501' });
