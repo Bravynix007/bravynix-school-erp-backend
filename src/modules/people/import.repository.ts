@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { Insertable, Selectable } from 'kysely';
 import type { Tx } from '../../platform/database/index.js';
 import type { ImportRunsTable } from './people.tables.js';
-import type { RowError } from './import.rules.js';
+import { RunStatus, type RowError } from './import.rules.js';
 
 export type ImportRunRow = Selectable<ImportRunsTable>;
 export type NewImportRun = Insertable<ImportRunsTable>;
@@ -15,11 +15,6 @@ export interface ImportProgress {
   rowErrors: readonly RowError[];
   overCapacity: boolean;
 }
-
-const QUEUED = 1;
-const RUNNING = 2;
-const COMPLETED = 3;
-const FAILED = 4;
 
 /** Queries on `import_runs`; every one runs in the caller's transaction, under row-level security. */
 @Injectable()
@@ -69,9 +64,9 @@ export class ImportRepository {
   async start(tx: Tx, id: string, totalRows: number, at: Date): Promise<void> {
     await tx
       .updateTable('import_runs')
-      .set({ run_status: RUNNING, total_rows: totalRows, started_at: at })
+      .set({ run_status: RunStatus.Running, total_rows: totalRows, started_at: at })
       .where('id', '=', id)
-      .where('run_status', 'in', [QUEUED, RUNNING])
+      .where('run_status', 'in', [RunStatus.Queued, RunStatus.Running])
       .execute();
   }
 
@@ -90,7 +85,9 @@ export class ImportRepository {
         skipped_rows: progress.skippedRows,
         row_errors: JSON.stringify(progress.rowErrors),
         over_capacity: progress.overCapacity,
-        ...(finishedAt === null ? {} : { run_status: COMPLETED, finished_at: finishedAt }),
+        ...(finishedAt === null
+          ? {}
+          : { run_status: RunStatus.Completed, finished_at: finishedAt }),
       })
       .where('id', '=', id)
       .execute();
@@ -106,13 +103,13 @@ export class ImportRepository {
     await tx
       .updateTable('import_runs')
       .set({
-        run_status: FAILED,
+        run_status: RunStatus.Failed,
         error_code: failure.code,
         finished_at: at,
         ...(failure.totalRows === undefined ? {} : { total_rows: failure.totalRows }),
       })
       .where('id', '=', id)
-      .where('run_status', 'in', [QUEUED, RUNNING])
+      .where('run_status', 'in', [RunStatus.Queued, RunStatus.Running])
       .execute();
   }
 }

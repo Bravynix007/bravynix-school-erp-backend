@@ -80,7 +80,7 @@ const ROLL_NUMBER = 'uq_placements_roll';
 const ONE_PHOTO_PER_CHILD = 'uq_students_photo';
 
 /** A unique violation on the Admission ID, the roll number or the photo, in the words of the API (API design 12). */
-export function translate(error: unknown): unknown {
+function translate(error: unknown): unknown {
   if (isDuplicateOn(error, ADMISSION_NO))
     return AppException.conflict(ErrorCode.ADMISSION_NO_TAKEN);
   if (isDuplicateOn(error, ROLL_NUMBER)) return AppException.conflict(ErrorCode.ROLL_NUMBER_TAKEN);

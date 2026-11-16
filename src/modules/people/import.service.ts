@@ -17,6 +17,7 @@ import { sampleCsv } from './import.csv.js';
 import type { ListImportsQueryDto, StartImportDto } from './import.dto.js';
 import { ImportRepository } from './import.repository.js';
 import { importResource, type ImportResource } from './import.resource.js';
+import { RunStatus } from './import.rules.js';
 import { STUDENT_IMPORT_JOB } from './import.processor.js';
 
 /** The name the idempotency store keeps with a start (API design 14.5). */
@@ -116,7 +117,7 @@ export class ImportService {
         });
         return {
           result: new ApiResult<ImportStarted>(
-            { importId: id, runStatus: 1 },
+            { importId: id, runStatus: RunStatus.Queued },
             {
               status: HttpStatus.ACCEPTED,
               code: ResultCode.ACCEPTED,

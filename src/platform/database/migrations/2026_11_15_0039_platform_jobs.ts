@@ -15,7 +15,9 @@ import { sql, type Kysely } from 'kysely';
  *   the table owner, whom the forced policies would bind too, so one more policy admits the owner role and no
  *   other. The claim takes the oldest due job with `for update skip locked`, so two workers never hold the same one.
  *   `extend_job` keeps the lease while a handler works, `settle_job` ends the job (Done or Failed) and `retry_job`
- *   queues it again after a pause, for work that stopped on a passing fault.
+ *   queues it again after a pause, for work that stopped on a passing fault. Each takes the claim number
+ *   (`attempts`) the worker was given and acts only while it is still the job's own: a worker whose lease ran out and
+ *   whose job another worker has claimed since changes nothing, and is told so (false).
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`
@@ -98,7 +100,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     $$
   `.execute(db);
   await sql`
-    create function maintenance.extend_job(p_id uuid, p_lease_seconds integer) returns boolean
+    create function maintenance.extend_job(p_id uuid, p_attempt integer, p_lease_seconds integer) returns boolean
     language sql
     security definer
     set search_path = pg_catalog, pg_temp
@@ -106,14 +108,15 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       with held as (
         update public.jobs
            set locked_until = now() + make_interval(secs => p_lease_seconds)
-         where id = p_id and job_status = 2 and locked_until >= now()
+         where id = p_id and attempts = p_attempt and job_status = 2
         returning 1
       )
       select exists (select 1 from held)
     $$
   `.execute(db);
   await sql`
-    create function maintenance.settle_job(p_id uuid, p_status smallint, p_error text) returns boolean
+    create function maintenance.settle_job(p_id uuid, p_attempt integer, p_status smallint, p_error text)
+    returns boolean
     language sql
     security definer
     set search_path = pg_catalog, pg_temp
@@ -124,14 +127,15 @@ export async function up(db: Kysely<unknown>): Promise<void> {
                locked_until = null,
                finished_at = now(),
                last_error = left(p_error, 500)
-         where id = p_id and job_status = 2 and p_status in (3, 4)
+         where id = p_id and attempts = p_attempt and job_status = 2 and p_status in (3, 4)
         returning 1
       )
       select exists (select 1 from settled)
     $$
   `.execute(db);
   await sql`
-    create function maintenance.retry_job(p_id uuid, p_delay_seconds integer, p_error text) returns boolean
+    create function maintenance.retry_job(p_id uuid, p_attempt integer, p_delay_seconds integer, p_error text)
+    returns boolean
     language sql
     security definer
     set search_path = pg_catalog, pg_temp
@@ -142,7 +146,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
                locked_until = null,
                run_at = now() + make_interval(secs => p_delay_seconds),
                last_error = left(p_error, 500)
-         where id = p_id and job_status = 2
+         where id = p_id and attempts = p_attempt and job_status = 2
         returning 1
       )
       select exists (select 1 from queued)
@@ -150,9 +154,9 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   `.execute(db);
   for (const signature of [
     'claim_job(integer)',
-    'extend_job(uuid, integer)',
-    'settle_job(uuid, smallint, text)',
-    'retry_job(uuid, integer, text)',
+    'extend_job(uuid, integer, integer)',
+    'settle_job(uuid, integer, smallint, text)',
+    'retry_job(uuid, integer, integer, text)',
   ]) {
     await sql`revoke all on function ${sql.raw(`maintenance.${signature}`)} from public`.execute(
       db,
@@ -165,9 +169,9 @@ export async function up(db: Kysely<unknown>): Promise<void> {
         revoke update, delete, truncate on table jobs from erp_app;
         grant usage on schema maintenance to erp_app;
         grant execute on function maintenance.claim_job(integer) to erp_app;
-        grant execute on function maintenance.extend_job(uuid, integer) to erp_app;
-        grant execute on function maintenance.settle_job(uuid, smallint, text) to erp_app;
-        grant execute on function maintenance.retry_job(uuid, integer, text) to erp_app;
+        grant execute on function maintenance.extend_job(uuid, integer, integer) to erp_app;
+        grant execute on function maintenance.settle_job(uuid, integer, smallint, text) to erp_app;
+        grant execute on function maintenance.retry_job(uuid, integer, integer, text) to erp_app;
       end if;
     end;
     $$
@@ -179,9 +183,13 @@ export async function down(db: Kysely<unknown>): Promise<void> {
   if (process.env.NODE_ENV === 'production') {
     throw new Error('Refusing to drop the job queue in production');
   }
-  await sql`drop function if exists maintenance.retry_job(uuid, integer, text)`.execute(db);
-  await sql`drop function if exists maintenance.settle_job(uuid, smallint, text)`.execute(db);
-  await sql`drop function if exists maintenance.extend_job(uuid, integer)`.execute(db);
+  await sql`drop function if exists maintenance.retry_job(uuid, integer, integer, text)`.execute(
+    db,
+  );
+  await sql`drop function if exists maintenance.settle_job(uuid, integer, smallint, text)`.execute(
+    db,
+  );
+  await sql`drop function if exists maintenance.extend_job(uuid, integer, integer)`.execute(db);
   await sql`drop function if exists maintenance.claim_job(integer)`.execute(db);
   await sql`drop table if exists jobs`.execute(db);
 }

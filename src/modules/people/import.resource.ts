@@ -2,9 +2,6 @@ import { message, type Language } from '../../common/i18n/messages.js';
 import type { ImportRunRow } from './import.repository.js';
 import type { RowError } from './import.rules.js';
 
-/** `runStatus` of an operation (API design 16.2, DDD 9.12). */
-export const RunStatus = { Queued: 1, Running: 2, Completed: 3, Failed: 4 } as const;
-
 /** IMP-03's answer: the operation resource (API design 16.2) for an import. */
 export interface ImportResource {
   id: string;

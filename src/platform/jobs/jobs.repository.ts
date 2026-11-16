@@ -64,23 +64,29 @@ export class JobsRepository {
     );
   }
 
-  /** Renews the lease; false when the job is no longer this worker's. */
-  async extend(id: string, leaseSeconds: number): Promise<boolean> {
+  /**
+   * The three calls below take the claim number the worker was given (`attempts`): they act only while that claim is
+   * still the job's, so a worker whose lease ran out and whose job another worker took over changes nothing.
+   * Each answers false then.
+   */
+  async extend(id: string, attempt: number, leaseSeconds: number): Promise<boolean> {
     const { rows } = await sql<{ held: boolean }>`
-      select maintenance.extend_job(${id}::uuid, ${leaseSeconds}::integer) as held
+      select maintenance.extend_job(${id}::uuid, ${attempt}::integer, ${leaseSeconds}::integer) as held
     `.execute(this.database.db);
     return rows[0]!.held;
   }
 
-  async settle(id: string, done: boolean, error: string | null): Promise<void> {
-    await sql`
-      select maintenance.settle_job(${id}::uuid, ${done ? 3 : 4}::smallint, ${error}::text)
+  async settle(id: string, attempt: number, done: boolean, error: string | null): Promise<boolean> {
+    const { rows } = await sql<{ held: boolean }>`
+      select maintenance.settle_job(${id}::uuid, ${attempt}::integer, ${done ? 3 : 4}::smallint, ${error}::text) as held
     `.execute(this.database.db);
+    return rows[0]!.held;
   }
 
-  async retry(id: string, delaySeconds: number, error: string): Promise<void> {
-    await sql`
-      select maintenance.retry_job(${id}::uuid, ${delaySeconds}::integer, ${error}::text)
+  async retry(id: string, attempt: number, delaySeconds: number, error: string): Promise<boolean> {
+    const { rows } = await sql<{ held: boolean }>`
+      select maintenance.retry_job(${id}::uuid, ${attempt}::integer, ${delaySeconds}::integer, ${error}::text) as held
     `.execute(this.database.db);
+    return rows[0]!.held;
   }
 }

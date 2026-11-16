@@ -11,6 +11,9 @@ export const IMPORT_COUNTRY_CODE = '91';
 export const MAX_ROW_ERRORS = 1_000;
 
 /** A row error as IMP-03 shows it. */
+/** `run_status` of an import and `runStatus` of its operation resource (API design 16.2, DDD 9.12). */
+export const RunStatus = { Queued: 1, Running: 2, Completed: 3, Failed: 4 } as const;
+
 export interface RowError {
   row: number;
   message: string;

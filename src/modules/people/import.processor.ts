@@ -24,6 +24,7 @@ import {
   IMPORT_COUNTRY_CODE,
   IMPORT_RELATION,
   MAX_ROW_ERRORS,
+  RunStatus,
   SectionIndex,
   checkRow,
   type ImportedStudent,
@@ -97,7 +98,7 @@ export class ImportProcessor implements JobHandler, OnModuleInit {
           this.runs.find(tx, importRunId),
         );
         // A run that is settled already (the job was claimed again after the last batch) or swept has nothing left.
-        if (run === undefined || run.run_status > 2) return;
+        if (run === undefined || run.run_status > RunStatus.Running) return;
         await this.process(run, context, by, lease);
       },
     );
@@ -142,7 +143,7 @@ export class ImportProcessor implements JobHandler, OnModuleInit {
       );
       return;
     }
-    if (run.run_status === 1) {
+    if (run.run_status === RunStatus.Queued) {
       await this.database.transaction(context.tenant, (tx) =>
         this.runs.start(tx, run.id, rows.length, this.clock.now()),
       );
@@ -168,7 +169,7 @@ export class ImportProcessor implements JobHandler, OnModuleInit {
     const settled = await this.database.transaction(context.tenant, async (tx) => {
       const run = await this.runs.findForUpdate(tx, runId);
       // Another worker has moved the run on since this one claimed it: the lease was lost.
-      if (run === undefined || run.run_status > 2 || run.processed_rows !== done) {
+      if (run === undefined || run.run_status > RunStatus.Running || run.processed_rows !== done) {
         throw new JobLeaseLost();
       }
       const index = new SectionIndex(await this.sections.openOf(tx, context.institutionId));

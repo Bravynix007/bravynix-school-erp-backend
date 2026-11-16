@@ -40,7 +40,7 @@ export class JobRunner {
     const handler = this.registry.handlerFor(job.kind);
     if (!handler) {
       this.logger.error({ jobId: job.id, kind: job.kind }, 'No handler for this kind of job');
-      await this.jobs.settle(job.id, false, NO_HANDLER);
+      await this.jobs.settle(job.id, job.attempts, false, NO_HANDLER);
     } else if (job.attempts > MAX_ATTEMPTS) {
       await this.giveUp(handler, job, ATTEMPTS_EXHAUSTED);
     } else {
@@ -66,7 +66,8 @@ export class JobRunner {
   private async run(handler: JobHandler, job: ClaimedJob): Promise<void> {
     const lease: JobLease = {
       keep: async () => {
-        if (!(await this.jobs.extend(job.id, LEASE_SECONDS))) throw new JobLeaseLost();
+        if (!(await this.jobs.extend(job.id, job.attempts, LEASE_SECONDS)))
+          throw new JobLeaseLost();
       },
     };
     try {
@@ -79,17 +80,17 @@ export class JobRunner {
       const reason = failureOf(error);
       this.logger.error({ err: error, jobId: job.id, kind: job.kind }, 'A job stopped');
       if (job.attempts >= MAX_ATTEMPTS) await this.giveUp(handler, job, reason);
-      else await this.jobs.retry(job.id, retryDelaySeconds(job.attempts), reason);
+      else await this.jobs.retry(job.id, job.attempts, retryDelaySeconds(job.attempts), reason);
       return;
     }
-    await this.jobs.settle(job.id, true, null);
+    await this.jobs.settle(job.id, job.attempts, true, null);
   }
 
   private async giveUp(handler: JobHandler, job: ClaimedJob, reason: string): Promise<void> {
     try {
       await handler.fail(job, reason);
     } finally {
-      await this.jobs.settle(job.id, false, reason);
+      await this.jobs.settle(job.id, job.attempts, false, reason);
     }
   }
 }

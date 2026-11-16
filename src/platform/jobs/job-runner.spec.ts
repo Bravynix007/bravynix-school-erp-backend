@@ -18,8 +18,8 @@ function build(claimed: ClaimedJob | undefined, handler?: Partial<JobHandler>, e
   const repository = {
     claim: vi.fn<JobsRepository['claim']>().mockResolvedValue(claimed),
     extend: vi.fn<JobsRepository['extend']>().mockResolvedValue(extended),
-    settle: vi.fn<JobsRepository['settle']>().mockResolvedValue(undefined),
-    retry: vi.fn<JobsRepository['retry']>().mockResolvedValue(undefined),
+    settle: vi.fn<JobsRepository['settle']>().mockResolvedValue(true),
+    retry: vi.fn<JobsRepository['retry']>().mockResolvedValue(true),
   };
   const registry = new JobRegistry();
   const full: JobHandler = {
@@ -50,20 +50,20 @@ describe('JobRunner.runNext', () => {
       job(),
       expect.objectContaining({ keep: expect.any(Function) }),
     );
-    expect(repository.settle).toHaveBeenCalledWith('job-1', true, null);
+    expect(repository.settle).toHaveBeenCalledWith('job-1', 1, true, null);
   });
 
   it('fails a job nobody handles, with a code', async () => {
     const { runner, repository } = build(job({ kind: 'other.work' }));
     await runner.runNext();
-    expect(repository.settle).toHaveBeenCalledWith('job-1', false, 'NO_HANDLER');
+    expect(repository.settle).toHaveBeenCalledWith('job-1', 1, false, 'NO_HANDLER');
   });
 
   it('queues the job again after a pause when the handler stops on a fault, keeping a code and not the text', async () => {
     const run = vi.fn<JobHandler['run']>().mockRejectedValue(new TypeError('person@example.test'));
     const { runner, repository } = build(job({ attempts: 2 }), { run });
     await runner.runNext();
-    expect(repository.retry).toHaveBeenCalledWith('job-1', retryDelaySeconds(2), 'TypeError');
+    expect(repository.retry).toHaveBeenCalledWith('job-1', 2, retryDelaySeconds(2), 'TypeError');
     expect(repository.settle).not.toHaveBeenCalled();
   });
 
@@ -72,7 +72,7 @@ describe('JobRunner.runNext', () => {
     const { runner, repository, handler } = build(job({ attempts: MAX_ATTEMPTS }), { run });
     await runner.runNext();
     expect(handler.fail).toHaveBeenCalledWith(job({ attempts: MAX_ATTEMPTS }), 'Error');
-    expect(repository.settle).toHaveBeenCalledWith('job-1', false, 'Error');
+    expect(repository.settle).toHaveBeenCalledWith('job-1', MAX_ATTEMPTS, false, 'Error');
     expect(repository.retry).not.toHaveBeenCalled();
   });
 
@@ -81,14 +81,24 @@ describe('JobRunner.runNext', () => {
     await runner.runNext();
     expect(handler.run).not.toHaveBeenCalled();
     expect(handler.fail).toHaveBeenCalledWith(expect.anything(), 'ATTEMPTS_EXHAUSTED');
-    expect(repository.settle).toHaveBeenCalledWith('job-1', false, 'ATTEMPTS_EXHAUSTED');
+    expect(repository.settle).toHaveBeenCalledWith(
+      'job-1',
+      MAX_ATTEMPTS + 1,
+      false,
+      'ATTEMPTS_EXHAUSTED',
+    );
   });
 
   it('still fails the job when the handler cannot settle its record', async () => {
     const fail = vi.fn<JobHandler['fail']>().mockRejectedValue(new Error('down'));
     const { runner, repository } = build(job({ attempts: MAX_ATTEMPTS + 1 }), { fail });
     await expect(runner.runNext()).rejects.toThrow('down');
-    expect(repository.settle).toHaveBeenCalledWith('job-1', false, 'ATTEMPTS_EXHAUSTED');
+    expect(repository.settle).toHaveBeenCalledWith(
+      'job-1',
+      MAX_ATTEMPTS + 1,
+      false,
+      'ATTEMPTS_EXHAUSTED',
+    );
   });
 
   it('leaves a job alone when its lease was lost to another worker', async () => {
@@ -111,7 +121,8 @@ describe('JobRunner.runNext', () => {
     const kept = build(job(), { run }, true);
     await kept.runner.runNext();
     await expect(lease!.keep()).resolves.toBeUndefined();
-    expect(kept.repository.extend).toHaveBeenCalledWith('job-1', expect.any(Number));
+    // The lease is asked for under the claim number the worker was given.
+    expect(kept.repository.extend).toHaveBeenCalledWith('job-1', 1, expect.any(Number));
   });
 });
 
@@ -121,7 +132,7 @@ describe('JobRunner.runUntil', () => {
     const { runner, repository } = build(job());
     repository.settle.mockImplementation(() => {
       controller.abort();
-      return Promise.resolve();
+      return Promise.resolve(true);
     });
     await runner.runUntil(controller.signal);
     expect(repository.claim).toHaveBeenCalledTimes(1);

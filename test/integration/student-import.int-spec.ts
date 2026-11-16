@@ -754,6 +754,32 @@ describe('student CSV import', () => {
       }
     });
 
+    it('lets only the worker that holds the claim extend, settle or requeue a job, once another has taken it over', async () => {
+      const queue = t.app.get(JobsRepository);
+      await sql`insert into jobs (society_id, institution_id, kind) values (${societyId}, ${first}, 'test.fence')`.execute(
+        ownerDb,
+      );
+      const a = await queue.claim(60);
+      expect(a).toMatchObject({ kind: 'test.fence', attempts: 1 });
+      // A's lease runs out and B takes the job over.
+      await changeJobs(ownerDb, societyId, sql`locked_until = now() - interval '1 second'`);
+      const b = await queue.claim(60);
+      expect([b?.id, b?.attempts]).toEqual([a!.id, 2]);
+      // A is told it lost the job, and changes nothing of it.
+      expect(await queue.extend(a!.id, 1, 60)).toBe(false);
+      expect(await queue.retry(a!.id, 1, 30, 'Error')).toBe(false);
+      expect(await queue.settle(a!.id, 1, true, null)).toBe(false);
+      expect(await readJobs(ownerDb, societyId, 'test.fence')).toMatchObject([
+        { job_status: 2, attempts: 2, last_error: null },
+      ]);
+      // B still holds it: it can extend, and then end it.
+      expect(await queue.extend(a!.id, 2, 60)).toBe(true);
+      expect(await queue.settle(a!.id, 2, true, null)).toBe(true);
+      expect(await readJobs(ownerDb, societyId, 'test.fence')).toMatchObject([{ job_status: 3 }]);
+      // Nothing of a settled job can be changed again.
+      expect(await queue.retry(a!.id, 2, 30, 'Error')).toBe(false);
+    });
+
     it('refuses a job for another Society or another Institution of the caller’s Society', async () => {
       const tenant = { personId: owner.person, roleCode: 2, societyId, institutionIds: [first] };
       await expect(
