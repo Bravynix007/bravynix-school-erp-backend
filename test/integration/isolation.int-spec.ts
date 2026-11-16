@@ -5,6 +5,7 @@ import { DatabaseService, type TenantContext } from '../../src/platform/database
 import { createPool } from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
 import { writeAcademicSeed } from '../../src/seeds/academic-seed.js';
+import { writeEventsSeed } from '../../src/seeds/events-seed.js';
 import { writeNotificationsSeed } from '../../src/seeds/notifications-seed.js';
 import { writeFilesSeed } from '../../src/seeds/files-seed.js';
 import {
@@ -143,6 +144,7 @@ describe('tenant isolation', () => {
     await writeStaffSeed(ownerDb);
     await writeStudentSeed(ownerDb);
     await writeNotificationsSeed(ownerDb);
+    await writeEventsSeed(ownerDb);
     await clearLoginState(ownerDb);
     // Role 3 grants need a staff record, which arrives with the People module.
     for (const caller of Object.values(callers)) {
@@ -204,6 +206,8 @@ describe('tenant isolation', () => {
         'class_teacher_assignments',
         'classes',
         'documents',
+        'event_holiday_classes',
+        'events',
         'files',
         'import_runs',
         'inbox_items',

@@ -109,8 +109,11 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`alter table event_holiday_classes force row level security`.execute(db);
   // Read and written as far as the event is: the subquery reads `events` under its own policies, and none of them reads this table.
   const ofVisibleEvent = sql`
-    society_id = app_current_society_id()
-    and exists (select 1 from events e where e.id = event_id and e.society_id = society_id)
+    event_holiday_classes.society_id = app_current_society_id()
+    and exists (
+      select 1 from events e
+      where e.id = event_holiday_classes.event_id and e.society_id = event_holiday_classes.society_id
+    )
   `;
   await sql`
     create policy event_holiday_classes_select on event_holiday_classes for select using (${ofVisibleEvent})

@@ -63,19 +63,6 @@ function auditView(row: EventRow, classIds: readonly string[]): AuditValues {
   };
 }
 
-/** The holiday rules look at the stored row as they look at a request. */
-function fieldsOf(row: EventRow, classIds: readonly string[]): EventFields {
-  return {
-    startDate: row.start_date,
-    endDate: row.end_date,
-    isHoliday: row.is_holiday,
-    holidayType: row.holiday_type,
-    holidayForStudents: row.holiday_for_students,
-    holidayForStaff: row.holiday_for_staff,
-    holidayPredefinedClassIds: classIds,
-  };
-}
-
 const sameSet = (a: readonly string[], b: readonly string[]) =>
   a.length === b.length && a.every((id) => b.includes(id));
 
@@ -114,7 +101,13 @@ export class EventService {
         holidaysOnly: query.holidays === true,
         audiences: visibleAudiences(principal.roleCode),
       });
-      return { rows: found, classes: await this.events.classesOf(tx, found.map((row) => row.id)) };
+      return {
+        rows: found,
+        classes: await this.events.classesOf(
+          tx,
+          found.map((row) => row.id),
+        ),
+      };
     });
     const people = await this.people.describe(authorIdsOf(rows));
     return ApiResult.list(
@@ -128,7 +121,11 @@ export class EventService {
     const { tenant } = await this.societyOf(principal);
     const found = await this.database.transaction(tenant, async (tx) => {
       const row = await this.events.find(tx, id);
-      if (!row || row.status === 0 || !visibleAudiences(principal.roleCode).includes(row.audience)) {
+      if (
+        !row ||
+        row.status === 0 ||
+        !visibleAudiences(principal.roleCode).includes(row.audience)
+      ) {
         throw AppException.notFound();
       }
       return { row, classIds: (await this.events.classesOf(tx, [id])).get(id) ?? [] };
@@ -173,7 +170,7 @@ export class EventService {
       await this.record(tx, 'event.created', row, {
         after: auditView(row, fields.holidayPredefinedClassIds),
       });
-      return { row, classIds: [...fields.holidayPredefinedClassIds] };
+      return { row, classIds: fields.holidayPredefinedClassIds.toSorted() };
     });
     return this.resource(principal, created.row, created.classIds);
   }
@@ -186,9 +183,7 @@ export class EventService {
   async update(principal: Principal, id: string, body: UpdateEventDto): Promise<EventResource> {
     const { tenant } = await this.societyOf(principal);
     const result = await this.database.transaction(tenant, async (tx) => {
-      const current = await this.lockedActive(tx, id);
-      requireVersion(current, body.version);
-      this.requireMayEdit(principal, current);
+      const current = await this.lockedForChange(tx, id, principal, body.version);
       const currentClasses = (await this.events.classesOf(tx, [id])).get(id) ?? [];
       const notHoliday = body.isHoliday === false;
       const fields: EventFields = {
@@ -236,13 +231,18 @@ export class EventService {
         ...updateStamp(principal.personId),
       });
       if (classesChanged) {
-        await this.events.replaceClasses(tx, id, updated.society_id, fields.holidayPredefinedClassIds);
+        await this.events.replaceClasses(
+          tx,
+          id,
+          updated.society_id,
+          fields.holidayPredefinedClassIds,
+        );
       }
       await this.record(tx, 'event.updated', updated, {
         before: auditView(current, currentClasses),
         after: auditView(updated, fields.holidayPredefinedClassIds),
       });
-      return { row: updated, classIds: [...fields.holidayPredefinedClassIds] };
+      return { row: updated, classIds: fields.holidayPredefinedClassIds.toSorted() };
     });
     return this.resource(principal, result.row, result.classIds);
   }
@@ -251,8 +251,7 @@ export class EventService {
   async deactivate(principal: Principal, id: string): Promise<{ id: string; status: 0 }> {
     const { tenant } = await this.societyOf(principal);
     await this.database.transaction(tenant, async (tx) => {
-      const current = await this.lockedActive(tx, id);
-      this.requireMayEdit(principal, current);
+      const current = await this.lockedForChange(tx, id, principal);
       const classIds = (await this.events.classesOf(tx, [id])).get(id) ?? [];
       const updated = await this.events.update(tx, id, {
         status: 0,
@@ -278,7 +277,7 @@ export class EventService {
     checkScope(body.scope, body.institutionId);
     const { tenant } = await this.societyOf(principal);
     const result = await this.database.transaction(tenant, async (tx) => {
-      const current = await this.lockedActive(tx, id);
+      const current = await this.activeRow(tx, id, true);
       requireVersion(current, body.version);
       const classIds = (await this.events.classesOf(tx, [id])).get(id) ?? [];
       const institutionId = body.scope === EventScope.Institution ? body.institutionId! : null;
@@ -358,7 +357,9 @@ export class EventService {
     return this.societyOf(principal);
   }
 
-  private async societyOf(principal: Principal): Promise<{ tenant: TenantContext; societyId: string }> {
+  private async societyOf(
+    principal: Principal,
+  ): Promise<{ tenant: TenantContext; societyId: string }> {
     const scope = await this.scopes.forPrincipal(principal);
     if (scope.societyId === null) throw AppException.forbidden();
     return { tenant: scope.tenant, societyId: scope.societyId };
@@ -371,10 +372,31 @@ export class EventService {
     }
   }
 
-  /** The event, locked for the change; 404 when another Society's or an Institution out of scope (the database hides it), gone or deactivated. */
-  private async lockedActive(tx: Tx, id: string): Promise<EventRow> {
-    const row = await this.events.find(tx, id, true);
+  /** The active event, locked when it is about to change; 404 when another Society's or an Institution out of scope (the database hides it), gone or deactivated. */
+  private async activeRow(tx: Tx, id: string, lock = false): Promise<EventRow> {
+    const row = await this.events.find(tx, id, lock);
     if (!row || row.status === 0) throw AppException.notFound();
+    return row;
+  }
+
+  /**
+   * The event an EVT-04 or EVT-05 changes, once the caller may: the `version` (when sent) first, then who may change it.
+   * It is read before it is locked, because a lock needs the right to update and an Admin who may not would otherwise
+   * be told 404 for a Society event they can see; what is locked is checked again.
+   */
+  private async lockedForChange(
+    tx: Tx,
+    id: string,
+    principal: Principal,
+    version?: number,
+  ): Promise<EventRow> {
+    const check = (row: EventRow) => {
+      if (version !== undefined) requireVersion(row, version);
+      this.requireMayEdit(principal, row);
+    };
+    check(await this.activeRow(tx, id));
+    const row = await this.activeRow(tx, id, true);
+    check(row);
     return row;
   }
 
@@ -407,7 +429,4 @@ export class EventService {
       ...values,
     });
   }
-
-  // `fieldsOf` keeps the stored row and a request in one shape for the rules.
-  static readonly fieldsOf = fieldsOf;
 }

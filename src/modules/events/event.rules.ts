@@ -17,7 +17,7 @@ export const HOLIDAY_TYPES = [1, 2, 3, 4] as const;
 
 /**
  * The preset pictures the app ships for an event with no upload of its own; the app maps each code to its image.
- * A code outside this list is 400 `INVALID_VALUE` (API design 10.26).
+ * A code outside this list is 400 `INVALID_CODE` (API design 10.26, 13.x code lists).
  */
 export const PRESET_IMAGES = [
   'assembly',

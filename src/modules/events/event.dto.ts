@@ -27,7 +27,10 @@ import {
 
 /** EVT-01 query: a span of dates, or an academic year of an Institution; optionally holidays only. */
 export class ListEventsQueryDto {
-  @ApiPropertyOptional({ format: 'date', description: 'First day; with `to`, or use `academicYearId`' })
+  @ApiPropertyOptional({
+    format: 'date',
+    description: 'First day; with `to`, or use `academicYearId`',
+  })
   @IsOptional()
   @IsCalendarDate()
   from?: string;
@@ -94,13 +97,20 @@ class EventFieldsDto {
   @MaxLength(200)
   venue?: string | null;
 
-  @ApiPropertyOptional({ enum: AUDIENCES, description: '1 Everyone (default), 2 Students and parents, 3 Staff' })
+  @ApiPropertyOptional({
+    enum: AUDIENCES,
+    description: '1 Everyone (default), 2 Students and parents, 3 Staff',
+  })
   @IsOptional()
   @IsInt()
   @IsIn(AUDIENCES)
   audience?: number;
 
-  @ApiPropertyOptional({ nullable: true, enum: PRESET_IMAGES, description: 'A picture the app ships' })
+  @ApiPropertyOptional({
+    nullable: true,
+    enum: PRESET_IMAGES,
+    description: 'A picture the app ships',
+  })
   @IsOptional()
   @IsString()
   @IsIn(PRESET_IMAGES)
