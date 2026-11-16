@@ -235,7 +235,7 @@ describe('staff access: block, subjects and extra Institutions', () => {
 
       // They can still sign in; the context says it is blocked and cannot be chosen.
       const again = await signInMobile(t, staff.person.email);
-      expect(again.contexts).toEqual([
+      expect(again.contexts).toMatchObject([
         { roleCode: TEACHER, societyId: societyA, societyName: 'Sunrise Trust', isBlocked: true },
       ]);
       const refused = await api('post', '/v1/auth/context', again.accessToken, {
@@ -555,7 +555,7 @@ describe('staff access: block, subjects and extra Institutions', () => {
 
       // The home Institution is stopped, the extra one is not: the context is open and works where it can.
       const { token, login } = await actingAs(staff.person.email, TEACHER);
-      expect(login.contexts).toEqual([
+      expect(login.contexts).toMatchObject([
         { roleCode: TEACHER, societyId: societyA, societyName: 'Sunrise Trust', isBlocked: false },
       ]);
       expect((await asTeacherReads(token, second)).status).toBe(200);

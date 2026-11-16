@@ -119,16 +119,23 @@ describe('the teacher signs in from the staff record', () => {
   it('lists the Teacher context with the Society’s name, and starts the session in it', async () => {
     const staff = await addTeacher();
     const login = await signInMobile(t, staff.person.email);
-    expect(login.contexts).toEqual([
-      { roleCode: TEACHER, societyId: societyA, societyName: 'Sunrise Trust', isBlocked: false },
-    ]);
-    expect(login.session.activeContext).toMatchObject({ roleCode: TEACHER, societyId: societyA });
+    // API design 10.2: the context names the staff record and its home Institution, so the app can open "My details".
+    const context = {
+      roleCode: TEACHER,
+      societyId: societyA,
+      societyName: 'Sunrise Trust',
+      isBlocked: false,
+      staffMemberId: staff.id,
+      homeInstitutionId: first,
+    };
+    expect(login.contexts).toEqual([context]);
+    expect(login.session.activeContext).toEqual(context);
     const me = await api('get', '/v1/me', login.accessToken);
     expect(me.status).toBe(200);
     expect(me.body.data).toMatchObject({
       userType: TEACHER,
-      session: { activeContext: { roleCode: TEACHER } },
-      contexts: [{ roleCode: TEACHER, societyId: societyA }],
+      session: { activeContext: context },
+      contexts: [context],
     });
   });
 

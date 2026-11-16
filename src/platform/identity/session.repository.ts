@@ -18,6 +18,8 @@ export interface Grant {
    * and the Teacher / Staff role there, and nothing else.
    */
   accessBlocked: boolean;
+  /** The person's staff record in this Society: set on the Teacher / Staff entry, which comes from that record. */
+  staffMemberId?: string;
 }
 
 export interface NewSession {
@@ -121,6 +123,7 @@ export class SessionRepository {
       home_institution_id: string;
       society_name: string | null;
       staff_blocked: boolean;
+      staff_member_id: string;
       access_blocked: boolean;
     }>`select r.*, app_staff_blocked(r.society_id, ${userId}::uuid) as access_blocked
       from app_staff_roles(${userId}) r`.execute(db);
@@ -132,6 +135,7 @@ export class SessionRepository {
       ownersBlocked: false,
       staffBlocked: row.staff_blocked,
       accessBlocked: row.access_blocked,
+      staffMemberId: row.staff_member_id,
     }));
   }
 
