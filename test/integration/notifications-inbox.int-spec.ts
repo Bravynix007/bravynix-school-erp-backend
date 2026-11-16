@@ -349,6 +349,33 @@ describe('the inbox and the push device', () => {
       expect(await devices()).toHaveLength(0);
     });
 
+    it('is removed when its session ends by AUTH-07 logout, and only that session’s', async () => {
+      await register(deviceBody('a'));
+      const secondLogin = await signInMobile(t, other.email);
+      await register(deviceBody('b'), secondLogin.accessToken);
+      expect((await api('post', '/v1/auth/logout', me.token, {})).status).toBe(200);
+      expect((await devices()).map((d) => d.fcm_token)).toEqual(['test-token-b']);
+    });
+
+    it('is removed when every session ends by AUTH-08 logout of all', async () => {
+      const secondLogin = await signInMobile(t, other.email);
+      await register(deviceBody('b'), secondLogin.accessToken);
+      expect((await api('post', '/v1/auth/logout-all', secondLogin.accessToken, {})).status).toBe(
+        200,
+      );
+      expect(await devices()).toEqual([]);
+    });
+
+    it('is removed whatever ends the session, and stays while the session lives', async () => {
+      await register(deviceBody('a'));
+      const [device] = await devices();
+      expect(device).toBeDefined();
+      await sql`update auth_sessions set ended_at = now(), end_reason = 4 where id = ${device!.session_id}`.execute(
+        ownerDb,
+      );
+      expect(await devices()).toEqual([]);
+    });
+
     it('checks the body, and is for a phone: a console session is 403', async () => {
       for (const bad of [
         {},
