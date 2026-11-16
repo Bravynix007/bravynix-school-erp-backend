@@ -322,6 +322,20 @@ describe('student CSV import', () => {
       expect((await start(two)).status).toBe(202);
     });
 
+    it('refuses a second import while the first is still running, not only while it is queued', async () => {
+      const rows = Array.from({ length: 150 }, (_v, i) => row(`Pupil ${i + 1}`, String(i + 1)));
+      const running = await start(await readyFile(csv(...rows)));
+      const jobs = t.app.get(JobsRepository);
+      // The worker saves one batch and loses its lease, which leaves the run Running.
+      vi.spyOn(jobs, 'extend').mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+      await runner.runNext();
+      vi.restoreAllMocks();
+      expect((await status(running.body.data.importId as string)).runStatus).toBe(2);
+
+      const refused = await start(await readyFile(csv(row('C D', '200'))));
+      expect([refused.status, refused.body.code]).toEqual([409, 'IMPORT_ALREADY_RUNNING']);
+    });
+
     it('lets two Institutions import at once', async () => {
       const one = await readyFile(csv(row('A B', '1')));
       const other = await readyFile(csv(row('C D', '2')), { institutionId: second });
@@ -447,6 +461,13 @@ describe('student CSV import', () => {
       ]);
       const found = await students();
       expect(found.map((s) => s.firstName).toSorted()).toEqual(['Asha Devi', 'Kabir', 'Tia']);
+    });
+
+    it('imports a file that starts with a byte order mark, as Excel saves "CSV UTF-8"', async () => {
+      const bytes = Buffer.concat([Buffer.from('\ufeff'), csv(row('Asha Rao', '1'))]);
+      const run = await importFile(bytes);
+      expect(run).toMatchObject({ runStatus: 3, result: { importedRows: 1, skippedRows: 0 } });
+      expect(await studentCount()).toBe(1);
     });
 
     it('makes each student as STU-02 does: placed, one primary guardian of relation 3 with phone code 91, no mobile of their own', async () => {

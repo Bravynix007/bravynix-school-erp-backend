@@ -36,8 +36,6 @@ export interface CsvRow {
   cells: string[];
 }
 
-const BYTE_ORDER_MARK = '﻿';
-
 /**
  * Splits the text into records by RFC 4180: a cell may be quoted to hold a comma, a quote (doubled) or a line break,
  * and a record ends at a line break outside quotes. A record that is empty is dropped; the rows after it keep their
@@ -104,11 +102,11 @@ const isBlank = (cells: readonly string[]): boolean => cells.every((cell) => cel
 export function readStudentCsv(file: Buffer): CsvRow[] {
   let text: string;
   try {
+    // The decoder drops a byte order mark (Excel saves "CSV UTF-8" with one) unless told to keep it.
     text = new TextDecoder('utf-8', { fatal: true }).decode(file);
   } catch {
     throw new CsvRejected(CsvFailure.Unreadable);
   }
-  if (text.startsWith(BYTE_ORDER_MARK)) text = text.slice(1);
   const [header, ...records] = parseCsv(text);
   if (
     header === undefined ||

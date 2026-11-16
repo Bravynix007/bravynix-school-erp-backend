@@ -86,6 +86,15 @@ describe('readStudentCsv', () => {
     expect(readStudentCsv(Buffer.from(`﻿${header}\r\n`))).toEqual([]);
   });
 
+  it('reads the rows of a file that starts with a byte order mark, as Excel saves "CSV UTF-8"', () => {
+    const rows = readStudentCsv(
+      Buffer.from(`﻿${header}\r\nAsha Rao,1,5th,A,Meera Rao,9876543210,\r\n`),
+    );
+    expect(rows).toEqual([
+      { row: 2, cells: ['Asha Rao', '1', '5th', 'A', 'Meera Rao', '9876543210', ''] },
+    ]);
+  });
+
   it.each([
     ['an empty file', ''],
     ['a different order', 'RollNumber,Name,Class,Section,GuardianName,GuardianPhone,GuardianEmail'],
