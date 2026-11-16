@@ -11,7 +11,7 @@ import type { Tx } from '../database/index.js';
 import type { InboxItemsTable, PushDevicesTable } from './notifications.tables.js';
 
 /** The unread count stops here: the bell shows "9+" (DDD 9.8). */
-export const UNREAD_CAP = 10;
+const UNREAD_CAP = 10;
 
 /** One inbox row as a page reads it, with its position for the next cursor. */
 export type InboxRow = Pick<

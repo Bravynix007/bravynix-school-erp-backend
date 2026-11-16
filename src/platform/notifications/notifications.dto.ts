@@ -16,7 +16,7 @@ import { DEFAULT_LIMIT, MAX_LIMIT } from '../../common/pagination/pagination.js'
 import { LowerCaseUuid } from '../../common/validation/lower-case-uuid.js';
 
 /** 1 Only for you, 2 All, 3 All teachers, 4 All students (DDD 9.8). */
-export const INBOX_TABS = [1, 2, 3, 4] as const;
+const INBOX_TABS = [1, 2, 3, 4] as const;
 export type InboxTab = (typeof INBOX_TABS)[number];
 
 /** The tab a request names, when it names one. A query value is a string, so it takes the number transform. */
