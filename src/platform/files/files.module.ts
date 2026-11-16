@@ -27,7 +27,7 @@ import { ObjectStorage } from './object-storage.js';
     { provide: ObjectStorage, useExisting: LocalObjectStorage },
   ],
   controllers: [FilesController],
-  exports: [FilesService, FileDirectory],
+  exports: [FilesService, FileDirectory, ObjectStorage],
 })
 export class FilesModule implements NestModule {
   constructor(private readonly storage: LocalObjectStorage) {}

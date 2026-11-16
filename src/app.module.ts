@@ -19,6 +19,7 @@ import { IdentityNumbersModule } from './platform/identity-numbers/index.js';
 import { IdempotencyModule } from './platform/idempotency/idempotency.module.js';
 import { IdentityModule } from './platform/identity/identity.module.js';
 import { JobsModule } from './platform/jobs/index.js';
+import { SweepsModule } from './platform/sweeps/index.js';
 import { MastersModule } from './platform/masters/index.js';
 import { NumberingModule } from './platform/numbering/numbering.module.js';
 import { TenancyModule } from './platform/tenancy/tenancy.module.js';
@@ -77,6 +78,7 @@ import { TenancyModule } from './platform/tenancy/tenancy.module.js';
     NumberingModule,
     FilesModule,
     JobsModule,
+    SweepsModule,
     IdentityNumbersModule,
     HealthModule,
     // Platform modules (Notifications) are registered here as they are built.
