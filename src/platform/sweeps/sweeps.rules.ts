@@ -10,6 +10,12 @@ export const UNREFERENCED_GRACE_HOURS = 24;
 /** Days an import run is kept after it finished (API design 16.3); its file goes with it (DDD 16.2). */
 export const IMPORT_RUN_DAYS = 7;
 
+/** Days a notice is kept in an inbox before its month's partition is dropped whole (DDD 9.8). */
+export const INBOX_KEEP_DAYS = 180;
+
+/** Months after this one whose partitions of the inboxes are made ahead (DDD 14.5). */
+export const PARTITIONS_AHEAD = 3;
+
 /** How many files are removed in one look at the list of those that are due. */
 export const FILE_BATCH = 100;
 
