@@ -9,6 +9,7 @@ import { UuidParamPipe } from '../../common/http/uuid-param.pipe.js';
 import {
   ChangeEventScopeDto,
   CreateEventDto,
+  GetEventQueryDto,
   ListEventsQueryDto,
   UpdateEventDto,
 } from './event.dto.js';
@@ -24,10 +25,10 @@ export class EventController {
   constructor(private readonly events: EventService) {}
 
   @Policy({
-    roles: [...WRITERS, RoleCode.TeacherStaff],
+    roles: [...WRITERS, RoleCode.TeacherStaff, RoleCode.StudentParent],
     scope: 'society',
     operationId: 'EVT-01',
-    rule: 'The active events with a day in `from` to `to` (at most 366 days, 400 RANGE_TOO_LARGE) or in an academic year of an Institution, earliest first: the Society’s and the caller’s Institutions’ events, for the audiences the role is told about (teachers and staff: everyone and staff); `holidays` keeps holidays only',
+    rule: 'The active events with a day in `from` to `to` (at most 366 days, 400 RANGE_TOO_LARGE) or in an academic year of an Institution, earliest first: the Society’s and the caller’s Institutions’ events, for the audiences the role is told about (teachers and staff: everyone and staff); `holidays` keeps holidays only; a parent names their own child with `studentId` (404 for any other, 403 CHILD_ACCESS_BLOCKED for a blocked one), reads dates only, and is told of events for everyone and for students and parents, and of holidays for students',
   })
   @Get()
   list(
@@ -52,17 +53,18 @@ export class EventController {
   }
 
   @Policy({
-    roles: [...WRITERS, RoleCode.TeacherStaff],
+    roles: [...WRITERS, RoleCode.TeacherStaff, RoleCode.StudentParent],
     scope: 'society',
     operationId: 'EVT-03',
-    rule: 'One active event of the Society or an Institution the caller reaches, for an audience their role is told about; any other is 404',
+    rule: 'One active event of the Society or an Institution the caller reaches, for an audience their role is told about; any other is 404; a parent names their own child with `studentId` and reads what that child’s Society and Institution hold for parents',
   })
   @Get(':eventId')
   get(
     @CurrentPrincipal() principal: Principal,
     @Param('eventId', UuidParamPipe) eventId: string,
+    @Query() query: GetEventQueryDto,
   ): Promise<EventResource> {
-    return this.events.get(principal, eventId);
+    return this.events.get(principal, eventId, query);
   }
 
   @Policy({

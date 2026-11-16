@@ -103,3 +103,25 @@ describe('StaffRepository.activeHomeIds', () => {
     expect(queries[0]!.parameters).toEqual([1]);
   });
 });
+
+describe('StaffRepository.activeUserIds', () => {
+  const repository = new StaffRepository();
+
+  it('reads the active staff of the whole Society, each person once, for no Institution', async () => {
+    const { tx, queries } = recorder();
+    expect(await repository.activeUserIds(tx, null)).toEqual([]);
+    expect(queries[0]!.sql).toMatch(
+      /^select distinct "user_id" from "staff_members" where "status" = \$1$/,
+    );
+    expect(queries[0]!.parameters).toEqual([1]);
+  });
+
+  it('reads those who work at one Institution, as their home or as an extra one', async () => {
+    const { tx, queries } = recorder();
+    await repository.activeUserIds(tx, 'institution-1');
+    expect(queries[0]!.sql).toContain(
+      '("home_institution_id" = $2 or "id" in (select "staff_member_id" from "staff_institutions" where "institution_id" = $3))',
+    );
+    expect(queries[0]!.parameters).toEqual([1, 'institution-1', 'institution-1']);
+  });
+});

@@ -2,6 +2,7 @@ import { body, problems } from '../../../test/support/dto-validation.js';
 import {
   ChangeEventScopeDto,
   CreateEventDto,
+  GetEventQueryDto,
   ListEventsQueryDto,
   UpdateEventDto,
 } from './event.dto.js';
@@ -161,8 +162,9 @@ describe('ListEventsQueryDto', () => {
       academicYearId: uuid.toUpperCase(),
       institutionId: uuid,
       holidays: 'true',
+      studentId: uuid.toUpperCase(),
     });
-    expect(parsed).toMatchObject({ academicYearId: uuid, holidays: true });
+    expect(parsed).toMatchObject({ academicYearId: uuid, holidays: true, studentId: uuid });
   });
 
   it.each([
@@ -171,7 +173,23 @@ describe('ListEventsQueryDto', () => {
     [{ academicYearId: 'nope' }, 'academicYearId', 'INVALID_FORMAT'],
     [{ institutionId: 'nope' }, 'institutionId', 'INVALID_FORMAT'],
     [{ holidays: 'maybe' }, 'holidays', 'INVALID_TYPE'],
+    [{ studentId: 'nope' }, 'studentId', 'INVALID_FORMAT'],
   ])('refuses %j', async (value, field, code) => {
     expect(await problems(body(ListEventsQueryDto, value))).toContainEqual({ field, code });
+  });
+});
+
+describe('GetEventQueryDto', () => {
+  it('takes the child of a parent, in lower case, and nothing else', async () => {
+    expect(await problems(body(GetEventQueryDto, {}))).toEqual([]);
+    expect((await body(GetEventQueryDto, { studentId: uuid.toUpperCase() })).studentId).toBe(uuid);
+    expect(await problems(body(GetEventQueryDto, { studentId: 'nope' }))).toContainEqual({
+      field: 'studentId',
+      code: 'INVALID_FORMAT',
+    });
+    expect(await problems(body(GetEventQueryDto, { institutionId: uuid }))).toContainEqual({
+      field: 'institutionId',
+      code: 'FIELD_NOT_ALLOWED',
+    });
   });
 });

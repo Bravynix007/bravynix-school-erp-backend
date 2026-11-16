@@ -31,3 +31,15 @@ describe('ClassRepository.orders', () => {
     expect(parameters).toEqual(['class-1', 'class-2']);
   });
 });
+
+describe('ClassRepository.idsOfPredefined', () => {
+  it('reads the active classes made from the predefined ones, and asks nothing for none', async () => {
+    const { tx, queries } = sqlRecorder();
+    expect(await new ClassRepository().idsOfPredefined(tx, ['p-1', 'p-2'])).toEqual([]);
+    expect(queries[0]!.sql).toContain('"status" = $1 and "predefined_class_id" in ($2, $3)');
+    expect(queries[0]!.parameters).toEqual([1, 'p-1', 'p-2']);
+    const none = sqlRecorder();
+    expect(await new ClassRepository().idsOfPredefined(none.tx, [])).toEqual([]);
+    expect(none.queries).toEqual([]);
+  });
+});

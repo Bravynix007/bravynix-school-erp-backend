@@ -65,3 +65,16 @@ describe('ClassDirectory.isBelow', () => {
     ).toBeUndefined();
   });
 });
+
+describe('ClassDirectory.ofPredefined', () => {
+  it('gives the classes made from the predefined ones as a set', async () => {
+    const idsOfPredefined = vi
+      .fn<ClassRepository['idsOfPredefined']>()
+      .mockResolvedValue(['class-1', 'class-2']);
+    const directory = new ClassDirectory({ idsOfPredefined } as unknown as ClassRepository);
+    expect(await directory.ofPredefined(tx, ['p-1', 'p-2'])).toEqual(
+      new Set(['class-1', 'class-2']),
+    );
+    expect(idsOfPredefined).toHaveBeenCalledWith(tx, ['p-1', 'p-2']);
+  });
+});

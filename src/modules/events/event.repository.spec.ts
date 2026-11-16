@@ -90,3 +90,12 @@ describe('EventRepository', () => {
     ]);
   });
 });
+
+describe('EventRepository.list for a parent', () => {
+  it('leaves out the holidays that are not for students', async () => {
+    const { tx, queries } = sqlRecorder();
+    await repository.list(tx, { ...filter, audiences: [1, 2], forStudents: true });
+    expect(queries[0]!.sql).toContain('("is_holiday" = $6 or "holiday_for_students" = $7)');
+    expect(queries[0]!.parameters.slice(-2)).toEqual([false, true]);
+  });
+});

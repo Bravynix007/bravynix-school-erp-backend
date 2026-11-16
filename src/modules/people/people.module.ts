@@ -1,4 +1,5 @@
 import { Global, Module } from '@nestjs/common';
+import { EventPeople } from '../events/index.js';
 import { AcademicSetupModule, SectionStudents, TeachingStaff } from '../academic-setup/index.js';
 import { FileReaders, FilesModule } from '../../platform/files/index.js';
 import { IdempotencyModule } from '../../platform/idempotency/index.js';
@@ -25,6 +26,7 @@ import { GuardianService } from './guardian.service.js';
 import { IdentityRepository } from './identity.repository.js';
 import { InstitutionAdminController } from './institution-admin.controller.js';
 import { InstitutionAdminService } from './institution-admin.service.js';
+import { PeopleEventPeople } from './people-event-people.js';
 import { PeopleFileReaders } from './people-file-readers.js';
 import { PeopleSectionStudents } from './people-section-students.js';
 import { PeopleTeachingStaff } from './people-teaching-staff.js';
@@ -102,7 +104,9 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
     { provide: SectionStudents, useExisting: PeopleSectionStudents },
     PeopleFileReaders,
     { provide: FileReaders, useExisting: PeopleFileReaders },
+    PeopleEventPeople,
+    { provide: EventPeople, useExisting: PeopleEventPeople },
   ],
-  exports: [TeachingStaff, SectionStudents, FileReaders],
+  exports: [TeachingStaff, SectionStudents, FileReaders, EventPeople],
 })
 export class PeopleModule {}

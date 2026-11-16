@@ -39,4 +39,12 @@ export class ClassDirectory {
     }
     return one.order < other.order;
   }
+
+  /**
+   * The active classes made from these predefined classes, across the Institutions the caller reaches: what a holiday
+   * "up to 8th Grade" covers in each of them. Empty for no predefined classes.
+   */
+  async ofPredefined(tx: Tx, predefinedClassIds: readonly string[]): Promise<ReadonlySet<string>> {
+    return new Set(await this.classes.idsOfPredefined(tx, predefinedClassIds));
+  }
 }

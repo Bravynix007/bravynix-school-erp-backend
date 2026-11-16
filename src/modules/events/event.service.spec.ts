@@ -5,7 +5,9 @@ import type { DatabaseService, TenantContext, Tx } from '../../platform/database
 import type { PersonDirectory } from '../../platform/identity/index.js';
 import type { MasterReferences } from '../../platform/masters/index.js';
 import type { InstitutionContext, ScopeService } from '../../platform/tenancy/index.js';
+import type { Notifications } from '../../platform/notifications/index.js';
 import type { AcademicYearDirectory } from '../academic-setup/index.js';
+import type { EventPeople } from './event-people.js';
 import type { CreateEventDto, UpdateEventDto } from './event.dto.js';
 import type { EventRepository, EventRow } from './event.repository.js';
 import { EventService } from './event.service.js';
@@ -29,6 +31,12 @@ const tenant: TenantContext = {
   societyId: 'society-1',
   institutionIds: ['inst-1', 'inst-2'],
 };
+const childTenantValue: TenantContext = {
+  personId: 'parent-9',
+  roleCode: 5,
+  childIds: ['child-1'],
+};
+const parent = principal(5);
 const narrowed: TenantContext = { ...tenant, institutionIds: ['inst-2'] };
 const context: InstitutionContext = {
   institutionId: 'inst-2',
@@ -119,6 +127,14 @@ function build(current: EventRow | null = event(), currentClasses: string[] = []
       ReturnType<AcademicYearDirectory['openYear']>
     >);
   const record = vi.fn<AuditService['record']>().mockResolvedValue('audit-1');
+  const notify = vi.fn<Notifications['notify']>().mockResolvedValue('job-1');
+  const staffUserIds = vi
+    .fn<EventPeople['staffUserIds']>()
+    .mockResolvedValue(['person-1', 'staff-1', 'staff-2']);
+  const parentUserIds = vi
+    .fn<EventPeople['parentUserIds']>()
+    .mockResolvedValue(['parent-1', 'staff-2']);
+  const childTenant = vi.fn<EventPeople['childTenant']>().mockResolvedValue(childTenantValue);
   const service = new EventService(
     { transaction } as unknown as DatabaseService,
     { list, find, insert, update, classesOf, replaceClasses } as unknown as EventRepository,
@@ -129,6 +145,8 @@ function build(current: EventRow | null = event(), currentClasses: string[] = []
       describe: vi.fn<PersonDirectory['describe']>().mockResolvedValue(new Map()),
     } as unknown as PersonDirectory,
     { record } as unknown as AuditService,
+    { notify } as unknown as Notifications,
+    { staffUserIds, parentUserIds, childTenant } as unknown as EventPeople,
   );
   return {
     service,
@@ -144,6 +162,10 @@ function build(current: EventRow | null = event(), currentClasses: string[] = []
     requireAllShown,
     openYear,
     record,
+    notify,
+    staffUserIds,
+    parentUserIds,
+    childTenant,
   };
 }
 
@@ -162,6 +184,7 @@ describe('EventService.list', () => {
       to: '2026-12-31',
       holidaysOnly: false,
       audiences: [1, 3],
+      forStudents: false,
     });
     expect(result.data).toHaveLength(1);
   });
@@ -533,5 +556,175 @@ describe('EventService.changeScope', () => {
     expect(
       await refusal(same.service.changeScope(owner, 'event-1', { version: 7, scope: 1 })),
     ).toMatchObject({ status: 409 });
+  });
+});
+
+describe('EventService, a parent’s reads', () => {
+  it('reads in the tenant of their child, for the audiences of parents, without holidays for staff alone', async () => {
+    const { service, list, childTenant, transaction, forPrincipal } = build();
+    await service.list(parent, { studentId: 'child-1', from: '2026-12-01', to: '2026-12-31' });
+    expect(childTenant).toHaveBeenCalledWith(parent, 'child-1');
+    expect(forPrincipal).not.toHaveBeenCalled();
+    expect(transaction).toHaveBeenCalledWith(childTenantValue, expect.any(Function));
+    expect(list).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ audiences: [1, 2], forStudents: true }),
+    );
+  });
+
+  it('needs the child, and takes no Institution and no year', async () => {
+    const { service, childTenant } = build();
+    expect(
+      await refusal(service.list(parent, { from: '2026-12-01', to: '2026-12-31' })),
+    ).toMatchObject({
+      fields: ['studentId'],
+    });
+    expect(
+      await refusal(
+        service.list(parent, {
+          studentId: 'child-1',
+          institutionId: 'inst-1',
+          academicYearId: 'year-1',
+        }),
+      ),
+    ).toMatchObject({ fields: ['institutionId', 'academicYearId'] });
+    expect(childTenant).not.toHaveBeenCalled();
+  });
+
+  it('is told 404, 423 or 403 for a child that is not open to them, as the child access says', async () => {
+    const { service, childTenant } = build();
+    childTenant.mockRejectedValue(AppException.notFound());
+    expect(
+      await refusal(
+        service.list(parent, { studentId: 'child-1', from: '2026-12-01', to: '2026-12-31' }),
+      ),
+    ).toMatchObject({ status: 404 });
+  });
+
+  it('reads one event for a child, and has no child to name when it is staff', async () => {
+    const { service, childTenant } = build(event({ audience: 2 }));
+    expect((await service.get(parent, 'event-1', { studentId: 'child-1' })).canEdit).toBe(false);
+    expect(childTenant).toHaveBeenCalledWith(parent, 'child-1');
+    expect(await refusal(service.get(parent, 'event-1', {}))).toMatchObject({
+      fields: ['studentId'],
+    });
+    expect(await refusal(service.get(owner, 'event-1', { studentId: 'child-1' }))).toMatchObject({
+      fields: ['studentId'],
+    });
+    expect(
+      await refusal(
+        build(event({ audience: 3 })).service.get(parent, 'event-1', { studentId: 'child-1' }),
+      ),
+    ).toMatchObject({ status: 404 });
+  });
+
+  it('refuses a parent every change, and a staff list that names a child', async () => {
+    const { service } = build();
+    expect(
+      await refusal(
+        service.list(admin, { studentId: 'child-1', from: '2026-12-01', to: '2026-12-31' }),
+      ),
+    ).toMatchObject({
+      fields: ['studentId'],
+    });
+  });
+});
+
+describe('EventService, the notice to the audience', () => {
+  it('tells the staff and the parents of an event for everyone, once each, and not the person who made it', async () => {
+    const { service, notify, staffUserIds, parentUserIds } = build();
+    await service.create(owner, created);
+    expect(staffUserIds).toHaveBeenCalledWith(expect.anything(), 'society-1', 'inst-1');
+    expect(parentUserIds).toHaveBeenCalledWith(expect.anything(), 'inst-1', []);
+    expect(notify).toHaveBeenCalledTimes(1);
+    const [, notice, startedBy] = notify.mock.calls[0]!;
+    expect(notice).toMatchObject({
+      title: 'New event: Annual Day',
+      institutionId: 'inst-1',
+      tab: 2,
+      target: { type: 3, id: 'event-new' },
+    });
+    expect(notice.receivers).toEqual([
+      { userId: 'staff-1' },
+      { userId: 'staff-2' },
+      { userId: 'parent-1' },
+    ]);
+    expect(startedBy).toBe('person-1');
+  });
+
+  it('asks only for the group of the audience: parents for students and parents, staff for staff', async () => {
+    const families = build();
+    await families.service.create(owner, { ...created, audience: 2 });
+    expect(families.staffUserIds).not.toHaveBeenCalled();
+    expect(families.parentUserIds).toHaveBeenCalled();
+    const staff = build();
+    await staff.service.create(owner, { ...created, audience: 3 });
+    expect(staff.parentUserIds).not.toHaveBeenCalled();
+    expect(staff.staffUserIds).toHaveBeenCalled();
+  });
+
+  it('tells the whole Society for a Society event', async () => {
+    const { service, staffUserIds, parentUserIds } = build();
+    await service.create(owner, { ...created, scope: 1, institutionId: undefined });
+    expect(staffUserIds).toHaveBeenCalledWith(expect.anything(), 'society-1', null);
+    expect(parentUserIds).toHaveBeenCalledWith(expect.anything(), null, []);
+  });
+
+  it('limits the parents of a holiday for students to its classes, and leaves out parents for a holiday for staff alone', async () => {
+    const students = build();
+    await students.service.create(owner, {
+      ...created,
+      isHoliday: true,
+      holidayType: 2,
+      holidayForStudents: true,
+      holidayPredefinedClassIds: ['c1', 'c2'],
+    });
+    expect(students.parentUserIds).toHaveBeenCalledWith(expect.anything(), 'inst-1', ['c1', 'c2']);
+    const staff = build();
+    await staff.service.create(owner, {
+      ...created,
+      isHoliday: true,
+      holidayType: 1,
+      holidayForStaff: true,
+    });
+    expect(staff.parentUserIds).not.toHaveBeenCalled();
+    expect(staff.notify.mock.calls[0]![1].title).toBe('Holiday: Annual Day');
+  });
+
+  it('sends nothing when nobody is left to tell', async () => {
+    const { service, staffUserIds, parentUserIds, notify } = build();
+    staffUserIds.mockResolvedValue(['person-1']);
+    parentUserIds.mockResolvedValue([]);
+    await service.create(owner, created);
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('splits an audience larger than one notice may hold', async () => {
+    const { service, notify, parentUserIds } = build();
+    parentUserIds.mockResolvedValue(
+      Array.from({ length: 5001 }, (_, n) => `parent-${n.toString()}`),
+    );
+    await service.create(owner, created);
+    // Two staff and 5001 parents: 5003 people, in notices of at most 5000.
+    expect(notify.mock.calls.map(([, notice]) => notice.receivers.length)).toEqual([5000, 3]);
+  });
+
+  it('tells of a change as an update with the new version, and of no change nothing', async () => {
+    const changed = build();
+    await changed.service.update(owner, 'event-1', { version: 1, title: 'Annual Day 2026' });
+    expect(changed.notify.mock.calls[0]![1]).toMatchObject({
+      title: 'Updated: Annual Day 2026',
+      sourceKey: 'event:event-1:v2',
+    });
+    const same = build(event({ title: 'Annual Day' }));
+    await same.service.update(owner, 'event-1', { version: 1, title: 'Annual Day' });
+    expect(same.notify).not.toHaveBeenCalled();
+  });
+
+  it('tells nobody of a deactivated event or a moved scope', async () => {
+    const { service, notify } = build();
+    await service.deactivate(owner, 'event-1');
+    await service.changeScope(owner, 'event-1', { version: 1, scope: 1 });
+    expect(notify).not.toHaveBeenCalled();
   });
 });
