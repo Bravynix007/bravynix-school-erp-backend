@@ -290,6 +290,24 @@ describe('a notice reaches its receivers', () => {
     ).rejects.toMatchObject({ code: '42501' });
   });
 
+  it('passes over a receiver who is no person, and still delivers to the rest of the batch', async () => {
+    await send(
+      notice({
+        receivers: [{ userId: newId() }, { userId: first.person }, { userId: second.person }],
+      }),
+    );
+    expect(await inbox(first)).toHaveLength(1);
+    expect(await inbox(second)).toHaveLength(1);
+  });
+
+  it('sends no push to a phone whose session has ended', async () => {
+    await register(first, 'fanout-logged-out');
+    await register(second, 'fanout-live');
+    expect((await api('post', '/v1/auth/logout', first.token, {})).status).toBe(200);
+    await send(notice());
+    expect(sent.flat().map((m) => m.token)).toEqual(['fanout-live']);
+  });
+
   it('writes a large audience in batches, one row for each person', async () => {
     const { rows } = await sql<{ id: string }>`
       insert into users (id, email)
