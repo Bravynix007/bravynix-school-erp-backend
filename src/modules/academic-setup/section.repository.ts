@@ -58,6 +58,27 @@ export class SectionRepository {
     );
   }
 
+  /** The open sections of an Institution, each with the name of its open class. */
+  async openOf(
+    tx: Tx,
+    institutionId: string,
+  ): Promise<{ id: string; displayName: string; classId: string; className: string }[]> {
+    const rows = await tx
+      .selectFrom('sections as s')
+      .innerJoin('classes as c', 'c.id', 's.class_id')
+      .select(['s.id', 's.display_name', 's.class_id', 'c.display_name as class_name'])
+      .where('s.institution_id', '=', institutionId)
+      .where('s.status', '=', 1)
+      .where('c.status', '=', 1)
+      .execute();
+    return rows.map((row) => ({
+      id: row.id,
+      displayName: row.display_name,
+      classId: row.class_id,
+      className: row.class_name,
+    }));
+  }
+
   async find(tx: Tx, id: string, lock = false): Promise<SectionRow | undefined> {
     const query = tx.selectFrom('sections').selectAll().where('id', '=', id);
     return (lock ? query.forUpdate() : query).executeTakeFirst();

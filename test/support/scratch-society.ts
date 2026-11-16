@@ -30,6 +30,7 @@ export async function removeScratchSocieties(
     await sql`alter table sections no force row level security`.execute(tx);
     await sql`alter table institution_class_categories no force row level security`.execute(tx);
     await sql`alter table files no force row level security`.execute(tx);
+    await sql`alter table import_runs no force row level security`.execute(tx);
     await sql`alter table staff_members no force row level security`.execute(tx);
     await sql`alter table staff_educations no force row level security`.execute(tx);
     await sql`alter table staff_emergency_contacts no force row level security`.execute(tx);
@@ -55,6 +56,8 @@ export async function removeScratchSocieties(
     await sql`delete from institution_price_rates where society_id in (${sql.join(ids)})`.execute(
       tx,
     );
+    await sql`delete from import_runs where society_id in (${sql.join(ids)})`.execute(tx);
+    await sql`delete from jobs where society_id in (${sql.join(ids)})`.execute(tx);
     await sql`delete from documents where society_id in (${sql.join(ids)})`.execute(tx);
     await sql`delete from student_achievements where society_id in (${sql.join(ids)})`.execute(tx);
     await sql`delete from student_section_placements where society_id in (${sql.join(ids)})`.execute(
@@ -87,6 +90,7 @@ export async function removeScratchSocieties(
     await sql`delete from institutions where society_id in (${sql.join(ids)})`.execute(tx);
     await sql`delete from societies where id in (${sql.join(ids)})`.execute(tx);
     await sql`alter table files force row level security`.execute(tx);
+    await sql`alter table import_runs force row level security`.execute(tx);
     await sql`alter table staff_members force row level security`.execute(tx);
     await sql`alter table staff_educations force row level security`.execute(tx);
     await sql`alter table staff_emergency_contacts force row level security`.execute(tx);

@@ -14,6 +14,8 @@
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main.js",
+    "worker": "nest build && node dist/worker.js",
+    "start:worker:prod": "node dist/worker.js",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "oxlint --deny-warnings src/ test/",
@@ -29,6 +31,7 @@
     "db:seed": "tsx src/cli/seed.ts",
     "demo:reset": "tsx src/cli/demo-reset.ts",
     "demo:api": "nest build && node --env-file=demo.env dist/main.js",
+    "demo:worker": "nest build && node --env-file=demo.env dist/worker.js",
     "openapi": "nest build && node dist/cli/openapi.js",
     "policies": "nest build && node dist/cli/policies.js"
   },

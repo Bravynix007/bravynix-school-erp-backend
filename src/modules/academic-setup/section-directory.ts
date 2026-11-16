@@ -10,6 +10,14 @@ export interface SectionName {
   className: string;
 }
 
+/** An open section and the open class it is in, named as a person types them (the CSV import reads them). */
+export interface OpenSection {
+  sectionId: string;
+  classId: string;
+  className: string;
+  sectionName: string;
+}
+
 /** Where a student can be placed: the section's class and Institution, whether it is open, and its capacity. */
 export interface SectionPlace {
   classId: string;
@@ -49,6 +57,17 @@ export class SectionDirectory {
         capacity: section.capacity,
       }
     );
+  }
+
+  /** Every open section of the Institution, with its open class's name. */
+  async openOf(tx: Tx, institutionId: string): Promise<OpenSection[]> {
+    const rows = await this.sections.openOf(tx, institutionId);
+    return rows.map((row) => ({
+      sectionId: row.id,
+      classId: row.classId,
+      className: row.className,
+      sectionName: row.displayName,
+    }));
   }
 
   /** The names of these sections and of their classes, by section ID. */

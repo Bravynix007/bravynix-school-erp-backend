@@ -21,6 +21,7 @@ import type {
   StatesTable,
 } from '../masters/masters.tables.js';
 import type { FilesTable } from '../files/files.tables.js';
+import type { JobsTable } from '../jobs/jobs.tables.js';
 import type { NumberSequencesTable } from '../numbering/numbering.tables.js';
 import type { IdempotencyKeysTable } from '../idempotency/idempotency.tables.js';
 import type {
@@ -52,6 +53,7 @@ export interface Database {
   institution_class_categories: InstitutionClassCategoriesTable;
   access_blocks: AccessBlocksTable;
   idempotency_keys: IdempotencyKeysTable;
+  jobs: JobsTable;
   number_sequences: NumberSequencesTable;
   countries: CountriesTable;
   states: StatesTable;

@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { AppException } from '../../common/http/app-exception.js';
-import { FieldErrorCode } from '../../common/http/error-codes.js';
+import { ErrorCode, FieldErrorCode } from '../../common/http/error-codes.js';
 import { fieldError } from '../../common/validation/field-error.js';
 import type { Tx } from '../database/index.js';
 import type { FilePurpose } from './file-purposes.js';
 import { FilesRepository } from './files.repository.js';
+import { ObjectStorage } from './object-storage.js';
 
 const READY = 2;
 
@@ -25,7 +26,10 @@ export interface FileBrief {
  */
 @Injectable()
 export class FileDirectory {
-  constructor(private readonly files: FilesRepository) {}
+  constructor(
+    private readonly files: FilesRepository,
+    private readonly storage: ObjectStorage,
+  ) {}
 
   async requireReady(
     tx: Tx,
@@ -42,6 +46,35 @@ export class FileDirectory {
     ) {
       throw AppException.validation([fieldError(field, FieldErrorCode.INVALID_VALUE)]);
     }
+  }
+
+  /**
+   * A file a person uploaded to start an operation on it (an import): the caller can see it (404 otherwise), and it is a
+   * file of the purpose, in the Institution, that this person uploaded (400 `INVALID_VALUE` on the field). It is also
+   * Ready, else 422 `FILE_NOT_READY`: the upload was not confirmed, or the file was refused or removed.
+   */
+  async requireUploaded(
+    tx: Tx,
+    fileId: string,
+    expect: { purpose: FilePurpose; institutionId: string; uploadedBy: string },
+    field: string,
+  ): Promise<void> {
+    const file = await this.files.find(tx, fileId);
+    if (!file) throw AppException.notFound();
+    if (
+      file.purpose !== expect.purpose ||
+      file.institution_id !== expect.institutionId ||
+      file.created_by !== expect.uploadedBy
+    ) {
+      throw AppException.validation([fieldError(field, FieldErrorCode.INVALID_VALUE)]);
+    }
+    if (file.file_status !== READY) throw AppException.businessRule(ErrorCode.FILE_NOT_READY);
+  }
+
+  /** What a Ready file holds (at most 5 MB), for the module that owns it to read; `null` when nothing is stored. */
+  async contentOf(tx: Tx, fileId: string): Promise<Buffer | null> {
+    const file = await this.files.find(tx, fileId);
+    return file?.file_status === READY ? this.storage.read(file.object_key) : null;
   }
 
   /** The files the caller can see among `ids`, by ID. */

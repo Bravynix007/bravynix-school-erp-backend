@@ -2,6 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { AcademicSetupModule, SectionStudents, TeachingStaff } from '../academic-setup/index.js';
 import { FileReaders, FilesModule } from '../../platform/files/index.js';
 import { IdempotencyModule } from '../../platform/idempotency/index.js';
+import { JobsModule } from '../../platform/jobs/index.js';
 import { MastersModule } from '../../platform/masters/index.js';
 import { AchievementController } from './achievement.controller.js';
 import { AchievementRepository } from './achievement.repository.js';
@@ -14,6 +15,10 @@ import { DocumentController } from './document.controller.js';
 import { DocumentRepository } from './document.repository.js';
 import { DocumentService } from './document.service.js';
 import { GuardianContext } from './guardian-context.js';
+import { ImportController } from './import.controller.js';
+import { ImportProcessor } from './import.processor.js';
+import { ImportRepository } from './import.repository.js';
+import { ImportService } from './import.service.js';
 import { GuardianController } from './guardian.controller.js';
 import { GuardianRepository } from './guardian.repository.js';
 import { GuardianService } from './guardian.service.js';
@@ -47,7 +52,7 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
  */
 @Global()
 @Module({
-  imports: [MastersModule, FilesModule, AcademicSetupModule, IdempotencyModule],
+  imports: [MastersModule, FilesModule, AcademicSetupModule, IdempotencyModule, JobsModule],
   controllers: [
     StaffController,
     StaffIdentityController,
@@ -61,6 +66,7 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
     GuardianController,
     AchievementController,
     PromotionController,
+    ImportController,
   ],
   providers: [
     StaffRepository,
@@ -76,6 +82,9 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
     AchievementRepository,
     AchievementService,
     PromotionService,
+    ImportRepository,
+    ImportService,
+    ImportProcessor,
     StudentRepository,
     StudentContext,
     StudentService,
