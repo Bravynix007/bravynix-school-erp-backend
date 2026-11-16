@@ -68,8 +68,6 @@ export async function up(db: Kysely<unknown>): Promise<void> {
                  select 1 from public.staff_members m where m.photo_file_id = f.id))
                or (f.purpose in (5, 6) and not exists (
                  select 1 from public.documents d where d.file_id = f.id))
-               or (f.purpose = 12 and not exists (
-                 select 1 from public.import_runs r where r.file_id = f.id))
              ))
            )
         returning 1

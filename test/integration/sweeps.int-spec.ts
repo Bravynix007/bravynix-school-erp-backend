@@ -6,6 +6,7 @@ import { runMigrations } from '../../src/platform/database/migrator.js';
 import { ObjectStorage } from '../../src/platform/files/index.js';
 import { JobRunner } from '../../src/platform/jobs/index.js';
 import { SweepsService } from '../../src/platform/sweeps/index.js';
+import { SweepsRepository } from '../../src/platform/sweeps/sweeps.repository.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { personaByKey } from '../../src/seeds/two-worlds.js';
 import { apiCaller } from '../support/api.js';
@@ -78,6 +79,25 @@ describe('worker sweeps', () => {
   const age = (id: string, days: number) =>
     sql`update files set confirmed_at = now() - make_interval(days => ${days}),
       created_at = now() - make_interval(days => ${days}) where id = ${id}`.execute(ownerDb);
+
+  /** Makes a file as old as `hours` hours. */
+  const ageHours = (id: string, hours: number) =>
+    sql`update files set confirmed_at = now() - make_interval(hours => ${hours}),
+      created_at = now() - make_interval(hours => ${hours}) where id = ${id}`.execute(ownerDb);
+  const staffMember = async (fields: object = {}) =>
+    kit.staff(
+      owner.token,
+      institutionId,
+      (await kit.masters(await superAdminToken(t, ownerDb, superAdmin.id), 'class-categories'))[0]!
+        .id,
+      fields,
+    );
+
+  /** Makes the time to delete a file come. */
+  const due = (id: string) =>
+    sql`update files set delete_after = now() - interval '1 minute' where id = ${id}`.execute(
+      ownerDb,
+    );
 
   const attach = async (fileId: string, staffId: string) => {
     const res = await api('post', `/v1/staff/${staffId}/documents`, owner.token, {
@@ -251,6 +271,97 @@ describe('worker sweeps', () => {
     });
   });
 
+  describe('files nothing points at, by purpose', () => {
+    it('gives up a staff photo and a document file no record holds, and keeps the ones a record holds', async () => {
+      const heldPhoto = await readyFile(4, JPEG, 'image/jpeg');
+      const loosePhoto = await readyFile(4, JPEG, 'image/jpeg');
+      const looseDocument = await readyFile(6, PDF, 'application/pdf');
+      const heldDocument = await readyFile(6, PDF, 'application/pdf');
+      const staff = await staffMember({ photoFileId: heldPhoto });
+      await attach(heldDocument, staff.id);
+      for (const id of [heldPhoto, loosePhoto, looseDocument, heldDocument]) await age(id, 3);
+
+      await sweeps.sweep();
+      expect((await file(loosePhoto)).file_status).toBe(4);
+      expect((await file(looseDocument)).file_status).toBe(4);
+      expect((await file(heldPhoto)).file_status).toBe(2);
+      expect((await file(heldDocument)).file_status).toBe(2);
+    });
+
+    it('waits the 24 hours: a file confirmed 23 hours ago stays, one confirmed 25 hours ago goes', async () => {
+      const young = await photo();
+      const old = await photo();
+      await ageHours(young, 23);
+      await ageHours(old, 25);
+
+      await sweeps.sweep();
+      expect((await file(young)).file_status).toBe(2);
+      expect((await file(young)).delete_after).toBeNull();
+      expect((await file(old)).file_status).toBe(4);
+    });
+  });
+
+  describe('a file whose time has come (DDD 16.4)', () => {
+    it('is no longer taken by a record, so the sweep never removes the object of a file that is held', async () => {
+      const fileId = await photo();
+      await due(fileId);
+      const refused = await api(
+        'post',
+        '/v1/students',
+        owner.token,
+        kit.studentBody(institutionId, place, { photoFileId: fileId }),
+      );
+      expect(refused.status).toBe(400);
+      expect(refused.body.errors).toEqual([
+        expect.objectContaining({ field: 'photoFileId', code: 'INVALID_VALUE' }),
+      ]);
+    });
+
+    it('is no longer taken for an import: 422 FILE_NOT_READY', async () => {
+      const fileId = await readyFile(12, CSV, 'text/csv');
+      await due(fileId);
+      const res = await request(t.app.getHttpServer())
+        .post('/v1/imports')
+        .set('Authorization', `Bearer ${owner.token}`)
+        .set('Idempotency-Key', crypto.randomUUID())
+        .send({ institutionId, importType: 1, fileId, academicYearId: place.academicYearId });
+      expect([res.status, res.body.code]).toEqual([422, 'FILE_NOT_READY']);
+    });
+
+    it('cannot be confirmed once its 24 hours are up: 404, and the sweep then removes it', async () => {
+      const res = await api('post', '/v1/files/uploads', owner.token, {
+        purpose: 3,
+        institutionId,
+        contentType: 'image/jpeg',
+        sizeBytes: JPEG.length,
+        fileName: 'p.jpg',
+      });
+      const given = succeeded(res, 201, 'ticket').body.data as unknown as Ticket;
+      const sent = request(t.app.getHttpServer()).post(new URL(given.upload.url).pathname);
+      for (const [name, value] of Object.entries(given.upload.fields)) sent.field(name, value);
+      await sent.attach('file', JPEG, { filename: 'upload', contentType: 'image/jpeg' });
+      await due(given.fileId);
+
+      const confirmed = await api('post', `/v1/files/${given.fileId}/confirm`, owner.token);
+      expect(confirmed.status).toBe(404);
+      await sweeps.sweep();
+      expect((await file(given.fileId)).file_status).toBe(4);
+      expect(await objectExists(given.fileId)).toBe(false);
+    });
+
+    it('is marked Deleted only while it is still in the status it was listed in', async () => {
+      const fileId = await photo();
+      await due(fileId);
+      const repository = t.app.get(SweepsRepository);
+      const { objectKey } = { objectKey: (await file(fileId)).object_key };
+
+      expect(await repository.markDeleted({ id: fileId, objectKey, status: 1 })).toBe(false);
+      expect((await file(fileId)).file_status).toBe(2);
+      expect(await repository.markDeleted({ id: fileId, objectKey, status: 2 })).toBe(true);
+      expect((await file(fileId)).file_status).toBe(4);
+    });
+  });
+
   describe('documents (DDD 16.2, DOC-03)', () => {
     it('keeps the file of a document for 30 days after DOC-03, and removes it then; the row stays', async () => {
       const categoryId = (
@@ -285,7 +396,9 @@ describe('worker sweeps', () => {
   describe('import runs and their files (API design 16.3)', () => {
     it('removes a run a week after it finished, and the file once its week is up', async () => {
       const recent = await importOnce();
+      const nearly = await importOnce();
       const old = await importOnce();
+      await finishedDaysAgo(nearly.importId, 6);
       await finishedDaysAgo(old.importId, 8);
       await sql`update files set delete_after = now() - interval '1 day' where id = ${old.fileId}`.execute(
         ownerDb,
@@ -297,6 +410,8 @@ describe('worker sweeps', () => {
       expect((await file(old.fileId)).file_status).toBe(4);
       expect(await objectExists(old.fileId)).toBe(false);
       expect(await runOf(recent.importId)).toBeDefined();
+      // A run that finished 6 days ago has a day left.
+      expect(await runOf(nearly.importId)).toBeDefined();
       expect((await file(recent.fileId)).file_status).toBe(2);
       expect(await objectExists(recent.fileId)).toBe(true);
     });

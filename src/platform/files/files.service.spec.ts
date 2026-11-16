@@ -270,6 +270,17 @@ describe('FilesService', () => {
       });
     });
 
+    it('is 404 for a Pending file whose 24 hours have passed, which the next sweep removes', async () => {
+      const due = build(file({ delete_after: new Date('2026-11-08T10:00:00.000Z') }));
+      expect(await fail(due.service.confirm(admin(), 'file-1'))).toEqual({
+        status: 404,
+        code: 'NOT_FOUND',
+      });
+      expect(due.read).not.toHaveBeenCalled();
+      const early = build(file({ delete_after: new Date('2026-11-08T10:00:01.000Z') }));
+      expect((await early.service.confirm(admin(), 'file-1')).fileStatus).toBe(2);
+    });
+
     it('is 409 for a second confirm, and for a race lost to another confirm', async () => {
       const done = build(file({ file_status: 2 }));
       expect(await fail(done.service.confirm(admin(), 'file-1'))).toEqual({
