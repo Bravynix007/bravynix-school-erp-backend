@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { AppException } from '../../common/http/app-exception.js';
 import { ErrorCode, FieldErrorCode } from '../../common/http/error-codes.js';
+import { Clock } from '../../common/time/clock.js';
 import { fieldError } from '../../common/validation/field-error.js';
 import type { Tx } from '../database/index.js';
 import type { FilePurpose } from './file-purposes.js';
-import { FilesRepository } from './files.repository.js';
+import { FilesRepository, isDue } from './files.repository.js';
 import { ObjectStorage } from './object-storage.js';
 
 const READY = 2;
@@ -22,13 +23,15 @@ export interface FileBrief {
  * What other modules need of a file when a record points at one (API design 15.1): the file exists and the caller
  * may see it (404, row-level security hides another Society's), and it is a Ready file of the purpose the field
  * takes, in the Institution of the record (400 `INVALID_VALUE` on the field). A record that already points at a
- * file keeps it; only a new link is checked.
+ * file keeps it; only a new link is checked. A file past its `delete_after` is as good as gone: the worker removes its
+ * object at its next sweep, so it is not Ready for a new link or an operation (DDD 16.4).
  */
 @Injectable()
 export class FileDirectory {
   constructor(
     private readonly files: FilesRepository,
     private readonly storage: ObjectStorage,
+    private readonly clock: Clock,
   ) {}
 
   async requireReady(
@@ -41,6 +44,7 @@ export class FileDirectory {
     if (!file) throw AppException.notFound();
     if (
       file.file_status !== READY ||
+      isDue(file, this.clock.now()) ||
       file.purpose !== expect.purpose ||
       file.institution_id !== expect.institutionId
     ) {
@@ -68,7 +72,9 @@ export class FileDirectory {
     ) {
       throw AppException.validation([fieldError(field, FieldErrorCode.INVALID_VALUE)]);
     }
-    if (file.file_status !== READY) throw AppException.businessRule(ErrorCode.FILE_NOT_READY);
+    if (file.file_status !== READY || isDue(file, this.clock.now())) {
+      throw AppException.businessRule(ErrorCode.FILE_NOT_READY);
+    }
   }
 
   /** What a Ready file holds (at most 5 MB), for the module that owns it to read; `null` when nothing is stored. */

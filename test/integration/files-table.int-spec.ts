@@ -113,11 +113,8 @@ describe('the files table (DDD 9.12, 15.3)', () => {
     await expect(insert(newId())).rejects.toMatchObject({ constraint: 'uq_files_object_key' });
   });
 
-  it('is hidden by forced row-level security from the table owner and from a request with no tenant', async () => {
-    const { rows } = await sql<{ n: number }>`select count(*)::int as n from files`.execute(
-      ownerDb,
-    );
-    expect(rows[0]!.n).toBe(0);
+  it('is hidden by forced row-level security from a request with no tenant', async () => {
+    // The table owner reads every file, through the policy the worker's sweeps need (DDD 16.4); the app role does not.
     expect(await countFileRows(ownerDb)).toBeGreaterThan(0);
     expect(
       await database.transaction({}, (tx) => tx.selectFrom('files').selectAll().execute()),

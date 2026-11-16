@@ -13,7 +13,7 @@ import { FileReaders } from './file-readers.js';
 import { matchesDeclaredType } from './file-signature.js';
 import { MAX_FILE_BYTES, PRIVATE_BUCKET, PURPOSES, type FilePurpose } from './file-purposes.js';
 import type { RequestUploadDto } from './files.dto.js';
-import { FilesRepository } from './files.repository.js';
+import { FilesRepository, isDue } from './files.repository.js';
 import { fileResource, type FileResource } from './files.resource.js';
 import { ObjectStorage, type DownloadTicket, type UploadTicket } from './object-storage.js';
 
@@ -106,8 +106,14 @@ export class FilesService {
   async confirm(principal: Principal, fileId: string): Promise<FileResource> {
     const { tenant } = await this.scope.forPrincipal(principal);
     const file = await this.database.transaction(tenant, (tx) => this.files.find(tx, fileId));
-    // 3 Rejected and 4 Deleted files no longer exist as far as a client can tell.
-    if (!file || file.created_by !== principal.personId || file.file_status > 2) {
+    // 3 Rejected and 4 Deleted files no longer exist as far as a client can tell, and nor does a file whose time to be
+    // deleted has come: the worker removes its object at its next sweep (DDD 16.4).
+    if (
+      !file ||
+      file.created_by !== principal.personId ||
+      file.file_status > 2 ||
+      isDue(file, this.clock.now())
+    ) {
       throw AppException.notFound();
     }
     if (file.file_status === 2) throw alreadyConfirmed();

@@ -1,3 +1,4 @@
+import { FixedClock } from '../../common/time/clock.js';
 import type { Tx } from '../database/index.js';
 import { FileDirectory } from './file-directory.js';
 import { FilePurpose } from './file-purposes.js';
@@ -5,6 +6,7 @@ import type { FileRow, FilesRepository } from './files.repository.js';
 import type { ObjectStorage } from './object-storage.js';
 
 const tx = {} as Tx;
+const clock = new FixedClock('2026-11-16T04:30:00.000Z');
 const want = { purpose: FilePurpose.StaffPhoto, institutionId: 'institution-1' };
 
 const ready = (changes: Partial<FileRow> = {}): FileRow =>
@@ -20,6 +22,7 @@ const directory = (found: FileRow | undefined) =>
   new FileDirectory(
     { find: () => Promise.resolve(found) } as unknown as FilesRepository,
     { read: () => Promise.resolve(Buffer.from('a,b')) } as unknown as ObjectStorage,
+    clock,
   );
 
 const refusal = async (promise: Promise<void>) =>
@@ -64,6 +67,36 @@ describe('FileDirectory.requireReady', () => {
   });
 });
 
+describe('FileDirectory.requireReady and a file whose time has come', () => {
+  it('refuses a Ready file past its delete_after, which the next sweep removes, with 400 INVALID_VALUE', async () => {
+    const error = await refusal(
+      directory(ready({ delete_after: new Date('2026-11-16T04:30:00.000Z') })).requireReady(
+        tx,
+        'file-1',
+        want,
+        'photoFileId',
+      ),
+    );
+    expect(error).toMatchObject({
+      status: 400,
+      options: {
+        errors: [expect.objectContaining({ field: 'photoFileId', code: 'INVALID_VALUE' })],
+      },
+    });
+  });
+
+  it('takes a Ready file whose delete_after is still to come', async () => {
+    await expect(
+      directory(ready({ delete_after: new Date('2026-11-16T04:30:01.000Z') })).requireReady(
+        tx,
+        'file-1',
+        want,
+        'photoFileId',
+      ),
+    ).resolves.toBeUndefined();
+  });
+});
+
 describe('FileDirectory.briefs', () => {
   it('shows what a list needs of each file the caller can see, and leaves the rest out', async () => {
     const rows = [
@@ -79,6 +112,7 @@ describe('FileDirectory.briefs', () => {
     const files = new FileDirectory(
       { findMany } as unknown as FilesRepository,
       {} as unknown as ObjectStorage,
+      clock,
     );
     expect(await files.briefs(tx, ['a', 'b', 'gone'])).toEqual(
       new Map([
@@ -131,6 +165,31 @@ describe('FileDirectory.requireUploaded', () => {
         directory(uploaded({ file_status })).requireUploaded(tx, 'file-1', upload, 'fileId'),
       ),
     ).toMatchObject({ status: 422, code: 'FILE_NOT_READY' });
+  });
+});
+
+describe('FileDirectory.requireUploaded and a file whose time has come', () => {
+  const upload = { ...want, purpose: FilePurpose.ImportCsv, uploadedBy: 'person-1' };
+
+  it('refuses a Ready import file past its delete_after with 422 FILE_NOT_READY, and takes one before it', async () => {
+    expect(
+      await refusal(
+        directory(uploaded({ delete_after: new Date('2026-11-16T04:30:00.000Z') })).requireUploaded(
+          tx,
+          'file-1',
+          upload,
+          'fileId',
+        ),
+      ),
+    ).toMatchObject({ status: 422, code: 'FILE_NOT_READY' });
+    await expect(
+      directory(uploaded({ delete_after: new Date('2026-11-16T04:30:01.000Z') })).requireUploaded(
+        tx,
+        'file-1',
+        upload,
+        'fileId',
+      ),
+    ).resolves.toBeUndefined();
   });
 });
 
