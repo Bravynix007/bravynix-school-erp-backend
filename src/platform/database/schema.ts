@@ -21,6 +21,7 @@ import type {
   StatesTable,
 } from '../masters/masters.tables.js';
 import type { FilesTable } from '../files/files.tables.js';
+import type { InboxItemsTable, PushDevicesTable } from '../notifications/notifications.tables.js';
 import type { JobsTable } from '../jobs/jobs.tables.js';
 import type { NumberSequencesTable } from '../numbering/numbering.tables.js';
 import type { IdempotencyKeysTable } from '../idempotency/idempotency.tables.js';
@@ -63,4 +64,6 @@ export interface Database {
   predefined_sections: PredefinedSectionsTable;
   designations: DesignationsTable;
   files: FilesTable;
+  inbox_items: InboxItemsTable;
+  push_devices: PushDevicesTable;
 }
