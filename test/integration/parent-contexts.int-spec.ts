@@ -1,5 +1,6 @@
 import { Kysely, PostgresDialect, sql } from 'kysely';
 import request from 'supertest';
+import { newId } from '../../src/common/ids/ids.js';
 import { DatabaseService } from '../../src/platform/database/index.js';
 import { createPool } from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
@@ -83,6 +84,18 @@ describe('the parent signs in and reads their own child', () => {
     tenant: Parameters<DatabaseService['transaction']>[0],
     work: (tx: Parameters<Parameters<DatabaseService['transaction']>[1]>[0]) => Promise<T>,
   ) => database.transaction(tenant, work);
+
+  /** Pauses (0) or restores (1) an Institution or a Society, as the platform owner does. */
+  const setStatus = (table: 'institutions' | 'societies', id: string, status: 0 | 1) =>
+    ownerDb.transaction().execute(async (tx) => {
+      await sql`select set_config('app.role_code', '1', true)`.execute(tx);
+      await sql`update ${sql.table(table)} set status = ${status} where id = ${id}`.execute(tx);
+    });
+  /** Changes rows of the school as its Owner would, for what no endpoint does (an inactive enrolment, an ended placement). */
+  const asSchoolOwner = <T>(work: Parameters<typeof readAs<T>>[1]) =>
+    readAs({ personId: owner.person, roleCode: 2, societyId, institutionIds: [institution] }, work);
+  const childOf = async (token: string, student: SchoolStudent) =>
+    (await me(token)).session.activeContext?.children?.find((c) => c.studentId === student.id);
 
   /** A new Society with an Owner, an Institution and a section to place students in. */
   const makeSchool = async () => {
@@ -294,6 +307,61 @@ describe('the parent signs in and reads their own child', () => {
       // Every child blocked: the context is blocked and can still be chosen; its data answers per child.
       expect(context?.isBlocked).toBe(true);
     });
+
+    it.each(['institutions', 'societies'] as const)(
+      'leaves the children out of a paused %s, and answers 404 for their records',
+      async (table) => {
+        const token = await asParent(ravi);
+        expect((await guardians(diya, token)).status).toBe(200);
+        const id = table === 'institutions' ? institution : societyId;
+        await setStatus(table, id, 0);
+        try {
+          expect((await me(token)).session.activeContext?.children ?? []).toEqual([]);
+          expect((await guardians(diya, token)).status).toBe(404);
+          expect((await signInMobile(t, ravi)).contexts).toEqual([]);
+        } finally {
+          await setStatus(table, id, 1);
+        }
+        expect((await guardians(diya, token)).status).toBe(200);
+      },
+    );
+
+    it('shows the section a child is in now, after a move, and none for a child with no current placement', async () => {
+      const sectionB = await kit.section(
+        owner.token,
+        place.classId,
+        (await kit.masters(admin, 'predefined-sections')).find((c) => c.code === 'B')!.id,
+      );
+      const token = await asParent(ravi);
+      expect(await childOf(token, diya)).toMatchObject({ sectionName: 'A' });
+      succeeded(
+        await api('patch', `/v1/students/${diya.id}/placement`, owner.token, {
+          sectionId: sectionB,
+          rollNumber: '1',
+        }),
+        200,
+        'move',
+      );
+      expect(await childOf(token, diya)).toMatchObject({ sectionName: 'B' });
+      // Arjun's placement is over, with no new one: he is in no class now, whatever he was in.
+      await asSchoolOwner((tx) =>
+        sql`
+          update student_section_placements set end_date = start_date
+          where student_enrolment_id in (select id from student_enrolments where student_id = ${arjun.id})
+        `.execute(tx),
+      );
+      expect(await childOf(token, arjun)).toMatchObject({ className: null, sectionName: null });
+    });
+
+    it('shows no class for a child whose enrolment is not active', async () => {
+      const token = await asParent(ravi);
+      expect(await childOf(token, arjun)).toMatchObject({ sectionName: 'A' });
+      await asSchoolOwner((tx) =>
+        sql`update student_enrolments set status = 0 where student_id = ${arjun.id}`.execute(tx),
+      );
+      expect(await childOf(token, arjun)).toMatchObject({ className: null, sectionName: null });
+      expect(await childOf(token, diya)).toMatchObject({ sectionName: 'A' });
+    });
   });
 
   describe('own children only', () => {
@@ -486,24 +554,37 @@ describe('the parent signs in and reads their own child', () => {
       ).resolves.toMatchObject({ numAffectedRows: 0n });
     });
 
-    it('returns a person’s children whoever calls the function, and puts the caller’s settings back', async () => {
+    it('returns a person’s children whoever calls the function, and puts all four of the caller’s settings back', async () => {
+      const settings = sql<Record<string, string>>`
+        select current_setting('app.role_code') as role, current_setting('app.person_id') as person,
+          current_setting('app.society_id') as society, current_setting('app.institution_ids') as institutions
+      `;
+      // The caller is in another Society and Institution than the children, so a setting left behind shows.
+      const [callerSociety, callerInstitution] = [newId(), newId()];
       const result = await readAs(
-        { personId: owner.person, roleCode: 2, societyId },
+        {
+          personId: owner.person,
+          roleCode: 2,
+          societyId: callerSociety,
+          institutionIds: [callerInstitution],
+        },
         async (tx) => {
           const children = await sql<{ student_id: string }>`
-          select student_id from app_children(${meena}::uuid)
-        `.execute(tx);
-          const after = await sql<{ role: string; person: string }>`
-          select current_setting('app.role_code') as role, current_setting('app.person_id') as person
-        `.execute(tx);
+            select student_id from app_children(${meena}::uuid)
+          `.execute(tx);
           return {
             children: children.rows.map((r) => r.student_id).toSorted(),
-            after: after.rows[0]!,
+            after: (await settings.execute(tx)).rows[0]!,
           };
         },
       );
       expect(result.children).toEqual([arjun.id, diya.id].toSorted());
-      expect(result.after).toEqual({ role: '2', person: owner.person });
+      expect(result.after).toEqual({
+        role: '2',
+        person: owner.person,
+        society: callerSociety,
+        institutions: callerInstitution,
+      });
     });
 
     it('returns nothing for a person who guards nobody', async () => {
