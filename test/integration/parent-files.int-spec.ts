@@ -241,6 +241,24 @@ describe('a parent opens the photo and the documents of their own child', () => 
       expect(seen.documents).toEqual([diya.id]);
     });
 
+    it('shows a parent request neither the row nor the file of a document that was deactivated', async () => {
+      const [form] = (await documents(diya)).body.data as unknown as { id: string }[];
+      const kept = await kit.readyFile(owner.token, institution);
+      await attach(diya, 'Report card', kept);
+      succeeded(await api('delete', `/v1/documents/${form!.id}`, owner.token), 200, 'deactivate');
+      const seen = await database.transaction(parentOf([diya.id]), async (tx) => ({
+        files: (await sql<{ id: string }>`select id from files order by id`.execute(tx)).rows.map(
+          (r) => r.id,
+        ),
+        documents: (await sql<{ id: string }>`select id from documents`.execute(tx)).rows.map(
+          (r) => r.id,
+        ),
+      }));
+      expect(seen.documents).not.toContain(form!.id);
+      expect(seen.documents).toHaveLength(1);
+      expect(seen.files).toEqual([diyaPhoto, kept].toSorted());
+    });
+
     it('shows nothing without a child, for another role, and no write at all', async () => {
       const count = (tenant: Parameters<DatabaseService['transaction']>[0]) =>
         database.transaction(tenant, async (tx) => [
