@@ -40,7 +40,7 @@ export class JobRunner {
     const handler = this.registry.handlerFor(job.kind);
     if (!handler) {
       this.logger.error({ jobId: job.id, kind: job.kind }, 'No handler for this kind of job');
-      await this.jobs.settle(job.id, job.attempts, false, NO_HANDLER);
+      await this.settle(job, false, NO_HANDLER);
     } else if (job.attempts > MAX_ATTEMPTS) {
       await this.giveUp(handler, job, ATTEMPTS_EXHAUSTED);
     } else {
@@ -80,18 +80,35 @@ export class JobRunner {
       const reason = failureOf(error);
       this.logger.error({ err: error, jobId: job.id, kind: job.kind }, 'A job stopped');
       if (job.attempts >= MAX_ATTEMPTS) await this.giveUp(handler, job, reason);
-      else await this.jobs.retry(job.id, job.attempts, retryDelaySeconds(job.attempts), reason);
+      else await this.retry(job, reason);
       return;
     }
-    await this.jobs.settle(job.id, job.attempts, true, null);
+    await this.settle(job, true, null);
   }
 
   private async giveUp(handler: JobHandler, job: ClaimedJob, reason: string): Promise<void> {
     try {
       await handler.fail(job, reason);
     } finally {
-      await this.jobs.settle(job.id, job.attempts, false, reason);
+      await this.settle(job, false, reason);
     }
+  }
+
+  /** Settles the job; a worker that no longer holds it changes nothing, and says so. */
+  private async settle(job: ClaimedJob, done: boolean, reason: string | null): Promise<void> {
+    if (!(await this.jobs.settle(job.id, job.attempts, done, reason))) this.lost(job, 'settle');
+  }
+
+  private async retry(job: ClaimedJob, reason: string): Promise<void> {
+    const delay = retryDelaySeconds(job.attempts);
+    if (!(await this.jobs.retry(job.id, job.attempts, delay, reason))) this.lost(job, 'retry');
+  }
+
+  private lost(job: ClaimedJob, action: 'settle' | 'retry'): void {
+    this.logger.warn(
+      { jobId: job.id, kind: job.kind },
+      `Another worker holds this job: its ${action} was not applied`,
+    );
   }
 }
 

@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { JobLeaseLost, JobRegistry, type ClaimedJob, type JobHandler } from './job-handler.js';
 import { JobRunner } from './job-runner.js';
 import type { JobsRepository } from './jobs.repository.js';
@@ -108,6 +109,28 @@ describe('JobRunner.runNext', () => {
     expect(repository.settle).not.toHaveBeenCalled();
     expect(repository.retry).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['settles a finished job', {}, 'settle'],
+    [
+      'retries a job that stopped on a passing fault',
+      { run: vi.fn<JobHandler['run']>().mockRejectedValue(new Error('x')) },
+      'retry',
+    ],
+  ] as const)(
+    'says so when it %s that another worker holds now',
+    async (_name, handler, action) => {
+      const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      const { runner, repository } = build(job(), handler);
+      repository[action].mockResolvedValue(false);
+      expect(await runner.runNext()).toBe(true);
+      expect(warn).toHaveBeenCalledWith(
+        { jobId: 'job-1', kind: 'test.work' },
+        `Another worker holds this job: its ${action} was not applied`,
+      );
+      warn.mockRestore();
+    },
+  );
 
   it('gives the handler a lease that renews, and that throws when another worker has the job', async () => {
     let lease: { keep(): Promise<void> } | undefined;
