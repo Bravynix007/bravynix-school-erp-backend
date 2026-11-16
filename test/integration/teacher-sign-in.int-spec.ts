@@ -282,11 +282,21 @@ describe('the teacher signs in from the staff record', () => {
         [TEACHER, societyB],
       ].toSorted(),
     );
+    // Each context names its own Society's record, not another one of the person's.
+    expect(login.contexts.find((c) => c.societyId === societyA)).toMatchObject({
+      staffMemberId: inA.id,
+      homeInstitutionId: first,
+    });
+    expect(login.contexts.find((c) => c.societyId === societyB)).toMatchObject({
+      staffMemberId: inB.id,
+      homeInstitutionId: institutionB,
+    });
     const chosen = await api('post', '/v1/auth/context', login.accessToken, {
       roleCode: TEACHER,
       societyId: societyA,
     });
     expect(chosen.status).toBe(200);
+    expect(chosen.body.data.activeContext).toMatchObject({ staffMemberId: inA.id });
     const asTeacherInA = chosen.body.data.accessToken as string;
     expect((await api('get', `/v1/staff/${inA.id}`, asTeacherInA)).status).toBe(200);
     // The own record of the other Society is as if it did not exist.
