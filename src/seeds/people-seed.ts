@@ -183,8 +183,8 @@ export async function writeStudentSeed(db: Kysely<unknown>): Promise<void> {
 }
 
 async function writeStudentsIn(tx: Kysely<unknown>): Promise<void> {
-  // The child the two worlds say is blocked is blocked from the profile (STU-06) by the platform's Super Admin.
-  const blockedBy = personaByKey('SA1').id;
+  // The child the two worlds say is blocked is blocked from the profile (STU-06) by the Owner of its Society, as STU-06
+  // is theirs and the Admins'. A re-seed blocks the child again, also after someone lifted the block: it is a demo.
   for (const { child, home, classId, sectionId, rollNumber, guardians, index } of seededStudents) {
     const societyId = await scopeTo(tx, home.id, 'student');
     const yearId = seededYearId(home.key);
@@ -195,7 +195,7 @@ async function writeStudentsIn(tx: Kysely<unknown>): Promise<void> {
          access_blocked_at, access_blocked_by)
       values (${child.id}, ${societyId}, ${home.id}, ${`ADM-${child.key}`}, ${firstName ?? child.key},
         ${rest.join(' ') || null}, '2026-06-01', '91', ${`9000003${(100 + index).toString()}`},
-        ${child.isBlocked ? sql`now()` : null}, ${child.isBlocked ? blockedBy : null})
+        ${child.isBlocked ? sql`now()` : null}, ${child.isBlocked ? personaByKey(`SO-${home.society}1`).id : null})
       on conflict (id) do update set
         access_blocked_at = coalesce(students.access_blocked_at, excluded.access_blocked_at),
         access_blocked_by = coalesce(students.access_blocked_by, excluded.access_blocked_by)
