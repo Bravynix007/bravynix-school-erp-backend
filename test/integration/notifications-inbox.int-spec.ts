@@ -1,7 +1,11 @@
 import { Kysely, PostgresDialect, sql } from 'kysely';
 import request from 'supertest';
 import { newId } from '../../src/common/ids/ids.js';
-import { createPool } from '../../src/platform/database/database.service.js';
+import {
+  createPool,
+  DatabaseService,
+  type Tx,
+} from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { personaByKey } from '../../src/seeds/two-worlds.js';
@@ -41,6 +45,7 @@ const deviceBody = (token: string, fields: object = {}) => ({
 describe('the inbox and the push device', () => {
   let ownerDb: Kysely<unknown>;
   let t: TestApp;
+  let database: DatabaseService;
   let fixtures: PlatformFixtures;
   let api: ReturnType<typeof apiCaller>;
   let kit: SchoolKit;
@@ -102,6 +107,19 @@ describe('the inbox and the push device', () => {
         where fcm_token like 'test-token-%' order by fcm_token`.execute(ownerDb)
     ).rows;
 
+  const asApp = <T>(
+    work: (tx: Tx) => Promise<T>,
+    personId = me.person,
+    institutionIds?: string[],
+  ) => database.transaction({ personId, societyId, institutionIds }, work);
+  const month = async () =>
+    (await sql<{ part: string }>`select to_char(now(), 'YYYY_MM') as part`.execute(ownerDb))
+      .rows[0]!.part;
+
+  const row = (society: string) =>
+    sql`insert into inbox_items (user_id, society_id, category, title, body, source_key)
+        values (${me.person}, ${society}, 1, 't', 'b', ${`own:${newId()}`})`;
+
   beforeAll(async () => {
     await runMigrations(migrationUrl, 'latest');
     ownerDb = new Kysely({
@@ -109,6 +127,7 @@ describe('the inbox and the push device', () => {
     });
     await writeIdentitySeed(ownerDb);
     t = await createTestApp({ imports: [FixtureModule] });
+    database = t.app.get(DatabaseService);
     fixtures = new PlatformFixtures(t, ownerDb);
     api = apiCaller(t);
     kit = new SchoolKit(t, api);
@@ -216,6 +235,8 @@ describe('the inbox and the push device', () => {
       const first = await api('post', `/v1/notifications/${id}/read`, me.token);
       expect(first.status).toBe(200);
       expect(first.body.data).toMatchObject({ id, isRead: true, readAt: expect.any(String) });
+      // Later by the clock, so a second call that wrote the time again would show.
+      t.clock.advanceMinutes(5);
       const again = await api('post', `/v1/notifications/${id}/read`, me.token);
       expect(again.body.data).toMatchObject({ readAt: first.body.data.readAt });
       expect(await api('get', '/v1/notifications/unread-count', me.token)).toMatchObject({
@@ -263,6 +284,35 @@ describe('the inbox and the push device', () => {
     });
   });
 
+  describe('row-level security, as the app role', () => {
+    it('refuses a partition addressed by name, for every kind of access, so the policies of the table cannot be walked around', async () => {
+      await put(other.person);
+      const part = `inbox_items_${await month()}`;
+      const statements = [
+        sql`select count(*) from ${sql.table(part)}`,
+        sql`insert into ${sql.table(part)} (user_id, society_id, category, title, body, source_key)
+          values (${me.person}, ${societyId}, 1, 't', 'b', 'x:1')`,
+        sql`update ${sql.table(part)} set read_at = now()`,
+        sql`delete from ${sql.table(part)}`,
+      ];
+      for (const statement of statements) {
+        await expect(asApp((tx) => statement.execute(tx))).rejects.toMatchObject({ code: '42501' });
+      }
+      // The table itself still answers, with the caller's own rows only.
+      expect(
+        await asApp(async (tx) => (await sql`select 1 from inbox_items`.execute(tx)).rows.length),
+      ).toBe(0);
+    });
+
+    it('lets a notice be written for the caller’s Society only', async () => {
+      await expect(asApp((tx) => row(societyId).execute(tx))).resolves.toBeDefined();
+      const elsewhere = await kit.society(admin);
+      await expect(asApp((tx) => row(elsewhere).execute(tx))).rejects.toMatchObject({
+        code: '42501',
+      });
+    });
+  });
+
   describe('ME-04 push device', () => {
     it('registers this session’s token, refreshes it, and keeps only the token the session sent last', async () => {
       expect((await register(deviceBody('a'))).status).toBe(200);
@@ -281,10 +331,14 @@ describe('the inbox and the push device', () => {
 
     it('moves a token to the session that sends it now, whoever held it', async () => {
       await register(deviceBody('a'));
-      const secondPhone = (await signInMobile(t, other.email)).accessToken;
-      expect((await register(deviceBody('a'), secondPhone)).status).toBe(200);
+      const secondLogin = await signInMobile(t, other.email);
+      expect((await register(deviceBody('a'), secondLogin.accessToken)).status).toBe(200);
       expect(await devices()).toEqual([
-        expect.objectContaining({ fcm_token: 'test-token-a', user_id: other.person }),
+        expect.objectContaining({
+          fcm_token: 'test-token-a',
+          user_id: other.person,
+          session_id: secondLogin.session.id,
+        }),
       ]);
     });
 
