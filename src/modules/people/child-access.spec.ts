@@ -1,5 +1,6 @@
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import type { RoleCode } from '../../common/auth/roles.js';
+import type { DatabaseService, Tx } from '../../platform/database/index.js';
 import type { GrantDirectory, GuardedChild } from '../../platform/identity/index.js';
 import { ChildAccess } from './child-access.js';
 
@@ -29,9 +30,14 @@ const principal = (roleCode: RoleCode | null = 5): Principal => ({
 
 const access = (children: GuardedChild[]) => {
   const guardedChildren = vi.fn<GrantDirectory['guardedChildren']>().mockResolvedValue(children);
+  const transaction = vi.fn<DatabaseService['transaction']>((_tenant, work) => work({} as Tx));
   return {
-    access: new ChildAccess({ guardedChildren } as unknown as GrantDirectory),
+    access: new ChildAccess(
+      { guardedChildren } as unknown as GrantDirectory,
+      { transaction } as unknown as DatabaseService,
+    ),
     guardedChildren,
+    transaction,
   };
 };
 
@@ -94,5 +100,41 @@ describe('ChildAccess', () => {
     expect(guardedChildren).toHaveBeenCalledTimes(1);
     await childAccess.of(principal(), 'stu-1');
     expect(guardedChildren).toHaveBeenCalledTimes(2);
+  });
+
+  describe('ofRecord', () => {
+    it('looks the record up with every child of the caller in the tenant, then checks the child it names', async () => {
+      const { access: childAccess, transaction } = access([child('stu-1'), child('stu-2')]);
+      const find = vi.fn<(tx: Tx) => Promise<string | undefined>>().mockResolvedValue('stu-2');
+      await expect(childAccess.ofRecord(principal(), find)).resolves.toMatchObject({
+        tenant: { childIds: ['stu-2'] },
+      });
+      expect(transaction).toHaveBeenCalledWith(
+        { personId: 'person-1', roleCode: 5, childIds: ['stu-1', 'stu-2'] },
+        find,
+      );
+    });
+
+    it('is 404 when the record is not one of their children’s', async () => {
+      const { access: childAccess } = access([child('stu-1')]);
+      await expect(
+        childAccess.ofRecord(principal(), () => Promise.resolve(undefined)),
+      ).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('is 403 CHILD_ACCESS_BLOCKED for the record of a blocked child', async () => {
+      const { access: childAccess } = access([child('stu-1', { childBlocked: true })]);
+      await expect(
+        childAccess.ofRecord(principal(), () => Promise.resolve('stu-1')),
+      ).rejects.toMatchObject({ status: 403, code: 'CHILD_ACCESS_BLOCKED' });
+    });
+
+    it('refuses a caller who is not acting as a parent without looking anything up', async () => {
+      const { access: childAccess, transaction } = access([child('stu-1')]);
+      await expect(
+        childAccess.ofRecord(principal(2), () => Promise.resolve('stu-1')),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(transaction).not.toHaveBeenCalled();
+    });
   });
 });

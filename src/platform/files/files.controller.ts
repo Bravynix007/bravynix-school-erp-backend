@@ -48,10 +48,10 @@ export class FilesController {
   }
 
   @Policy({
-    roles: [...ADMINS, RoleCode.TeacherStaff],
+    roles: [...ADMINS, RoleCode.TeacherStaff, RoleCode.StudentParent],
     scope: 'society',
     operationId: 'FIL-03',
-    rule: 'An Owner or Admin of the file’s Institution, or a teacher for a file the owning module lets them open (their own staff documents), gets a five-minute link; document purposes are audited',
+    rule: 'An Owner or Admin of the file’s Institution, or a teacher for a file the owning module lets them open (their own staff documents), or a parent for the photo or a document of their own child (404 for any other file, 403 CHILD_ACCESS_BLOCKED for a blocked child), gets a five-minute link; document purposes are audited',
   })
   @Get(':fileId/download')
   download(

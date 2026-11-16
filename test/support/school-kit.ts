@@ -1,4 +1,5 @@
 import { sql, type Kysely } from 'kysely';
+import request from 'supertest';
 import { newId } from '../../src/common/ids/ids.js';
 import type { apiCaller } from './api.js';
 import { removeScratchSocieties } from './scratch-society.js';
@@ -152,6 +153,34 @@ export class SchoolKit {
     const body = this.studentBody(institutionId, place, fields);
     const res = succeeded(await this.api('post', '/v1/students', token, body), 201, 'student');
     return res.body.data as unknown as SchoolStudent;
+  }
+
+  /**
+   * A Ready file: asked for (FIL-01), sent to the store and confirmed (FIL-02) as `token`. `fields` replace the
+   * defaults of the ticket (a purpose 5 PDF for `institutionId`).
+   */
+  async readyFile(token: string, institutionId: string, fields: object = {}, jpeg = false) {
+    const bytes = jpeg
+      ? Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(60, 1)])
+      : Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(60, 2)]);
+    const contentType = jpeg ? 'image/jpeg' : 'application/pdf';
+    const res = await this.api('post', '/v1/files/uploads', token, {
+      purpose: 5,
+      institutionId,
+      contentType,
+      sizeBytes: bytes.length,
+      fileName: 'file',
+      ...fields,
+    });
+    const given = succeeded(res, 201, 'upload ticket').body.data as unknown as {
+      fileId: string;
+      upload: { url: string; fields: Record<string, string> };
+    };
+    const sent = request(this.t.app.getHttpServer()).post(new URL(given.upload.url).pathname);
+    for (const [name, value] of Object.entries(given.upload.fields)) sent.field(name, value);
+    succeeded(await sent.attach('file', bytes, { filename: 'upload', contentType }), 204, 'send');
+    succeeded(await this.api('post', `/v1/files/${given.fileId}/confirm`, token), 200, 'confirm');
+    return given.fileId;
   }
 
   /** Signs the person in (from `ip`, when sign-ins must not share an address) and chooses the context; returns the token that acts in it. */

@@ -5,6 +5,7 @@ import { RoleCode } from '../../common/auth/roles.js';
 import { AppException } from '../../common/http/app-exception.js';
 import { ErrorCode } from '../../common/http/error-codes.js';
 import { GrantDirectory, type GuardedChild } from '../../platform/identity/index.js';
+import { DatabaseService, type Tx } from '../../platform/database/index.js';
 import type { InstitutionContext } from '../../platform/tenancy/index.js';
 
 /**
@@ -23,7 +24,10 @@ export class ChildAccess {
   /** One principal object lives for one request, so this memoises per request. */
   private readonly children = new WeakMap<Principal, Promise<readonly GuardedChild[]>>();
 
-  constructor(private readonly grants: GrantDirectory) {}
+  constructor(
+    private readonly grants: GrantDirectory,
+    private readonly database: DatabaseService,
+  ) {}
 
   async of(principal: Principal, studentId: string): Promise<InstitutionContext> {
     if (principal.roleCode !== RoleCode.StudentParent) throw AppException.forbidden();
@@ -40,6 +44,25 @@ export class ChildAccess {
         childIds: [studentId],
       },
     };
+  }
+
+  /**
+   * The child a record belongs to, found among the children the caller guards: `find` runs with all of them in the
+   * tenant, so row-level security shows it only those children's rows, and answers the child's ID or nothing (404).
+   * The child is then checked as for `of`, so a blocked child still answers 403 and the tenant names that one child.
+   */
+  async ofRecord(
+    principal: Principal,
+    find: (tx: Tx) => Promise<string | undefined>,
+  ): Promise<InstitutionContext> {
+    if (principal.roleCode !== RoleCode.StudentParent) throw AppException.forbidden();
+    const childIds = (await this.guarded(principal)).map((child) => child.studentId);
+    const studentId = await this.database.transaction(
+      { personId: principal.personId, roleCode: RoleCode.StudentParent, childIds },
+      find,
+    );
+    if (!studentId) throw AppException.notFound();
+    return this.of(principal, studentId);
   }
 
   private guarded(principal: Principal): Promise<readonly GuardedChild[]> {

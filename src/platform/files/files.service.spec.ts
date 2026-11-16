@@ -92,6 +92,8 @@ function build(stored: FileRow | null = file(), bytes: Buffer | null = JPEG) {
   const forPrincipal = vi.fn<ScopeService['forPrincipal']>().mockResolvedValue({ tenant } as never);
   const record = vi.fn<AuditService['record']>().mockResolvedValue('audit-1');
   const mayOpen = vi.fn<FileReaders['mayOpen']>().mockResolvedValue(false);
+  const childTenant = { personId: 'parent-1', roleCode: 5, childIds: ['student-1'] };
+  const parentTenant = vi.fn<FileReaders['parentTenant']>().mockResolvedValue(childTenant);
   const service = new FilesService(
     { transaction } as unknown as DatabaseService,
     { find, insert, settlePending } as unknown as FilesRepository,
@@ -99,7 +101,7 @@ function build(stored: FileRow | null = file(), bytes: Buffer | null = JPEG) {
     { requireInstitution, forPrincipal } as unknown as ScopeService,
     { record } as unknown as AuditService,
     clock,
-    { mayOpen } as unknown as FileReaders,
+    { mayOpen, parentTenant } as unknown as FileReaders,
   );
   return {
     service,
@@ -113,6 +115,10 @@ function build(stored: FileRow | null = file(), bytes: Buffer | null = JPEG) {
     requireInstitution,
     record,
     mayOpen,
+    parentTenant,
+    childTenant,
+    forPrincipal,
+    transaction,
   };
 }
 
@@ -361,6 +367,30 @@ describe('FilesService', () => {
         expect.anything(),
         expect.objectContaining({ action: 'file.download', entityId: 'file-1' }),
       );
+    });
+
+    it('opens a parent’s request in the tenant of the child the file belongs to, with no Institution scope read', async () => {
+      const t = build(file({ file_status: 2, purpose: 5, content_type: 'application/pdf' }));
+      const parent = admin({ personId: 'parent-1', roleCode: 5, societyId: null });
+      expect((await t.service.download(parent, 'file-1')).url).toBe('http://store/down');
+      expect(t.parentTenant).toHaveBeenCalledWith(parent, 'file-1');
+      expect(t.transaction).toHaveBeenCalledWith(t.childTenant, expect.any(Function));
+      expect(t.forPrincipal).not.toHaveBeenCalled();
+      expect(t.mayOpen).not.toHaveBeenCalled();
+      expect(t.record).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ action: 'file.download', entityId: 'file-1' }),
+      );
+    });
+
+    it('answers a parent as the child does: the refusal of the lookup, and no file when row-level security shows none', async () => {
+      const refused = build(file({ file_status: 2 }));
+      refused.parentTenant.mockRejectedValue(AppException.notFound());
+      const parent = admin({ personId: 'parent-1', roleCode: 5, societyId: null });
+      expect(await fail(refused.service.download(parent, 'file-1'))).toMatchObject({ status: 404 });
+      expect(refused.find).not.toHaveBeenCalled();
+      const hidden = build(null);
+      expect(await fail(hidden.service.download(parent, 'file-1'))).toMatchObject({ status: 404 });
     });
 
     it('does not ask the owner of the purpose for an Owner or Admin', async () => {

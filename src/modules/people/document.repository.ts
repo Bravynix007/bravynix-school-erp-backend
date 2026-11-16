@@ -44,6 +44,23 @@ export class DocumentRepository {
     return row !== undefined;
   }
 
+  /** The student a file is the photo or a document of, whichever of the two it is; none when it is neither. */
+  async studentOfFile(tx: Tx, fileId: string): Promise<string | undefined> {
+    const photo = await tx
+      .selectFrom('students')
+      .select('id')
+      .where('photo_file_id', '=', fileId)
+      .executeTakeFirst();
+    if (photo) return photo.id;
+    const document = await tx
+      .selectFrom('documents')
+      .select('student_id')
+      .where('file_id', '=', fileId)
+      .where('status', '=', 1)
+      .executeTakeFirst();
+    return document?.student_id ?? undefined;
+  }
+
   insert(tx: Tx, values: NewDocument): Promise<DocumentRow> {
     return tx.insertInto('documents').values(values).returningAll().executeTakeFirstOrThrow();
   }
