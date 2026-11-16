@@ -11,8 +11,10 @@ import { sql, type Kysely } from 'kysely';
  *   worker writes them for a Society's job. `uq_inbox_items_source` makes a rerun of a fan-out add nothing twice,
  *   because the rows take the source event's time as `created_at`.
  * - `maintenance.ensure_inbox_partitions(first_month, months_ahead)`: makes the monthly partitions, as the audit log
- *   does, so a row never lands in the default partition. It runs as its owner with a fixed search_path and holds no
- *   business rule; the worker asks for it (the sweeps slice).
+ *   does, and takes every right on each from the app role, because the policies of the parent do not reach a
+ *   partition that is named. There is no default partition: a row of a month with no partition is refused, so the
+ *   worker's sweep keeps three months ahead (B2b). It runs as its owner with a fixed search_path and holds no
+ *   business rule.
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`
@@ -119,6 +121,11 @@ export async function up(db: Kysely<unknown>): Promise<void> {
             'create table public.%I partition of public.inbox_items for values from (%L) to (%L)',
             part_name, month_from, month_to
           );
+          -- A policy on the parent does not apply to a partition addressed by name, so the app role gets no rights
+          -- on it at all (as for the audit log's partitions).
+          if exists (select 1 from pg_roles where rolname = 'erp_app') then
+            execute format('revoke all on table public.%I from erp_app', part_name);
+          end if;
           made := made + 1;
         end if;
       end loop;
