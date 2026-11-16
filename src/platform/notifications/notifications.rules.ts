@@ -14,7 +14,7 @@ export const MAX_RECEIVERS = 5000;
 export const MAX_SOURCE_KEY = 100;
 export const MAX_TITLE = 150;
 export const MAX_BODY = 1000;
-export const MAX_SENDER = 200;
+const MAX_SENDER = 200;
 
 /** One person who is to get the notice, and the child it is about when it is about one. */
 export interface Receiver {
