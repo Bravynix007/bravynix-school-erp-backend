@@ -1,5 +1,5 @@
 import { accessBlockedIn, findContext, mobileContexts, onlyContext } from './contexts.js';
-import type { Grant } from './session.repository.js';
+import type { Grant, GuardedChild } from './session.repository.js';
 
 const grant = (
   roleCode: number,
@@ -13,6 +13,26 @@ const grant = (
   ownersBlocked: false,
   staffBlocked: false,
   accessBlocked: false,
+});
+
+const guarded = (studentId: string, fields: Partial<GuardedChild> = {}): GuardedChild => ({
+  studentId,
+  societyId: 'soc-1',
+  institutionId: 'ins-1',
+  institutionName: 'Green Valley School',
+  firstName: 'Diya',
+  lastName: 'Shetty',
+  photoFileId: null,
+  className: '7th',
+  sectionName: 'A',
+  childBlocked: false,
+  studentsBlocked: false,
+  ...fields,
+});
+
+const parentGrant = (children: GuardedChild[]): Grant => ({
+  ...grant(5, null),
+  children,
 });
 
 const choice = (roleCode: number, societyId: string | null) => ({
@@ -94,6 +114,47 @@ describe('mobileContexts', () => {
       false,
       false,
     ]);
+  });
+
+  it('makes one Parent context for the person, with no Society and every child, across Societies', () => {
+    const two = [
+      guarded('stu-1'),
+      guarded('stu-2', { societyId: 'soc-2', institutionId: 'ins-2' }),
+    ];
+    expect(mobileContexts([grant(2, 'soc-1'), parentGrant(two)])).toEqual([
+      choice(2, 'soc-1'),
+      {
+        roleCode: 5,
+        societyId: null,
+        societyName: null,
+        isBlocked: false,
+        children: [
+          {
+            studentId: 'stu-1',
+            firstName: 'Diya',
+            lastName: 'Shetty',
+            photoFileId: null,
+            institutionId: 'ins-1',
+            institutionName: 'Green Valley School',
+            societyId: 'soc-1',
+            className: '7th',
+            sectionName: 'A',
+            isBlocked: false,
+          },
+          expect.objectContaining({ studentId: 'stu-2', societyId: 'soc-2', isBlocked: false }),
+        ],
+      },
+    ]);
+  });
+
+  it('flags a child blocked by the profile or by the Institution, and the context only when every child is', () => {
+    const profile = guarded('stu-1', { childBlocked: true });
+    const institution = guarded('stu-2', { studentsBlocked: true });
+    const open = guarded('stu-3');
+    const [some] = mobileContexts([parentGrant([profile, institution, open])]);
+    expect(some?.children?.map((child) => child.isBlocked)).toEqual([true, true, false]);
+    expect(some?.isBlocked).toBe(false);
+    expect(mobileContexts([parentGrant([profile, institution])])[0]?.isBlocked).toBe(true);
   });
 
   it('keeps a Society Owner and an Institution Admin of the same Society apart', () => {

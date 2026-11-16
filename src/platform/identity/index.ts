@@ -23,6 +23,7 @@ export {
   type OwnerSortField,
   type SocietyOwner,
 } from './grant-directory.js';
+export type { GuardedChild } from './session.repository.js';
 export { PersonDirectory, type PersonRef } from './person-directory.js';
 export { AccountStatus, AuthCode, ClientType } from './auth-codes.js';
 export type {

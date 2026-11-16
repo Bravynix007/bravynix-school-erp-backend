@@ -7,6 +7,7 @@ import { SecretBox } from '../../platform/crypto/index.js';
 import type { DatabaseService, Tx } from '../../platform/database/index.js';
 import { IdentityNumbers } from '../../platform/identity-numbers/index.js';
 import type { ScopeService } from '../../platform/tenancy/index.js';
+import type { ChildAccess } from './child-access.js';
 import { StudentContext } from './student-context.js';
 import type {
   StudentIdentityRepository,
@@ -99,7 +100,7 @@ function build(held?: StudentIdentityRow, current: StudentRow | undefined = stud
   const service = new StudentIdentityService(
     database,
     repository,
-    new StudentContext(database, repository, scope),
+    new StudentContext(database, repository, scope, {} as unknown as ChildAccess),
     { find: identityFind, holderOf, heldElsewhere, put } as unknown as StudentIdentityRepository,
     numbers,
     { record } as unknown as AuditService,

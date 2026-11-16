@@ -249,19 +249,20 @@ describe('AUTH-02 verify the code', () => {
       ).toHaveLength(1);
     });
 
-    it('starts a person with no admin grant without an active context', async () => {
+    it('starts a parent in the one Student / Parent context, which names no Society', async () => {
       const code = await codeFor(parent.email);
       const res = await verify(parent.email, code).expect(200);
       expect(res.body.data).toMatchObject({
-        userType: null,
-        userTypeName: null,
-        session: { activeContext: null },
-        contexts: [],
+        userType: 5,
+        userTypeName: 'student_parent',
+        session: { activeContext: { roleCode: 5, societyId: null } },
+        contexts: [{ roleCode: 5, societyId: null, societyName: null, isBlocked: false }],
       });
+      expect(res.body.data.contexts[0].children).toHaveLength(1);
       const check = await t.app
         .get(TokenService)
         .checkAccessToken(res.body.data.accessToken, t.clock.now());
-      expect(check).toMatchObject({ claims: { roleCode: null, societyId: null } });
+      expect(check).toMatchObject({ claims: { roleCode: 5, societyId: null } });
     });
 
     it('does not give a Super Admin a mobile context', async () => {

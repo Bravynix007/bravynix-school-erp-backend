@@ -37,6 +37,7 @@ import { StaffController } from './staff.controller.js';
 import { StaffRepository } from './staff.repository.js';
 import { StaffService } from './staff.service.js';
 import { StudentClassroomService } from './student-classroom.service.js';
+import { ChildAccess } from './child-access.js';
 import { StudentContext } from './student-context.js';
 import { StudentIdentityController } from './student-identity.controller.js';
 import { StudentIdentityRepository } from './student-identity.repository.js';
@@ -86,6 +87,7 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
     ImportService,
     ImportProcessor,
     StudentRepository,
+    ChildAccess,
     StudentContext,
     StudentService,
     StudentClassroomService,

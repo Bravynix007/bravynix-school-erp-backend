@@ -20,10 +20,10 @@ export class GuardianController {
   constructor(private readonly guardians: GuardianService) {}
 
   @Policy({
-    roles: ADMINS,
+    roles: [...ADMINS, RoleCode.StudentParent],
     scope: 'institution',
     operationId: 'GDN-01',
-    rule: 'Lists the active guardians of a student whose Institution the caller reaches, the primary first; a teacher never reads them',
+    rule: 'Lists the active guardians of a student whose Institution the caller reaches, the primary first; a parent reads the guardians of their own child (404 for any other, 403 CHILD_ACCESS_BLOCKED for a blocked child); a teacher never reads them',
   })
   @Get('students/:studentId/guardians')
   list(

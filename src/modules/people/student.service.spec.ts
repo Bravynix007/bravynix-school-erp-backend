@@ -15,6 +15,7 @@ import type {
   SectionDirectory,
 } from '../academic-setup/index.js';
 import type { StudentClassroomService } from './student-classroom.service.js';
+import type { ChildAccess } from './child-access.js';
 import { StudentContext } from './student-context.js';
 import {
   StudentIdentityRepository,
@@ -255,7 +256,7 @@ function build(found: StudentRow | null = row()) {
     database,
     repository,
     scopeService,
-    new StudentContext(database, repository, scopeService),
+    new StudentContext(database, repository, scopeService, {} as unknown as ChildAccess),
     { linkGuardian, welcomeAs } as unknown as AccountDirectory,
     {
       describe: vi.fn<PersonDirectory['describe']>().mockResolvedValue(new Map()),

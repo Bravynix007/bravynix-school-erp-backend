@@ -9,6 +9,7 @@ import { GuardianContext } from './guardian-context.js';
 import type { UpdateGuardianDto } from './guardian.dto.js';
 import type { GuardianRepository } from './guardian.repository.js';
 import { GuardianService } from './guardian.service.js';
+import type { ChildAccess } from './child-access.js';
 import { StudentContext } from './student-context.js';
 import type { GuardianDto } from './student.dto.js';
 import type { GuardianRow, StudentRepository, StudentRow } from './student.repository.js';
@@ -161,7 +162,7 @@ function build(
     database,
     students,
     guardians,
-    new StudentContext(database, students, scope),
+    new StudentContext(database, students, scope, {} as unknown as ChildAccess),
     new GuardianContext(database, guardians, scope),
     {
       linkGuardian,

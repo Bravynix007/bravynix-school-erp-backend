@@ -9,6 +9,7 @@ import type { DocumentRepository, DocumentRow } from './document.repository.js';
 import { DocumentService } from './document.service.js';
 import { StaffContext } from './staff-context.js';
 import type { StaffRepository, StaffRow } from './staff.repository.js';
+import type { ChildAccess } from './child-access.js';
 import { StudentContext } from './student-context.js';
 import type { StudentRepository, StudentRow } from './student.repository.js';
 
@@ -119,7 +120,12 @@ function build(
     database,
     { find, ofOwner, insert, deactivate } as unknown as DocumentRepository,
     new StaffContext(database, repository, scope),
-    new StudentContext(database, { find: studentFind } as unknown as StudentRepository, scope),
+    new StudentContext(
+      database,
+      { find: studentFind } as unknown as StudentRepository,
+      scope,
+      {} as unknown as ChildAccess,
+    ),
     scope,
     { requireReady, briefs } as unknown as FileDirectory,
     { describe } as unknown as PersonDirectory,
