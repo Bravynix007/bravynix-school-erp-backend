@@ -8,7 +8,7 @@ export interface Context {
 }
 
 /** One child in the Student / Parent context (API design 10.2), as the child switcher shows it. */
-export interface ChildChoice {
+interface ChildChoice {
   studentId: string;
   firstName: string;
   lastName: string | null;
