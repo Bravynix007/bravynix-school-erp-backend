@@ -46,6 +46,15 @@ describe('mobileContexts', () => {
     ]);
   });
 
+  it('names the staff record and its home Institution on a teacher context, and on no other', () => {
+    const teacher = { ...grant(4, 'soc-1', 'ins-1'), staffMemberId: 'stf-1' };
+    const admin = { ...grant(3, 'soc-1', 'ins-1'), staffMemberId: 'stf-1' };
+    expect(mobileContexts([teacher])).toEqual([
+      { ...choice(4, 'soc-1'), staffMemberId: 'stf-1', homeInstitutionId: 'ins-1' },
+    ]);
+    expect(mobileContexts([admin])).toEqual([choice(3, 'soc-1')]);
+  });
+
   it('names the Society of each context, so two Owner seats can be told apart', () => {
     expect(
       mobileContexts([grant(2, 'soc-1'), grant(2, 'soc-2')]).map((c) => c.societyName),

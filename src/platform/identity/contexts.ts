@@ -17,6 +17,9 @@ export interface Context {
 export interface ContextChoice extends Context {
   societyName: string | null;
   isBlocked: boolean;
+  /** Role 4 only: the person's staff record in the Society, and its home Institution (API design 10.2). */
+  staffMemberId?: string;
+  homeInstitutionId?: string;
 }
 
 /** The console's one context: Super Admin, no Society. */
@@ -26,6 +29,15 @@ export const CONSOLE_CONTEXT: ContextChoice = {
   societyName: null,
   isBlocked: false,
 };
+
+/** The staff record a role 4 entry stands for, which the context names so the app can open it. */
+function staffRecordOf(grant: Grant): Pick<ContextChoice, 'staffMemberId' | 'homeInstitutionId'> {
+  return grant.roleCode === RoleCode.TeacherStaff &&
+    grant.staffMemberId !== undefined &&
+    grant.institutionId !== null
+    ? { staffMemberId: grant.staffMemberId, homeInstitutionId: grant.institutionId }
+    : {};
+}
 
 /**
  * The contexts a mobile session can choose from: one per role and Society
@@ -52,6 +64,7 @@ export function mobileContexts(grants: readonly Grant[]): ContextChoice[] {
         societyId: grant.societyId,
         societyName: grant.societyName,
         isBlocked: blocked,
+        ...staffRecordOf(grant),
       });
     }
   }
