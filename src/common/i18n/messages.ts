@@ -27,6 +27,7 @@ const en: Catalogue = {
   NOT_ASSIGNED: 'You are not assigned to this class or subject',
   ACCESS_BLOCKED: 'Your access has been blocked, please contact your Institution',
   CHILD_ACCESS_BLOCKED: 'Access to this child has been blocked, please contact the school',
+  SCOPE_NOT_ALLOWED: 'You may not make or change this for the whole Society',
   SUPPORT_READ_ONLY: 'Support access is read-only',
   NOT_FOUND: 'Not found',
   VERSION_CONFLICT: 'Someone else changed this; your changes were not saved',
