@@ -69,11 +69,34 @@ describe('SweepsService.sweep', () => {
     expect((await service.sweep()).filesRemoved).toBe(0);
   });
 
-  it('stops looking when a whole batch failed, so it does not ask for the same files again', async () => {
+  it('asks past the files that failed, and stops when only they are left', async () => {
     const { service, storage, repository } = build([[due('f1')], [due('f1')]]);
     storage.remove.mockRejectedValue(new Error('storage is down'));
     await service.sweep();
-    expect(repository.dueFiles).toHaveBeenCalledTimes(1);
+    expect(repository.dueFiles).toHaveBeenCalledTimes(2);
+    expect(repository.dueFiles).toHaveBeenLastCalledWith(FILE_BATCH + 1);
+    expect(storage.remove).toHaveBeenCalledTimes(1);
+  });
+
+  it('removes a file listed behind files whose objects could not be removed', async () => {
+    const { service, storage, repository } = build([
+      [due('f1'), due('f2')],
+      [due('f1'), due('f2'), due('f3')],
+    ]);
+    storage.remove.mockImplementation(async (key) => {
+      if (key !== 'k/f3') throw new Error('this object cannot be removed');
+    });
+    const report = await service.sweep();
+    expect(repository.dueFiles).toHaveBeenNthCalledWith(2, FILE_BATCH + 2);
+    expect(repository.markDeleted).toHaveBeenCalledExactlyOnceWith(due('f3'));
+    expect(report.filesRemoved).toBe(1);
+  });
+
+  it('passes over a file confirmed in the meantime instead of trying it again', async () => {
+    const { service, repository, storage } = build([[due('f1')], [due('f1')]]);
+    repository.markDeleted.mockResolvedValue(false);
+    await service.sweep();
+    expect(storage.remove).toHaveBeenCalledTimes(1);
   });
 
   it('works through further batches, up to a limit', async () => {

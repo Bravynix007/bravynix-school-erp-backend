@@ -59,27 +59,30 @@ export class SweepsService {
 
   /**
    * Removes the object of each due file and then marks its row Deleted: a row is never marked while its object may
-   * still be there. A file whose object could not be removed is left for the next sweep.
+   * still be there. A file whose object could not be removed is left for the next sweep, and the next look asks past
+   * it, so files that keep failing at the head of the list never hold back the ones behind them.
    */
   private async removeDueFiles(): Promise<number> {
     let removed = 0;
+    // The files this sweep has tried and could not settle: still listed, and passed over.
+    const passed = new Set<string>();
     for (let batch = 0; batch < MAX_FILE_BATCHES; batch++) {
-      const due = await this.sweeps.dueFiles(FILE_BATCH);
-      let settled = 0;
+      const due = (await this.sweeps.dueFiles(FILE_BATCH + passed.size)).filter(
+        (file) => !passed.has(file.id),
+      );
+      // Only files this sweep could not settle are left: another look would find the same ones.
+      if (due.length === 0) break;
       for (const file of due) {
         try {
           await this.storage.remove(file.objectKey);
         } catch (error) {
           this.logger.warn({ err: error, fileId: file.id }, 'A file object could not be removed');
+          passed.add(file.id);
           continue;
         }
-        if (await this.sweeps.markDeleted(file)) {
-          removed++;
-          settled++;
-        }
+        if (await this.sweeps.markDeleted(file)) removed++;
+        else passed.add(file.id);
       }
-      // Nothing was settled in this batch (all failed, or none was due): another look would find the same files.
-      if (settled === 0) break;
     }
     return removed;
   }
