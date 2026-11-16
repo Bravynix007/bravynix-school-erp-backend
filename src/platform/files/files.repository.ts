@@ -4,6 +4,11 @@ import type { Tx } from '../database/index.js';
 import type { FilesTable } from './files.tables.js';
 
 export type FileRow = Selectable<FilesTable>;
+
+/** The file's `delete_after` has come: the worker removes its object at its next sweep, so it is as good as gone. */
+export function isDue(file: Pick<FileRow, 'delete_after'>, now: Date): boolean {
+  return file.delete_after !== null && file.delete_after <= now;
+}
 export type NewFile = Insertable<FilesTable>;
 export type FileChanges = Updateable<FilesTable>;
 

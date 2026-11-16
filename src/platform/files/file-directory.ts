@@ -5,7 +5,7 @@ import { Clock } from '../../common/time/clock.js';
 import { fieldError } from '../../common/validation/field-error.js';
 import type { Tx } from '../database/index.js';
 import type { FilePurpose } from './file-purposes.js';
-import { FilesRepository, type FileRow } from './files.repository.js';
+import { FilesRepository, isDue } from './files.repository.js';
 import { ObjectStorage } from './object-storage.js';
 
 const READY = 2;
@@ -44,7 +44,7 @@ export class FileDirectory {
     if (!file) throw AppException.notFound();
     if (
       file.file_status !== READY ||
-      this.due(file) ||
+      isDue(file, this.clock.now()) ||
       file.purpose !== expect.purpose ||
       file.institution_id !== expect.institutionId
     ) {
@@ -72,14 +72,9 @@ export class FileDirectory {
     ) {
       throw AppException.validation([fieldError(field, FieldErrorCode.INVALID_VALUE)]);
     }
-    if (file.file_status !== READY || this.due(file)) {
+    if (file.file_status !== READY || isDue(file, this.clock.now())) {
       throw AppException.businessRule(ErrorCode.FILE_NOT_READY);
     }
-  }
-
-  /** The file's `delete_after` has come. */
-  private due(file: FileRow): boolean {
-    return file.delete_after !== null && file.delete_after <= this.clock.now();
   }
 
   /** What a Ready file holds (at most 5 MB), for the module that owns it to read; `null` when nothing is stored. */

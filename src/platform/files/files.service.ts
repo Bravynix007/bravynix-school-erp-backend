@@ -13,7 +13,7 @@ import { FileReaders } from './file-readers.js';
 import { matchesDeclaredType } from './file-signature.js';
 import { MAX_FILE_BYTES, PRIVATE_BUCKET, PURPOSES, type FilePurpose } from './file-purposes.js';
 import type { RequestUploadDto } from './files.dto.js';
-import { FilesRepository } from './files.repository.js';
+import { FilesRepository, isDue } from './files.repository.js';
 import { fileResource, type FileResource } from './files.resource.js';
 import { ObjectStorage, type DownloadTicket, type UploadTicket } from './object-storage.js';
 
@@ -112,7 +112,7 @@ export class FilesService {
       !file ||
       file.created_by !== principal.personId ||
       file.file_status > 2 ||
-      (file.delete_after !== null && file.delete_after <= this.clock.now())
+      isDue(file, this.clock.now())
     ) {
       throw AppException.notFound();
     }
