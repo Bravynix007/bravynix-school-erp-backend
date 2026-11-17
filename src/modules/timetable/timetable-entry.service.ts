@@ -9,6 +9,7 @@ import { ErrorCode, FieldErrorCode } from '../../common/http/error-codes.js';
 import { requireVersion } from '../../common/http/require-version.js';
 import { newId } from '../../common/ids/ids.js';
 import { fieldError } from '../../common/validation/field-error.js';
+import { parentReadErrors, staffReadErrors } from '../../common/validation/parent-read.js';
 import { AuditService, type AuditValues } from '../../platform/audit/index.js';
 import {
   DatabaseService,
@@ -17,7 +18,11 @@ import {
   type Tx,
 } from '../../platform/database/index.js';
 import { PersonDirectory } from '../../platform/identity/index.js';
-import { ScopeService, type InstitutionContext } from '../../platform/tenancy/index.js';
+import {
+  ChildContexts,
+  ScopeService,
+  type InstitutionContext,
+} from '../../platform/tenancy/index.js';
 import {
   AcademicYearDirectory,
   SectionDirectory,
@@ -98,6 +103,7 @@ export class TimetableEntryService {
     private readonly teaching: TeachingStaff,
     private readonly staff: TimetableStaff,
     private readonly children: TimetableChildren,
+    private readonly childContexts: ChildContexts,
     private readonly people: PersonDirectory,
     private readonly audit: AuditService,
   ) {}
@@ -245,22 +251,13 @@ export class TimetableEntryService {
    */
   private async target(principal: Principal, query: ListTimetableQueryDto): Promise<Target> {
     if (principal.roleCode === RoleCode.StudentParent) {
-      const errors = [
-        ...(query.studentId === undefined
-          ? [fieldError('studentId', FieldErrorCode.REQUIRED)]
-          : []),
-        ...(['sectionId', 'staffMemberId', 'institutionId'] as const)
-          .filter((field) => query[field] !== undefined)
-          .map((field) => fieldError(field, FieldErrorCode.FIELD_NOT_ALLOWED)),
-      ];
+      const errors = parentReadErrors(query, ['sectionId', 'staffMemberId', 'institutionId']);
       if (errors.length > 0) throw AppException.validation(errors);
       const studentId = query.studentId!;
-      return { context: await this.children.childContext(principal, studentId), studentId };
+      return { context: await this.childContexts.of(principal, studentId), studentId };
     }
     const errors = [
-      ...(query.studentId === undefined
-        ? []
-        : [fieldError('studentId', FieldErrorCode.FIELD_NOT_ALLOWED)]),
+      ...staffReadErrors(query),
       ...(query.sectionId === undefined && query.staffMemberId === undefined
         ? [fieldError('sectionId', FieldErrorCode.REQUIRED)]
         : []),
