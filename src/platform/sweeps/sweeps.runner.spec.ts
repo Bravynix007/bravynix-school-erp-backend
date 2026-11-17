@@ -14,6 +14,7 @@ describe('SweepsRunner.runUntil', () => {
       answersRemoved: 0,
       inboxPartitionsMade: 0,
       inboxPartitionsDropped: 0,
+      attendancePartitionsMade: 0,
     });
     const stop = new AbortController();
     const done = new SweepsRunner({ sweep } as unknown as SweepsService).runUntil(stop.signal);

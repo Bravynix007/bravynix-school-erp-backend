@@ -49,6 +49,7 @@ import * as m0047 from './2026_11_16_0047_events_core.js';
 import * as m0048 from './2026_11_16_0048_events_parent_read.js';
 import * as m0049 from './2026_11_16_0049_timetable_time_slots.js';
 import * as m0050 from './2026_11_17_0050_timetable_entries.js';
+import * as m0051 from './2026_11_17_0051_attendance_sessions.js';
 
 /**
  * Every migration, in order. Listed explicitly (not read from disk) so the
@@ -109,6 +110,7 @@ const migrations: Record<string, Migration> = {
   '2026_11_16_0048_events_parent_read': m0048,
   '2026_11_16_0049_timetable_time_slots': m0049,
   '2026_11_17_0050_timetable_entries': m0050,
+  '2026_11_17_0051_attendance_sessions': m0051,
 };
 
 export const migrationProvider: MigrationProvider = {

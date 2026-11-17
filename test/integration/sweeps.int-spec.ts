@@ -473,6 +473,14 @@ describe('worker sweeps', () => {
       expect((await sweeps.sweep()).inboxPartitionsMade).toBe(0);
     });
 
+    it('makes the attendance partitions of this year and the next, when they are missing', async () => {
+      const next = `attendance_exceptions_${(new Date().getUTCFullYear() + 1).toString()}`;
+      await sql`drop table ${sql.table(next)}`.execute(ownerDb);
+      expect((await sweeps.sweep()).attendancePartitionsMade).toBe(1);
+      expect(await exists(next)).toBe(true);
+      expect((await sweeps.sweep()).attendancePartitionsMade).toBe(0);
+    });
+
     it('drops an inbox month that ended more than 180 days ago, with its rows, and keeps the others', async () => {
       await sql`select maintenance.ensure_inbox_partitions(date '2025-01-01', 0)`.execute(ownerDb);
       const lastMonth = await monthName('inbox_items', -1);

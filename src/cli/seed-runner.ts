@@ -10,6 +10,7 @@ import { writeAcademicSeed } from '../seeds/academic-seed.js';
 import { writeBillingSeed } from '../seeds/billing-seed.js';
 import { writeFilesSeed } from '../seeds/files-seed.js';
 import { writeEventsSeed } from '../seeds/events-seed.js';
+import { writeAttendanceSeed } from '../seeds/attendance-seed.js';
 import { writeTimetableSeed } from '../seeds/timetable-seed.js';
 import { writeNotificationsSeed } from '../seeds/notifications-seed.js';
 import { writeStaffSeed, writeStudentSeed } from '../seeds/people-seed.js';
@@ -39,6 +40,7 @@ export const SCENARIOS: Record<string, Scenario> = {
       writeNotificationsSeed,
       writeEventsSeed,
       writeTimetableSeed,
+      writeAttendanceSeed,
     ],
     summary: () => [
       `Scenario two-worlds: ${societies.length} Societies, ${institutions.length} Institutions,`,

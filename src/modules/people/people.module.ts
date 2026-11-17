@@ -1,4 +1,5 @@
 import { Global, Module } from '@nestjs/common';
+import { AttendanceStaff, SectionRoster } from '../attendance/index.js';
 import { EventPeople } from '../events/index.js';
 import { TimetableChildren, TimetableStaff } from '../timetable/index.js';
 import { AcademicSetupModule, SectionStudents, TeachingStaff } from '../academic-setup/index.js';
@@ -30,6 +31,8 @@ import { InstitutionAdminService } from './institution-admin.service.js';
 import { PeopleEventPeople } from './people-event-people.js';
 import { PeopleFileReaders } from './people-file-readers.js';
 import { PeopleTimetableChildren } from './people-timetable-children.js';
+import { PeopleAttendanceStaff } from './people-attendance-staff.js';
+import { PeopleSectionRoster } from './people-section-roster.js';
 import { PeopleTimetableStaff } from './people-timetable-staff.js';
 import { PeopleSectionStudents } from './people-section-students.js';
 import { PeopleTeachingStaff } from './people-teaching-staff.js';
@@ -113,6 +116,10 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
     { provide: TimetableChildren, useExisting: PeopleTimetableChildren },
     PeopleTimetableStaff,
     { provide: TimetableStaff, useExisting: PeopleTimetableStaff },
+    PeopleSectionRoster,
+    { provide: SectionRoster, useExisting: PeopleSectionRoster },
+    PeopleAttendanceStaff,
+    { provide: AttendanceStaff, useExisting: PeopleAttendanceStaff },
   ],
   exports: [
     TeachingStaff,
@@ -121,6 +128,8 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
     EventPeople,
     TimetableChildren,
     TimetableStaff,
+    SectionRoster,
+    AttendanceStaff,
   ],
 })
 export class PeopleModule {}
