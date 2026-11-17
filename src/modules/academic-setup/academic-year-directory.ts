@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { AppException } from '../../common/http/app-exception.js';
+import { ErrorCode } from '../../common/http/error-codes.js';
 import type { Tx } from '../../platform/database/index.js';
 import { AcademicYearRepository } from './academic-year.repository.js';
 
@@ -39,5 +40,12 @@ export class AcademicYearDirectory {
   /** The current academic year of the Institution, or `null` when none is set. */
   async currentId(tx: Tx, institutionId: string): Promise<string | null> {
     return (await this.years.currentOf(tx, institutionId))?.id ?? null;
+  }
+
+  /** The current academic year of the Institution; 422 `CURRENT_YEAR_REQUIRED` when none is set. */
+  async requireCurrentId(tx: Tx, institutionId: string): Promise<string> {
+    const id = await this.currentId(tx, institutionId);
+    if (id === null) throw AppException.businessRule(ErrorCode.CURRENT_YEAR_REQUIRED);
+    return id;
   }
 }
