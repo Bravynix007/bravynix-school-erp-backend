@@ -123,12 +123,7 @@ function build(current: TimetableEntryRow | null = entry()) {
     .fn<TimetableEntryRepository['withSlots']>()
     .mockImplementation(() => Promise.resolve([withSlot(current ?? entry())]));
   const find = vi.fn<TimetableEntryRepository['find']>().mockResolvedValue(current ?? undefined);
-  const sectionTaken = vi
-    .fn<TimetableEntryRepository['sectionTaken']>()
-    .mockResolvedValue(undefined);
-  const teacherBooked = vi
-    .fn<TimetableEntryRepository['teacherBooked']>()
-    .mockResolvedValue(undefined);
+  const taken = vi.fn<TimetableEntryRepository['taken']>().mockResolvedValue(undefined);
   const insert = vi
     .fn<TimetableEntryRepository['insert']>()
     .mockImplementation((_tx, values) =>
@@ -151,12 +146,7 @@ function build(current: TimetableEntryRow | null = entry()) {
   const requireCurrentId = vi
     .fn<AcademicYearDirectory['requireCurrentId']>()
     .mockResolvedValue('year-1');
-  const placeOf = vi.fn<SectionDirectory['placeOf']>().mockResolvedValue({
-    classId: 'class-1',
-    institutionId: 'inst-1',
-    active: true,
-    capacity: null,
-  });
+  const contextOf = vi.fn<SectionDirectory['contextOf']>().mockResolvedValue(context);
   const requireActiveSection = vi.fn<SectionDirectory['requireActive']>().mockResolvedValue();
   const sectionNames = vi
     .fn<SectionDirectory['names']>()
@@ -190,8 +180,7 @@ function build(current: TimetableEntryRow | null = entry()) {
     {
       withSlots,
       find,
-      sectionTaken,
-      teacherBooked,
+      taken,
       insert,
       update,
     } as unknown as TimetableEntryRepository,
@@ -199,7 +188,7 @@ function build(current: TimetableEntryRow | null = entry()) {
     { forPrincipal, requireInstitution } as unknown as ScopeService,
     { requireCurrentId } as unknown as AcademicYearDirectory,
     {
-      placeOf,
+      contextOf,
       requireActive: requireActiveSection,
       names: sectionNames,
     } as unknown as SectionDirectory,
@@ -223,14 +212,13 @@ function build(current: TimetableEntryRow | null = entry()) {
     transaction,
     withSlots,
     find,
-    sectionTaken,
-    teacherBooked,
+    taken,
     insert,
     update,
     findSlot,
     requireInstitution,
     requireCurrentId,
-    placeOf,
+    contextOf,
     requireActiveSection,
     sectionNames,
     requireSubject,
@@ -249,8 +237,7 @@ describe('TimetableEntryService.list', () => {
   it('reads a section’s week of the current year, with the names', async () => {
     const t = build();
     const result = await t.service.list(admin, { sectionId: 'section-1' });
-    expect(t.placeOf).toHaveBeenCalled();
-    expect(t.requireInstitution).toHaveBeenCalledWith(admin, 'inst-1');
+    expect(t.contextOf).toHaveBeenCalledWith(admin, 'section-1');
     expect(t.withSlots).toHaveBeenCalledWith(expect.anything(), {
       academicYearId: 'year-1',
       sectionId: 'section-1',
@@ -266,7 +253,7 @@ describe('TimetableEntryService.list', () => {
 
   it('is 404 for a section the caller cannot see', async () => {
     const t = build();
-    t.placeOf.mockResolvedValue(undefined);
+    t.contextOf.mockRejectedValue(AppException.notFound());
     expect(await refusal(t.service.list(admin, { sectionId: 'x' }))).toMatchObject({ status: 404 });
   });
 
@@ -407,7 +394,8 @@ describe('TimetableEntryService.create', () => {
     });
     expect(t.requireSubject).not.toHaveBeenCalled();
     expect(t.requireTeacher).not.toHaveBeenCalled();
-    expect(t.teacherBooked).not.toHaveBeenCalled();
+    // A break has no teacher, so only the section's own period is looked at.
+    expect(t.taken).toHaveBeenCalledTimes(1);
     expect(t.insert).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ is_break: true, subject_id: null, staff_member_id: null }),
@@ -423,12 +411,12 @@ describe('TimetableEntryService.create', () => {
       status: 400,
       fields: ['subjectId', 'staffMemberId'],
     });
-    expect(t.placeOf).not.toHaveBeenCalled();
+    expect(t.contextOf).not.toHaveBeenCalled();
   });
 
   it('is 404 for a section out of reach, and 422 for a deactivated one', async () => {
     const t = build();
-    t.placeOf.mockResolvedValue(undefined);
+    t.contextOf.mockRejectedValue(AppException.notFound());
     expect(await refusal(t.service.create(admin, lesson))).toMatchObject({ status: 404 });
     const inactive = build();
     inactive.requireActiveSection.mockRejectedValue(AppException.referenceInactive('sectionId'));
@@ -465,22 +453,32 @@ describe('TimetableEntryService.create', () => {
       status: 422,
       code: 'SUBJECT_NOT_TAUGHT',
     });
-    expect(u.sectionTaken).not.toHaveBeenCalled();
+    expect(u.taken).not.toHaveBeenCalled();
   });
 
   it('is 409 SECTION_SLOT_TAKEN when the section has an entry there, before the teacher is looked at', async () => {
     const t = build();
-    t.sectionTaken.mockResolvedValue(entry({ id: 'other' }));
+    t.taken.mockResolvedValueOnce(entry({ id: 'other' }));
     expect(await refusal(t.service.create(admin, lesson))).toMatchObject({
       status: 409,
       code: 'SECTION_SLOT_TAKEN',
     });
-    expect(t.teacherBooked).not.toHaveBeenCalled();
+    expect(t.taken).toHaveBeenCalledTimes(1);
+    expect(t.taken).toHaveBeenCalledWith(
+      expect.anything(),
+      'section_id',
+      'section-1',
+      1,
+      'slot-1',
+      undefined,
+    );
   });
 
   it('is 409 TEACHER_DOUBLE_BOOKED, naming the section and class of the clash', async () => {
     const t = build();
-    t.teacherBooked.mockResolvedValue(entry({ id: 'other', section_id: 'section-1' }));
+    t.taken
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(entry({ id: 'other', section_id: 'section-1' }));
     expect(await refusal(t.service.create(admin, lesson))).toMatchObject({
       status: 409,
       code: 'TEACHER_DOUBLE_BOOKED',
@@ -508,15 +506,17 @@ describe('TimetableEntryService.update', () => {
     const t = build();
     await t.service.update(admin, 'entry-1', { version: 1, dayOfWeek: 3 });
     expect(t.find).toHaveBeenLastCalledWith(expect.anything(), 'entry-1', true);
-    expect(t.sectionTaken).toHaveBeenCalledWith(
+    expect(t.taken).toHaveBeenCalledWith(
       expect.anything(),
+      'section_id',
       'section-1',
       3,
       'slot-1',
       'entry-1',
     );
-    expect(t.teacherBooked).toHaveBeenCalledWith(
+    expect(t.taken).toHaveBeenCalledWith(
       expect.anything(),
+      'staff_member_id',
       'staff-1',
       3,
       'slot-1',
@@ -601,6 +601,8 @@ describe('TimetableEntryService.deactivate', () => {
   it('removes an entry and audits it', async () => {
     const t = build();
     expect(await t.service.deactivate(admin, 'entry-1')).toEqual({ id: 'entry-1', status: 0 });
+    // Two removals at once must not both pass: the row is read with the lock.
+    expect(t.find).toHaveBeenLastCalledWith(expect.anything(), 'entry-1', true);
     expect(t.update).toHaveBeenCalledWith(
       expect.anything(),
       'entry-1',

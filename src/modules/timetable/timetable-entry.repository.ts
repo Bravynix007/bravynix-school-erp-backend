@@ -47,10 +47,14 @@ export class TimetableEntryRepository {
     return (lock ? query.forUpdate() : query).executeTakeFirst();
   }
 
-  /** The active entry of the section in this day and period, other than `exceptId`. */
-  sectionTaken(
+  /**
+   * The active entry that holds this day and period for a section or for a teacher (`column` says which, `id` is the
+   * section's or the teacher's), other than `exceptId`. Both are held once (the two unique indexes).
+   */
+  taken(
     tx: Tx,
-    sectionId: string,
+    column: 'section_id' | 'staff_member_id',
+    id: string,
     day: number,
     timeSlotId: string,
     exceptId?: string,
@@ -58,25 +62,7 @@ export class TimetableEntryRepository {
     const query = tx
       .selectFrom('timetable_entries')
       .selectAll()
-      .where('section_id', '=', sectionId)
-      .where('day_of_week', '=', day)
-      .where('time_slot_id', '=', timeSlotId)
-      .where('status', '=', 1);
-    return (exceptId ? query.where('id', '!=', exceptId) : query).executeTakeFirst();
-  }
-
-  /** The active entry of the teacher in this day and period, other than `exceptId`. */
-  teacherBooked(
-    tx: Tx,
-    staffMemberId: string,
-    day: number,
-    timeSlotId: string,
-    exceptId?: string,
-  ): Promise<TimetableEntryRow | undefined> {
-    const query = tx
-      .selectFrom('timetable_entries')
-      .selectAll()
-      .where('staff_member_id', '=', staffMemberId)
+      .where(column, '=', id)
       .where('day_of_week', '=', day)
       .where('time_slot_id', '=', timeSlotId)
       .where('status', '=', 1);

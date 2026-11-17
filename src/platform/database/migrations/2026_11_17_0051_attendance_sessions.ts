@@ -216,9 +216,10 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     $$
   `.execute(db);
 
-  // This year and the next, as the sweep keeps them (DDD 14.5).
+  // Last year, this year and the next, as the sweep keeps them (DDD 14.5): an academic year that began last calendar
+  // year still marks its days, and those must not fall in the default partition.
   await sql`
-    select maintenance.ensure_attendance_partitions(extract(year from current_date)::integer, 1)
+    select maintenance.ensure_attendance_partitions((extract(year from current_date) - 1)::integer, 2)
   `.execute(db);
 }
 
