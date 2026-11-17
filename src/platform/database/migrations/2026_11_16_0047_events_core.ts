@@ -12,9 +12,23 @@ import { sql, type Kysely } from 'kysely';
  *   their scope. A write needs an Institution of their scope, or, for a Society-wide event, the Society Owner (role
  *   2), so an Institution Admin cannot make or change one even by a path that skips the service.
  * - `event_holiday_classes`: the predefined classes a holiday is limited to ("Holiday up to 8th Grade"); no rows mean
- *   every class. Replaced as a set when the event is edited, so it is hard-deleted, and it is read as far as the event is visible and written
- *   only as far as the event may be changed (an Admin cannot rewrite the classes of a Society holiday).
+ *   every class. Replaced as a set when the event is edited, so it is hard-deleted, and it is read as far as the event
+ *   is visible and written only as far as the event may be changed (an Admin cannot rewrite the classes of a Society
+ *   holiday).
  */
+
+// Who may write an event: the one rule, for the event's own policies and for its classes' (`row` names the event).
+function writableEvent(row: string) {
+  const column = (name: string) => sql.ref(`${row}.${name}`);
+  return sql`
+    ${column('society_id')} = app_current_society_id()
+    and (
+      ${column('institution_id')} = any (app_current_institution_ids())
+      or (${column('institution_id')} is null and app_current_role_code() = 2)
+    )
+  `;
+}
+
 export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`
     create table events (
@@ -83,13 +97,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       and (institution_id is null or institution_id = any (app_current_institution_ids()))
     )
   `.execute(db);
-  const writable = sql`
-    society_id = app_current_society_id()
-    and (
-      institution_id = any (app_current_institution_ids())
-      or (institution_id is null and app_current_role_code() = 2)
-    )
-  `;
+  const writable = writableEvent('events');
   await sql`create policy events_insert on events for insert with check (${writable})`.execute(db);
   await sql`
     create policy events_update on events for update using (${writable}) with check (${writable})
@@ -121,10 +129,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     and exists (
       select 1 from events e
       where e.id = event_holiday_classes.event_id and e.society_id = event_holiday_classes.society_id
-        and (
-          e.institution_id = any (app_current_institution_ids())
-          or (e.institution_id is null and app_current_role_code() = 2)
-        )
+        and ${writableEvent('e')}
     )
   `;
   await sql`
