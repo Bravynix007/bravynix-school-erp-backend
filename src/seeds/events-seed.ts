@@ -97,19 +97,6 @@ const events: readonly SeedEvent[] = [
   },
 ];
 
-/** The seeded event with this title in this Institution (null: the Society's, of the world of `home`), so a test can find its row. */
-export function seededEventId(
-  institution: SeedEvent['institution'],
-  home: SeedEvent['home'],
-  title: string,
-): string {
-  const index = events.findIndex(
-    (e) => e.institution === institution && e.home === home && e.title === title,
-  );
-  if (index < 0) throw new Error(`No seeded event ${title}`);
-  return seedId(6001 + index);
-}
-
 /**
  * Each world's calendar: a Society-wide holiday, Institution events for each audience, and holidays limited to
  * classes. A Society-wide event is written under the Owner's role, as the policy asks. Safe to run twice.

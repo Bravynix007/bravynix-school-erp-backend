@@ -118,6 +118,15 @@ describe('EVT-01 to EVT-06 events and holidays (PRD 7.12, API design 10.26)', ()
       ),
     );
 
+  /** Inserts an Institution event of the first Institution as the Owner, with these columns and values besides. */
+  const insertWith = (columns: ReturnType<typeof sql>, values: ReturnType<typeof sql>) =>
+    database.transaction({ societyId: societyA, institutionIds: [first], roleCode: 2 }, (tx) =>
+      sql`insert into events (society_id, scope, institution_id, title, start_date, end_date, duration_label, ${columns})
+          values (${societyA}, 2, ${first}, 'x', '2026-12-01', '2026-12-01', '1 Day', ${values})`.execute(
+        tx,
+      ),
+    );
+
   beforeAll(async () => {
     await runMigrations(migrationUrl, 'latest');
     ownerDb = new Kysely({
@@ -586,6 +595,64 @@ describe('EVT-01 to EVT-06 events and holidays (PRD 7.12, API design 10.26)', ()
           sql`delete from events where id = ${made.id}`.execute(tx),
         ),
       ).rejects.toMatchObject({ code: '42501' });
+    });
+
+    it('lets an Admin change the classes of their Institution’s holiday, and not those of a Society holiday they can see', async () => {
+      const society = await added(
+        holiday({ scope: 1, institutionId: undefined, holidayPredefinedClassIds: [classIds[0]] }),
+      );
+      const mine = await added(holiday({ holidayPredefinedClassIds: [classIds[0]] }));
+      const asAdmin = { societyId: societyA, institutionIds: [first], roleCode: 3 };
+      const removeClasses = (eventId: string, tenant: typeof asAdmin) =>
+        database.transaction(
+          tenant,
+          async (tx) =>
+            (
+              await sql`delete from event_holiday_classes where event_id = ${eventId} returning 1`.execute(
+                tx,
+              )
+            ).rows.length,
+        );
+      const addClass = (eventId: string, tenant: typeof asAdmin) =>
+        database.transaction(tenant, (tx) =>
+          sql`insert into event_holiday_classes (event_id, predefined_class_id, society_id)
+            values (${eventId}, ${classIds[1]}, ${societyA})`.execute(tx),
+        );
+      expect(await removeClasses(society.id, asAdmin)).toBe(0);
+      await expect(addClass(society.id, asAdmin)).rejects.toMatchObject({ code: '42501' });
+      await expect(addClass(mine.id, asAdmin)).resolves.toBeDefined();
+      expect(await removeClasses(mine.id, asAdmin)).toBe(2);
+      await expect(addClass(society.id, { ...asAdmin, roleCode: 2 })).resolves.toBeDefined();
+      expect(await removeClasses(society.id, { ...asAdmin, roleCode: 2 })).toBe(2);
+    });
+
+    it('refuses an Admin to move their Institution’s event to the Society or into an Institution they do not hold', async () => {
+      const made = await added();
+      const relocate = (set: ReturnType<typeof sql>) =>
+        database.transaction({ societyId: societyA, institutionIds: [first], roleCode: 3 }, (tx) =>
+          sql`update events set ${set} where id = ${made.id}`.execute(tx),
+        );
+      await expect(relocate(sql`scope = 1, institution_id = null`)).rejects.toMatchObject({
+        code: '42501',
+      });
+      await expect(relocate(sql`institution_id = ${second}`)).rejects.toMatchObject({
+        code: '42501',
+      });
+    });
+
+    it('refuses, in the table itself, a holiday for neither students nor staff and a plain event marked for students', async () => {
+      await expect(
+        insertWith(
+          sql`is_holiday, holiday_type, holiday_for_students, holiday_for_staff`,
+          sql`true, 1, false, false`,
+        ),
+      ).rejects.toMatchObject({ code: '23514' });
+      await expect(
+        insertWith(sql`is_holiday, holiday_for_students`, sql`false, true`),
+      ).rejects.toMatchObject({ code: '23514' });
+      await expect(
+        insertWith(sql`is_holiday, holiday_type, holiday_for_students`, sql`true, 1, true`),
+      ).resolves.toBeDefined();
     });
   });
 });

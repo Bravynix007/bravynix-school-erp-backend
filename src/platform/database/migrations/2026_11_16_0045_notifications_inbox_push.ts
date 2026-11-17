@@ -35,6 +35,24 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`create unique index uq_push_devices_fcm_token on push_devices (fcm_token)`.execute(db);
   await sql`create index ix_push_devices_user on push_devices (user_id)`.execute(db);
   await sql`create index ix_push_devices_session on push_devices (session_id)`.execute(db);
+  // A session that ends (logout, logout of all, a block, a revoked grant, a changed email, a reused refresh token)
+  // stops its phone getting pushes at once (API design 6.3): its rows are deleted here, whatever ended it. The session
+  // row itself stays for 30 days (DDD 15), so the foreign key's cascade alone would leave the phone registered.
+  await sql`
+    create function push_devices_end_with_session() returns trigger
+    language plpgsql as $$
+    begin
+      delete from push_devices where session_id = new.id;
+      return null;
+    end;
+    $$
+  `.execute(db);
+  await sql`
+    create trigger trg_auth_sessions_end_push_devices
+      after update of ended_at on auth_sessions
+      for each row when (old.ended_at is null and new.ended_at is not null)
+      execute function push_devices_end_with_session()
+  `.execute(db);
 
   await sql`
     create table inbox_items (
@@ -158,5 +176,7 @@ export async function down(db: Kysely<unknown>): Promise<void> {
   }
   await sql`drop function if exists maintenance.ensure_inbox_partitions(date, integer)`.execute(db);
   await sql`drop table if exists inbox_items`.execute(db);
+  await sql`drop trigger if exists trg_auth_sessions_end_push_devices on auth_sessions`.execute(db);
+  await sql`drop function if exists push_devices_end_with_session()`.execute(db);
   await sql`drop table if exists push_devices`.execute(db);
 }

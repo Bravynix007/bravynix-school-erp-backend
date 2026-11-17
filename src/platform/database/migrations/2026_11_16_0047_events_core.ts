@@ -12,8 +12,8 @@ import { sql, type Kysely } from 'kysely';
  *   their scope. A write needs an Institution of their scope, or, for a Society-wide event, the Society Owner (role
  *   2), so an Institution Admin cannot make or change one even by a path that skips the service.
  * - `event_holiday_classes`: the predefined classes a holiday is limited to ("Holiday up to 8th Grade"); no rows mean
- *   every class. Replaced as a set when the event is edited, so it is hard-deleted, and it is read and written only
- *   as far as the event is.
+ *   every class. Replaced as a set when the event is edited, so it is hard-deleted, and it is read as far as the event is visible and written
+ *   only as far as the event may be changed (an Admin cannot rewrite the classes of a Society holiday).
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`
@@ -107,7 +107,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   `.execute(db);
   await sql`alter table event_holiday_classes enable row level security`.execute(db);
   await sql`alter table event_holiday_classes force row level security`.execute(db);
-  // Read and written as far as the event is: the subquery reads `events` under its own policies, and none of them reads this table.
+  // Read as far as the event is visible: the subquery reads `events` under its own policies, and none of them reads this table.
   const ofVisibleEvent = sql`
     event_holiday_classes.society_id = app_current_society_id()
     and exists (
@@ -115,14 +115,26 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       where e.id = event_holiday_classes.event_id and e.society_id = event_holiday_classes.society_id
     )
   `;
+  // Written only as far as the event may be: an Admin sees a Society event but may not change its classes.
+  const ofWritableEvent = sql`
+    event_holiday_classes.society_id = app_current_society_id()
+    and exists (
+      select 1 from events e
+      where e.id = event_holiday_classes.event_id and e.society_id = event_holiday_classes.society_id
+        and (
+          e.institution_id = any (app_current_institution_ids())
+          or (e.institution_id is null and app_current_role_code() = 2)
+        )
+    )
+  `;
   await sql`
     create policy event_holiday_classes_select on event_holiday_classes for select using (${ofVisibleEvent})
   `.execute(db);
   await sql`
-    create policy event_holiday_classes_insert on event_holiday_classes for insert with check (${ofVisibleEvent})
+    create policy event_holiday_classes_insert on event_holiday_classes for insert with check (${ofWritableEvent})
   `.execute(db);
   await sql`
-    create policy event_holiday_classes_delete on event_holiday_classes for delete using (${ofVisibleEvent})
+    create policy event_holiday_classes_delete on event_holiday_classes for delete using (${ofWritableEvent})
   `.execute(db);
 
   await sql`
