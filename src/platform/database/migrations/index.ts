@@ -52,6 +52,7 @@ import * as m0050 from './2026_11_17_0050_timetable_entries.js';
 import * as m0051 from './2026_11_17_0051_attendance_sessions.js';
 import * as m0052 from './2026_11_17_0052_attendance_corrections.js';
 import * as m0053 from './2026_11_17_0053_attendance_parent_read.js';
+import * as m0054 from './2026_11_17_0054_diary_entries.js';
 
 /**
  * Every migration, in order. Listed explicitly (not read from disk) so the
@@ -115,6 +116,7 @@ const migrations: Record<string, Migration> = {
   '2026_11_17_0051_attendance_sessions': m0051,
   '2026_11_17_0052_attendance_corrections': m0052,
   '2026_11_17_0053_attendance_parent_read': m0053,
+  '2026_11_17_0054_diary_entries': m0054,
 };
 
 export const migrationProvider: MigrationProvider = {

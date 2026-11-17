@@ -7,6 +7,7 @@ import { runMigrations } from '../../src/platform/database/migrator.js';
 import { writeAcademicSeed } from '../../src/seeds/academic-seed.js';
 import { writeEventsSeed } from '../../src/seeds/events-seed.js';
 import { writeAttendanceSeed } from '../../src/seeds/attendance-seed.js';
+import { writeDiarySeed } from '../../src/seeds/diary-seed.js';
 import { writeTimetableSeed } from '../../src/seeds/timetable-seed.js';
 import { writeNotificationsSeed } from '../../src/seeds/notifications-seed.js';
 import { writeFilesSeed } from '../../src/seeds/files-seed.js';
@@ -149,6 +150,7 @@ describe('tenant isolation', () => {
     await writeEventsSeed(ownerDb);
     await writeTimetableSeed(ownerDb);
     await writeAttendanceSeed(ownerDb);
+    await writeDiarySeed(ownerDb);
     await clearLoginState(ownerDb);
     // Role 3 grants need a staff record, which arrives with the People module.
     for (const caller of Object.values(callers)) {
@@ -211,6 +213,7 @@ describe('tenant isolation', () => {
         'audit_logs',
         'class_teacher_assignments',
         'classes',
+        'diary_entries',
         'documents',
         'event_holiday_classes',
         'events',

@@ -124,6 +124,31 @@ export class AssignmentRepository {
     return rows.rows.map((row) => row.section_id);
   }
 
+  /**
+   * Whether the staff member may write the diary for the subject in the section in the year (PRD 7.9, Phase 5 decision
+   * 6): they teach the subject there, or they lead the section as its class teacher, which is any subject of it.
+   */
+  async mayWriteDiary(
+    tx: Tx,
+    staffMemberId: string,
+    academicYearId: string,
+    sectionId: string,
+    subjectId: string,
+  ): Promise<boolean> {
+    const rows = await sql<{ allowed: boolean }>`
+      select exists (
+        select 1 from class_teacher_assignments
+          where staff_member_id = ${staffMemberId} and academic_year_id = ${academicYearId}
+            and section_id = ${sectionId} and ended_at is null
+      ) or exists (
+        select 1 from teaching_assignments
+          where staff_member_id = ${staffMemberId} and academic_year_id = ${academicYearId}
+            and section_id = ${sectionId} and subject_id = ${subjectId} and ended_at is null
+      ) as allowed
+    `.execute(tx);
+    return rows.rows[0]!.allowed;
+  }
+
   /** The years of the Institution in which the staff member has an active assignment of either kind. */
   async activeYearIds(tx: Tx, staffMemberId: string, institutionId: string): Promise<string[]> {
     const rows = await sql<{ academic_year_id: string }>`
