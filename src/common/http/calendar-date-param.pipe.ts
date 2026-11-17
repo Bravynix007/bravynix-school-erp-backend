@@ -1,19 +1,17 @@
 import { Injectable, type PipeTransform } from '@nestjs/common';
+import { isISO8601 } from 'class-validator';
+import { DATE_ONLY } from '../validation/calendar-date.js';
 import { FieldErrorCode } from './error-codes.js';
 import { AppException } from './app-exception.js';
 import { fieldError } from '../validation/field-error.js';
 
-const DATE = /^\d{4}-\d{2}-\d{2}$/;
-
-/** A date in the path: `YYYY-MM-DD` and a real day, else 400 `INVALID_FORMAT` on `date` (API design 7.4). */
+/** A date in the path: `YYYY-MM-DD` and a real day, as `IsCalendarDate` says in a body; else 400 `INVALID_FORMAT` on `date`. */
 @Injectable()
 export class CalendarDateParamPipe implements PipeTransform<string, string> {
   transform(value: string): string {
-    const real =
-      DATE.test(value) &&
-      !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) &&
-      new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
-    if (!real) throw AppException.validation([fieldError('date', FieldErrorCode.INVALID_FORMAT)]);
+    if (!DATE_ONLY.test(value) || !isISO8601(value, { strict: true })) {
+      throw AppException.validation([fieldError('date', FieldErrorCode.INVALID_FORMAT)]);
+    }
     return value;
   }
 }

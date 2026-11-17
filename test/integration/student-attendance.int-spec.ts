@@ -405,6 +405,31 @@ describe('ATT-07 and ATT-08 a student’s attendance (API design 10.13)', () => 
       expect(statuses(cy, '2026-11-05', '2026-11-06')).toEqual(['present', 'not_enrolled']);
     });
 
+    it('keeps a deactivated academic year from holding a month', async () => {
+      const later = await kit.year(owner.token, first, {
+        name: '2027-2028',
+        startDate: '2027-04-05',
+        endDate: '2028-03-31',
+      });
+      expect((await month(studentIds.bea!, '2027-05')).status).toBe(200);
+      succeeded(await api('delete', `/v1/academic-years/${later}`, owner.token), 200, 'deactivate');
+      const res = await month(studentIds.bea!, '2027-05');
+      expect([res.status, res.body.code]).toEqual([422, 'OUTSIDE_ACADEMIC_YEAR']);
+    });
+
+    it('reads a month two years share in the current one, not the one that begins later', async () => {
+      await markMonth();
+      await rows(`update academic_years set end_date = '2026-11-20' where id = '${year}'`);
+      const alone = (await calendarOf('bea')).yearToDate.attendancePercentage;
+      expect(alone).not.toBeNull();
+      await kit.year(owner.token, first, {
+        name: '2026-2027 B',
+        startDate: '2026-11-25',
+        endDate: '2027-03-31',
+      });
+      expect((await calendarOf('bea')).yearToDate.attendancePercentage).toBe(alone);
+    });
+
     it('refuses a month outside every academic year (422) and a month written wrong (400)', async () => {
       for (const value of ['2026-05', '2027-04', '2025-01']) {
         const res = await month(studentIds.bea!, value);
