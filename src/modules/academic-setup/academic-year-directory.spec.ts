@@ -82,4 +82,19 @@ describe('AcademicYearDirectory', () => {
       expect(await build().directory.currentId(tx, 'institution-1')).toBeNull();
     });
   });
+
+  describe('requireCurrentId', () => {
+    it('is the current year of the Institution', async () => {
+      expect(
+        await build(year({ id: 'year-9' })).directory.requireCurrentId(tx, 'institution-1'),
+      ).toBe('year-9');
+    });
+
+    it('is 422 CURRENT_YEAR_REQUIRED when the Institution has none', async () => {
+      await expect(build().directory.requireCurrentId(tx, 'institution-1')).rejects.toMatchObject({
+        status: 422,
+        code: 'CURRENT_YEAR_REQUIRED',
+      });
+    });
+  });
 });

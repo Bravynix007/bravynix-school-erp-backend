@@ -96,6 +96,9 @@ const en: Catalogue = {
   // Academic years (API design 10.4h)
   YEAR_OVERLAP: 'This year overlaps another academic year of the Institution',
   CURRENT_YEAR_LOCKED: 'The current year cannot be deactivated; make another year current first',
+  CURRENT_YEAR_REQUIRED: 'This Institution has no current academic year; make one current first',
+  // Period timings (API design 9.4)
+  TIME_SLOT_OVERLAP: 'This period overlaps another period of the same year',
   // Classes and sections (API design 10.4j, 10.4c)
   CLASS_NOT_OFFERED: 'This Institution does not offer the category of this class',
   STREAM_NOT_ALLOWED: 'Only Pre-University classes have a stream',

@@ -1,12 +1,21 @@
 import { parentReadErrors, staffReadErrors } from './parent-read.js';
 
+interface Query {
+  studentId?: string;
+  institutionId?: string;
+  academicYearId?: string;
+  sectionId?: string;
+}
+
+const query = (fields: Query): Query => fields;
+
 describe('parentReadErrors', () => {
   it('needs the child and takes none of the fields that would widen the read', () => {
-    expect(parentReadErrors({}, ['institutionId'])).toEqual([
+    expect(parentReadErrors(query({}), ['institutionId'])).toEqual([
       expect.objectContaining({ field: 'studentId', code: 'REQUIRED' }),
     ]);
     expect(
-      parentReadErrors({ studentId: 's', institutionId: 'i', sectionId: 'x' }, [
+      parentReadErrors(query({ studentId: 's', institutionId: 'i', sectionId: 'x' }), [
         'institutionId',
         'academicYearId',
         'sectionId',
@@ -18,7 +27,7 @@ describe('parentReadErrors', () => {
   });
 
   it('is content with the child alone', () => {
-    expect(parentReadErrors({ studentId: 's' }, ['institutionId'])).toEqual([]);
+    expect(parentReadErrors(query({ studentId: 's' }), ['institutionId'])).toEqual([]);
   });
 });
 
