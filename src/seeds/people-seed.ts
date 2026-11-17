@@ -1,6 +1,6 @@
 import { sql, type Kysely } from 'kysely';
 import { classes, clearScope, scopeTo, seededYearId } from './academic-seed.js';
-import { children, institutions, personas } from './two-worlds.js';
+import { children, institutions, personaByKey, personas } from './two-worlds.js';
 
 const seedId = (n: number): string => `00000000-0000-7000-8000-${n.toString().padStart(12, '0')}`;
 
@@ -183,16 +183,22 @@ export async function writeStudentSeed(db: Kysely<unknown>): Promise<void> {
 }
 
 async function writeStudentsIn(tx: Kysely<unknown>): Promise<void> {
+  // The child the two worlds say is blocked is blocked from the profile (STU-06) by the Owner of its Society, as STU-06
+  // is theirs and the Admins'. A re-seed blocks the child again, also after someone lifted the block: it is a demo.
   for (const { child, home, classId, sectionId, rollNumber, guardians, index } of seededStudents) {
     const societyId = await scopeTo(tx, home.id, 'student');
     const yearId = seededYearId(home.key);
     const [firstName, ...rest] = child.displayName.split(' ');
     await sql`
       insert into students
-        (id, society_id, institution_id, admission_no, first_name, last_name, admission_date, country_code, mobile_number)
+        (id, society_id, institution_id, admission_no, first_name, last_name, admission_date, country_code, mobile_number,
+         access_blocked_at, access_blocked_by)
       values (${child.id}, ${societyId}, ${home.id}, ${`ADM-${child.key}`}, ${firstName ?? child.key},
-        ${rest.join(' ') || null}, '2026-06-01', '91', ${`9000003${(100 + index).toString()}`})
-      on conflict (id) do nothing
+        ${rest.join(' ') || null}, '2026-06-01', '91', ${`9000003${(100 + index).toString()}`},
+        ${child.isBlocked ? sql`now()` : null}, ${child.isBlocked ? personaByKey(`SO-${home.society}1`).id : null})
+      on conflict (id) do update set
+        access_blocked_at = coalesce(students.access_blocked_at, excluded.access_blocked_at),
+        access_blocked_by = coalesce(students.access_blocked_by, excluded.access_blocked_by)
     `.execute(tx);
     await sql`
       insert into student_enrolments (id, society_id, institution_id, academic_year_id, student_id, class_id, enrolled_date)

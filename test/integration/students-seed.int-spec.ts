@@ -5,8 +5,9 @@ import { runMigrations } from '../../src/platform/database/migrator.js';
 import { writeAcademicSeed } from '../../src/seeds/academic-seed.js';
 import { writeBillingSeed } from '../../src/seeds/billing-seed.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
-import { seededStudents, writeStudentSeed } from '../../src/seeds/people-seed.js';
+import { seededStudentId, seededStudents, writeStudentSeed } from '../../src/seeds/people-seed.js';
 import { children, institutions, personaByKey, societies } from '../../src/seeds/two-worlds.js';
+import { GrantDirectory } from '../../src/platform/identity/index.js';
 import { createTestApp, type TestApp } from '../support/test-app.js';
 import { FixtureModule } from '../support/fixture.module.js';
 
@@ -42,6 +43,8 @@ describe('student seed', () => {
     await t.close();
     await ownerDb.destroy();
   });
+
+  const guarded = (key: string) => t.app.get(GrantDirectory).guardedChildren(personaByKey(key).id);
 
   const rows = (societyKey: string) =>
     database.transaction(
@@ -96,5 +99,23 @@ describe('student seed', () => {
     expect(guardiansOf('C-dual').map((row) => row.user_id)).toEqual([
       personaByKey('TP-A1-dual').id,
     ]);
+  });
+
+  it('lists each parent persona’s children across the Societies, the blocked one as blocked', async () => {
+    const sibling = await guarded('P-A1-siblings');
+    expect(sibling.map((c) => [c.studentId, c.childBlocked])).toEqual([
+      [seededStudentId('C-A1-sib1'), false],
+      [seededStudentId('C-A1-sib2'), true],
+    ]);
+    expect(sibling.every((c) => c.className !== null && c.sectionName !== null)).toBe(true);
+    const cross = await guarded('P-cross');
+    expect(cross.map((c) => c.studentId).toSorted()).toEqual(
+      [seededStudentId('C-cross-A1'), seededStudentId('C-cross-B1')].toSorted(),
+    );
+    expect(new Set(cross.map((c) => c.societyId)).size).toBe(2);
+    expect((await guarded('TP-A1-dual')).map((c) => c.studentId)).toEqual([
+      seededStudentId('C-dual'),
+    ]);
+    expect(await guarded('SA1')).toEqual([]);
   });
 });

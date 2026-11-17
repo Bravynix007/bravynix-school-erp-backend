@@ -12,6 +12,7 @@ import type {
 } from '../academic-setup/index.js';
 import type { PromoteClassDto, PromoteStudentDto } from './promotion.dto.js';
 import { PromotionService, targetOf } from './promotion.service.js';
+import type { ChildAccess } from './child-access.js';
 import { StudentContext } from './student-context.js';
 import type {
   EnrolmentRow,
@@ -192,7 +193,7 @@ function build(options: Options = {}) {
     database,
     students,
     { get } as unknown as StudentService,
-    new StudentContext(database, students, scope),
+    new StudentContext(database, students, scope, {} as unknown as ChildAccess),
     scope,
     { openYear } as unknown as AcademicYearDirectory,
     { isLast, isBelow } as unknown as ClassDirectory,

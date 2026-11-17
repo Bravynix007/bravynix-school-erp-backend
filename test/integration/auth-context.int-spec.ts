@@ -18,7 +18,6 @@ const migrationUrl = process.env.TEST_DATABASE_MIGRATION_URL!;
 
 const owner = personaByKey('SO-A1');
 const admin = personaByKey('IA-A12');
-const parent = personaByKey('P-A1-one');
 const superAdmin = personaByKey('SA1');
 const societyA = societies.find((s) => s.key === 'A')!;
 const societyB = societies.find((s) => s.key === 'B')!;
@@ -28,6 +27,16 @@ describe('AUTH-06 switch context and ME-01', () => {
   let ownerDb: Kysely<unknown>;
   let t: TestApp;
   const signIn = (email: string) => signInMobile(t, email);
+  /** A person of their own with no role, no staff record and no child, so what other files seed cannot give them one. */
+  const withContextlessPerson = async (work: (email: string) => Promise<void>) => {
+    const email = scratchEmail();
+    await sql`insert into users (id, email) values (${newId()}, ${email})`.execute(ownerDb);
+    try {
+      await work(email);
+    } finally {
+      await removeScratchPeople(ownerDb, [email]);
+    }
+  };
   let otp: OtpService;
 
   const rows = async <T = Record<string, unknown>>(query: RawBuilder<unknown>): Promise<T[]> =>
@@ -161,9 +170,11 @@ describe('AUTH-06 switch context and ME-01', () => {
     });
 
     it('answers /me for a person with no context, and for a Super Admin on the console', async () => {
-      const login = await signIn(parent.email);
-      const res = await me(login.accessToken).expect(200);
-      expect(res.body.data).toMatchObject({ contexts: [], session: { activeContext: null } });
+      await withContextlessPerson(async (email) => {
+        const login = await signIn(email);
+        const res = await me(login.accessToken).expect(200);
+        expect(res.body.data).toMatchObject({ contexts: [], session: { activeContext: null } });
+      });
 
       const [created] = await rows<{ id: string }>(
         sql`insert into auth_sessions (user_id, client_type, idle_expires_at, absolute_expires_at)
@@ -310,9 +321,11 @@ describe('AUTH-06 switch context and ME-01', () => {
     });
 
     it('lets a person with no context try, and refuses them', async () => {
-      const login = await signIn(parent.email);
-      const res = await switchTo(login.accessToken, { roleCode: 5 }).expect(403);
-      expect(res.body.code).toBe('CONTEXT_NOT_AVAILABLE');
+      await withContextlessPerson(async (email) => {
+        const login = await signIn(email);
+        const res = await switchTo(login.accessToken, { roleCode: 5 }).expect(403);
+        expect(res.body.code).toBe('CONTEXT_NOT_AVAILABLE');
+      });
     });
 
     it('validates the body', async () => {

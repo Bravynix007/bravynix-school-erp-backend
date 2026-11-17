@@ -9,6 +9,8 @@ export interface LoginContext {
   societyId: string | null;
   societyName: string | null;
   isBlocked: boolean;
+  /** Role 5 only. */
+  children?: Record<string, unknown>[];
 }
 
 export interface LoginData {

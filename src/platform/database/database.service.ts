@@ -14,6 +14,11 @@ export interface TenantContext {
   societyId?: string | null;
   /** Institutions in the caller's scope. */
   institutionIds?: readonly string[];
+  /**
+   * Role 5 only: the one child a request has been checked against (`ChildAccess`). Policies on a child's rows read
+   * it, so a parent's request reaches that child and no other.
+   */
+  childIds?: readonly string[];
   roleCode?: number | null;
   viaSupportAccess?: boolean;
 }
@@ -123,6 +128,7 @@ export async function applyTenant(tx: Tx, tenant: TenantContext): Promise<void> 
       set_config('app.person_id', ${tenant.personId ?? ''}, true),
       set_config('app.society_id', ${tenant.societyId ?? ''}, true),
       set_config('app.institution_ids', ${(tenant.institutionIds ?? []).join(',')}, true),
+      set_config('app.child_ids', ${(tenant.childIds ?? []).join(',')}, true),
       set_config('app.role_code', ${tenant.roleCode?.toString() ?? ''}, true),
       set_config('app.via_support', ${tenant.viaSupportAccess ? 'true' : 'false'}, true),
       set_config('lock_timeout', ${LOCK_TIMEOUT}, true)

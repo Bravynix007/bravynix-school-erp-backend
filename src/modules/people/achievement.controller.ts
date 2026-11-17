@@ -19,10 +19,10 @@ export class AchievementController {
   constructor(private readonly achievements: AchievementService) {}
 
   @Policy({
-    roles: GIVERS,
+    roles: [...GIVERS, RoleCode.StudentParent],
     scope: 'institution',
     operationId: 'ACH-01',
-    rule: 'The stars earned by tier and the stars of a student whose Institution the caller reaches, newest first; a Teacher or Staff member reads a student of their own sections only (403 NOT_ASSIGNED)',
+    rule: 'The stars earned by tier and the stars of a student whose Institution the caller reaches, newest first; a Teacher or Staff member reads a student of their own sections only (403 NOT_ASSIGNED); a parent reads their own child (404 for any other, 403 CHILD_ACCESS_BLOCKED for a blocked child)',
   })
   @Get('students/:studentId/achievements')
   list(

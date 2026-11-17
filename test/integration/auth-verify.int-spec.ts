@@ -6,7 +6,10 @@ import { BackgroundMailer } from '../../src/platform/identity/background-mailer.
 import { OtpHasher } from '../../src/platform/identity/otp-hasher.js';
 import { OtpService } from '../../src/platform/identity/otp.service.js';
 import { TokenService } from '../../src/platform/identity/token.service.js';
+import { writeAcademicSeed } from '../../src/seeds/academic-seed.js';
+import { writeBillingSeed } from '../../src/seeds/billing-seed.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
+import { writeStudentSeed } from '../../src/seeds/people-seed.js';
 import { personaByKey, societies } from '../../src/seeds/two-worlds.js';
 import { readAuditRows } from '../support/audit-rows.js';
 import { clearLoginState } from '../support/login-state.js';
@@ -97,6 +100,10 @@ describe('AUTH-02 verify the code', () => {
       dialect: new PostgresDialect({ pool: createPool(migrationUrl, 2, 30_000) }),
     });
     await writeIdentitySeed(ownerDb);
+    // The parent persona signs in to a Student / Parent context only once the child it guards exists.
+    await writeBillingSeed(ownerDb);
+    await writeAcademicSeed(ownerDb);
+    await writeStudentSeed(ownerDb);
   });
 
   afterAll(async () => {
@@ -249,19 +256,20 @@ describe('AUTH-02 verify the code', () => {
       ).toHaveLength(1);
     });
 
-    it('starts a person with no admin grant without an active context', async () => {
+    it('starts a parent in the one Student / Parent context, which names no Society', async () => {
       const code = await codeFor(parent.email);
       const res = await verify(parent.email, code).expect(200);
       expect(res.body.data).toMatchObject({
-        userType: null,
-        userTypeName: null,
-        session: { activeContext: null },
-        contexts: [],
+        userType: 5,
+        userTypeName: 'student_parent',
+        session: { activeContext: { roleCode: 5, societyId: null } },
+        contexts: [{ roleCode: 5, societyId: null, societyName: null, isBlocked: false }],
       });
+      expect(res.body.data.contexts[0].children).toHaveLength(1);
       const check = await t.app
         .get(TokenService)
         .checkAccessToken(res.body.data.accessToken, t.clock.now());
-      expect(check).toMatchObject({ claims: { roleCode: null, societyId: null } });
+      expect(check).toMatchObject({ claims: { roleCode: 5, societyId: null } });
     });
 
     it('does not give a Super Admin a mobile context', async () => {

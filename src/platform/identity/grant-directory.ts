@@ -4,6 +4,7 @@ import { containsPattern, type SortKey } from '../../common/pagination/paginatio
 import { DatabaseService, type Database, type Tx } from '../database/index.js';
 import { reportedStatus, SessionEndReason } from './auth-codes.js';
 import { personName } from './person-name.js';
+import { SessionRepository, type GuardedChild } from './session.repository.js';
 
 /**
  * What the Identity module tells other modules about a person's grants. The
@@ -11,7 +12,15 @@ import { personName } from './person-name.js';
  */
 @Injectable()
 export class GrantDirectory {
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly sessions: SessionRepository,
+  ) {}
+
+  /** The active students a person guards, in any Society (API design 5.4): what a parent's request resolves a child from. */
+  guardedChildren(userId: string): Promise<GuardedChild[]> {
+    return this.sessions.guardedChildren(this.database.db, userId);
+  }
 
   /** The Institutions an Institution Admin holds an active grant for in one Society. */
   async adminInstitutionIds(userId: string, societyId: string): Promise<string[]> {

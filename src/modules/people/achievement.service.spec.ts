@@ -8,6 +8,7 @@ import type { AchievementRepository, AchievementRow } from './achievement.reposi
 import { AchievementService } from './achievement.service.js';
 import type { StaffRepository, StaffRow } from './staff.repository.js';
 import type { StudentClassroomService } from './student-classroom.service.js';
+import type { ChildAccess } from './child-access.js';
 import { StudentContext } from './student-context.js';
 import type { PlacedRow, StudentRepository, StudentRow } from './student.repository.js';
 
@@ -108,7 +109,7 @@ function build(options: { student?: StudentRow | null; placement?: PlacedRow | n
   const service = new AchievementService(
     database,
     { ofStudent, find, insert, remove } as unknown as AchievementRepository,
-    new StudentContext(database, students, scope),
+    new StudentContext(database, students, scope, {} as unknown as ChildAccess),
     students,
     { ownPlacement, requireOwnSection } as unknown as StudentClassroomService,
     { activeOfUser } as unknown as StaffRepository,

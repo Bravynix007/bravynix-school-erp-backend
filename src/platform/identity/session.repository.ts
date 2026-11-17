@@ -20,6 +20,26 @@ export interface Grant {
   accessBlocked: boolean;
   /** The person's staff record in this Society: set on the Teacher / Staff entry, which comes from that record. */
   staffMemberId?: string;
+  /** Role 5 only: the children the person guards, from which the one Student / Parent context is made. */
+  children?: readonly GuardedChild[];
+}
+
+/** A child a person guards, with what the child switcher shows and the blocks that apply to the child (DDD D-02). */
+export interface GuardedChild {
+  studentId: string;
+  societyId: string;
+  institutionId: string;
+  institutionName: string;
+  firstName: string;
+  lastName: string | null;
+  photoFileId: string | null;
+  /** The current placement; empty while the child has none. */
+  className: string | null;
+  sectionName: string | null;
+  /** The child's profile is blocked (STU-06). */
+  childBlocked: boolean;
+  /** The child's Institution has its students blocked (section `students`). */
+  studentsBlocked: boolean;
 }
 
 export interface NewSession {
@@ -110,10 +130,62 @@ const NO_SOCIETY = '00000000-0000-0000-0000-000000000000';
 export class SessionRepository {
   /**
    * The roles this person can act as: Super Admin, Owner and Institution Admin by a grant, Teacher / Staff by an
-   * active staff record (DDD 7.2, M1), one entry for the record's home Institution.
+   * active staff record (DDD 7.2, M1), one entry for the record's home Institution, and Student / Parent by an
+   * active guardian link, one entry holding every child.
    */
   async activeGrants(tx: Db, userId: string): Promise<Grant[]> {
-    return [...(await this.explicitGrants(tx, userId)), ...(await this.staffRoles(tx, userId))];
+    const children = await this.guardedChildren(tx, userId);
+    return [
+      ...(await this.explicitGrants(tx, userId)),
+      ...(await this.staffRoles(tx, userId)),
+      ...(children.length === 0
+        ? []
+        : [
+            {
+              roleCode: RoleCode.StudentParent,
+              societyId: null,
+              societyName: null,
+              institutionId: null,
+              ownersBlocked: false,
+              staffBlocked: false,
+              accessBlocked: false,
+              children,
+            },
+          ]),
+    ];
+  }
+
+  /**
+   * The active students a person guards, in any Society (role 5, API design 6.3). Sign-in and the request have no
+   * tenant for a parent, so the definer function reads each child under the child's own Society and Institution.
+   */
+  async guardedChildren(db: Db, userId: string): Promise<GuardedChild[]> {
+    const { rows } = await sql<{
+      student_id: string;
+      society_id: string;
+      institution_id: string;
+      institution_name: string;
+      first_name: string;
+      last_name: string | null;
+      photo_file_id: string | null;
+      class_name: string | null;
+      section_name: string | null;
+      child_blocked: boolean;
+      students_blocked: boolean;
+    }>`select * from app_children(${userId}::uuid)`.execute(db);
+    return rows.map((row) => ({
+      studentId: row.student_id,
+      societyId: row.society_id,
+      institutionId: row.institution_id,
+      institutionName: row.institution_name,
+      firstName: row.first_name,
+      lastName: row.last_name,
+      photoFileId: row.photo_file_id,
+      className: row.class_name,
+      sectionName: row.section_name,
+      childBlocked: row.child_blocked,
+      studentsBlocked: row.students_blocked,
+    }));
   }
 
   /** The active staff records of a person, as role 4 entries; read through the definer function, since sign-in has no role set. */
