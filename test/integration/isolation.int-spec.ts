@@ -233,6 +233,7 @@ describe('tenant isolation', () => {
         'subjects',
         'teaching_assignments',
         'time_slots',
+        'timetable_entries',
       ]);
     });
 

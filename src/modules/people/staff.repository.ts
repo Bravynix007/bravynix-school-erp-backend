@@ -40,6 +40,13 @@ export interface StaffFilter {
   subjectId?: string;
 }
 
+/** A staff member's name. */
+export interface StaffName {
+  id: string;
+  first_name: string;
+  last_name: string | null;
+}
+
 /** The staff member's name as lists order it: first and last name, ignoring letter case. */
 export const STAFF_NAME = sql`lower(concat_ws(' ', staff_members.first_name, staff_members.last_name))`;
 const SORT_COLUMN = {
@@ -185,6 +192,29 @@ export class StaffRepository {
       .where('user_id', '=', userId)
       .where('status', '=', 1)
       .executeTakeFirst();
+  }
+
+  /** The first and last names of these staff records, by ID, as the caller's scope shows them. */
+  async namesOf(tx: Tx, ids: readonly string[]): Promise<Map<string, StaffName>> {
+    if (ids.length === 0) return new Map();
+    const rows = await tx
+      .selectFrom('staff_members')
+      .select(['id', 'first_name', 'last_name'])
+      .where('id', 'in', ids)
+      .execute();
+    return new Map(rows.map((row) => [row.id, row]));
+  }
+
+  /**
+   * The names, and only the names, of these teachers of a parent's child's Institution (`app_staff_names`): a parent
+   * has no right to read a staff record.
+   */
+  async namesForParent(tx: Tx, ids: readonly string[]): Promise<Map<string, StaffName>> {
+    if (ids.length === 0) return new Map();
+    const { rows } = await sql<{ id: string; first_name: string; last_name: string | null }>`
+      select id, first_name, last_name from app_staff_names(${ids}::uuid[])
+    `.execute(tx);
+    return new Map(rows.map((row) => [row.id, row]));
   }
 
   insert(tx: Tx, values: NewStaff): Promise<StaffRow> {
