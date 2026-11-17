@@ -147,7 +147,7 @@ export class TimetableEntryService {
       staffMemberId: body.staffMemberId ?? null,
     };
     requireEntryShape(placement);
-    const context = await this.contextOfSection(principal, body.sectionId);
+    const context = await this.sections.contextOf(principal, body.sectionId);
     const { rows, names } = await this.database
       .transaction(context.tenant, async (tx) => {
         await this.sections.requireActive(tx, body.sectionId, 'sectionId');
@@ -274,7 +274,7 @@ export class TimetableEntryService {
     if (errors.length > 0) throw AppException.validation(errors);
     if (query.sectionId !== undefined) {
       return {
-        context: await this.contextOfSection(principal, query.sectionId),
+        context: await this.sections.contextOf(principal, query.sectionId),
         sectionId: query.sectionId,
       };
     }
@@ -350,8 +350,9 @@ export class TimetableEntryService {
       await this.staff.requireTeacher(tx, entry.staffMemberId, institutionId, entry.subjectId);
     }
     if (
-      await this.entries.sectionTaken(
+      await this.entries.taken(
         tx,
+        'section_id',
         entry.sectionId,
         entry.dayOfWeek,
         entry.timeSlotId,
@@ -361,8 +362,9 @@ export class TimetableEntryService {
       throw AppException.conflict(ErrorCode.SECTION_SLOT_TAKEN);
     }
     if (entry.staffMemberId !== null) {
-      const clash = await this.entries.teacherBooked(
+      const clash = await this.entries.taken(
         tx,
+        'staff_member_id',
         entry.staffMemberId,
         entry.dayOfWeek,
         entry.timeSlotId,
@@ -423,19 +425,6 @@ export class TimetableEntryService {
     names: EntryNames,
   ): Promise<TimetableEntryResource> {
     return (await this.resources(rows, names))[0]!;
-  }
-
-  /** The Institution of a section named by its ID, which the caller must reach (404 otherwise, 422 when deactivated). */
-  private async contextOfSection(
-    principal: Principal,
-    sectionId: string,
-  ): Promise<InstitutionContext> {
-    const { tenant } = await this.scope.forPrincipal(principal);
-    const place = await this.database.transaction(tenant, (tx) =>
-      this.sections.placeOf(tx, sectionId),
-    );
-    if (!place) throw AppException.notFound();
-    return this.scope.requireInstitution(principal, place.institutionId);
   }
 
   /** The Institution of an entry named by its ID alone, which the caller must reach (404 otherwise, and when removed). */
