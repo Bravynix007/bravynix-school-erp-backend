@@ -557,6 +557,21 @@ describe('who an event reaches, and what a parent reads of the calendar', () => 
       ]);
       expect(await seen([students.stranger])).toEqual([]);
       expect(await seen([])).toEqual([]);
+      // A Society-wide event of another Society has no Institution to compare, so the Society must be.
+      await create(
+        { title: 'Other Society', scope: 1, institutionId: undefined },
+        otherOwner.token,
+      );
+      expect(await seen([students.ten])).toEqual(['Everyone']);
+      expect(await seen([students.stranger])).toEqual(['Other Society']);
+      // An event that was deactivated is not seen.
+      const gone = await create({ title: 'Cancelled', audience: 1 });
+      succeeded(
+        await api('delete', `/v1/events/${gone.id}`, owner.token),
+        200,
+        'deactivated event',
+      );
+      expect(await seen([students.ten])).toEqual(['Everyone']);
       // The setting of a child is honoured for role 5 only.
       expect(await seen([students.ten], 4)).toEqual([]);
     });

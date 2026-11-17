@@ -128,11 +128,7 @@ export class EventService {
    * EVT-03: one active event the caller reads; one that is not theirs, or not for their audience, is 404. A parent
    * names their child, and reads the Society's events and their child's Institution's for the parents' audiences.
    */
-  async get(
-    principal: Principal,
-    id: string,
-    query: GetEventQueryDto = {},
-  ): Promise<EventResource> {
+  async get(principal: Principal, id: string, query: GetEventQueryDto): Promise<EventResource> {
     const tenant = await this.readTenant(principal, query);
     const found = await this.database.transaction(tenant, async (tx) => {
       const row = await this.events.find(tx, id);
