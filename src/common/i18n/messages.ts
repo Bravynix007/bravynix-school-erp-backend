@@ -113,6 +113,7 @@ const en: Catalogue = {
   DATE_IN_FUTURE: 'Attendance cannot be marked for a day that has not come',
   DATE_OUTSIDE_CURRENT_YEAR: 'This date is outside the current academic year',
   DATE_IS_HOLIDAY: 'This date is a holiday for this class',
+  OUTSIDE_ACADEMIC_YEAR: 'This month or day is outside every academic year of the school',
   STUDENT_NOT_IN_SECTION: 'A student marked is not in this section on this date',
   // Classes and sections (API design 10.4j, 10.4c)
   CLASS_NOT_OFFERED: 'This Institution does not offer the category of this class',

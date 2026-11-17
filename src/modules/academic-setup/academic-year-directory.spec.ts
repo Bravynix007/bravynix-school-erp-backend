@@ -9,10 +9,16 @@ const year = (overrides: Partial<AcademicYearRow> = {}) =>
 const build = (found?: AcademicYearRow) => {
   const find = vi.fn<AcademicYearRepository['find']>().mockResolvedValue(found);
   const currentOf = vi.fn<AcademicYearRepository['currentOf']>().mockResolvedValue(found);
+  const overlapping = vi.fn<AcademicYearRepository['overlapping']>().mockResolvedValue(found);
   return {
-    directory: new AcademicYearDirectory({ find, currentOf } as unknown as AcademicYearRepository),
+    directory: new AcademicYearDirectory({
+      find,
+      currentOf,
+      overlapping,
+    } as unknown as AcademicYearRepository),
     find,
     currentOf,
+    overlapping,
   };
 };
 
@@ -95,6 +101,26 @@ describe('AcademicYearDirectory', () => {
         status: 422,
         code: 'CURRENT_YEAR_REQUIRED',
       });
+    });
+  });
+
+  describe('overlapping', () => {
+    it('is the year with a day in the span, with its first and last day', async () => {
+      const t = build(year({ id: 'year-3', start_date: '2026-06-01', end_date: '2027-03-31' }));
+      expect(
+        await t.directory.overlapping(tx, 'institution-1', '2026-11-01', '2026-11-30'),
+      ).toEqual({
+        id: 'year-3',
+        startDate: '2026-06-01',
+        endDate: '2027-03-31',
+      });
+      expect(t.overlapping).toHaveBeenCalledWith(tx, 'institution-1', '2026-11-01', '2026-11-30');
+    });
+
+    it('is undefined when no year has a day in the span', async () => {
+      expect(
+        await build().directory.overlapping(tx, 'institution-1', '2020-01-01', '2020-01-31'),
+      ).toBeUndefined();
     });
   });
 });

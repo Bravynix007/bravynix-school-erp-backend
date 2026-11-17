@@ -97,6 +97,70 @@ export class AttendanceRepository {
       .execute();
   }
 
+  /** The active sessions of these sections with a day from `from` to `to`, as a student's calendar reads them. */
+  async sessionsOfSections(
+    tx: Tx,
+    sectionIds: readonly string[],
+    from: string,
+    to: string,
+  ): Promise<
+    {
+      id: string;
+      sectionId: string;
+      attendanceDate: string;
+      submittedAt: Date;
+      submittedBy: string;
+      lastCorrectedAt: Date | null;
+    }[]
+  > {
+    if (sectionIds.length === 0) return [];
+    return tx
+      .selectFrom('attendance_sessions')
+      .select([
+        'id',
+        'section_id as sectionId',
+        'attendance_date as attendanceDate',
+        'submitted_at as submittedAt',
+        'submitted_by as submittedBy',
+        'last_corrected_at as lastCorrectedAt',
+      ])
+      .where('section_id', 'in', [...sectionIds])
+      .where('attendance_date', '>=', from)
+      .where('attendance_date', '<=', to)
+      .where('status', '=', 1)
+      .execute();
+  }
+
+  /**
+   * The marks of these enrolments from `from` to `to` that belong to an active session, by date: what each was marked
+   * when not Present. A voided session's marks stay in the table and are left out.
+   */
+  async marksOfEnrolments(
+    tx: Tx,
+    enrolmentIds: readonly string[],
+    from: string,
+    to: string,
+  ): Promise<{ studentEnrolmentId: string; attendanceDate: string; attendanceStatus: number }[]> {
+    if (enrolmentIds.length === 0) return [];
+    return tx
+      .selectFrom('attendance_exceptions as x')
+      .innerJoin('attendance_sessions as s', (join) =>
+        join
+          .onRef('s.id', '=', 'x.attendance_session_id')
+          .onRef('s.attendance_date', '=', 'x.attendance_date'),
+      )
+      .select([
+        'x.student_enrolment_id as studentEnrolmentId',
+        'x.attendance_date as attendanceDate',
+        'x.attendance_status as attendanceStatus',
+      ])
+      .where('x.student_enrolment_id', 'in', [...enrolmentIds])
+      .where('x.attendance_date', '>=', from)
+      .where('x.attendance_date', '<=', to)
+      .where('s.status', '=', 1)
+      .execute();
+  }
+
   /** Changes the mark of one student in a session. */
   async setStatus(
     tx: Tx,

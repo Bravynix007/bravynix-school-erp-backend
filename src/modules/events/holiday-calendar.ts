@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { eachDay } from '../../common/time/calendar-days.js';
 import type { Tx } from '../../platform/database/index.js';
 import { ClassDirectory } from '../academic-setup/index.js';
 import { EventRepository } from './event.repository.js';
@@ -30,20 +31,55 @@ export class HolidayCalendar {
     date: string,
   ): Promise<ClassHoliday | undefined> {
     const holidays = await this.events.holidaysForStudentsOn(tx, institutionId, date);
-    if (holidays.length === 0) return undefined;
+    return (await this.coveringClass(tx, holidays, classId))[0];
+  }
+
+  /**
+   * The title of the holiday that keeps this class of the Institution at home on each day from `from` to `to` that has
+   * one (the earliest holiday of a day, as `forClass` answers), by date.
+   */
+  async between(
+    tx: Tx,
+    institutionId: string,
+    classId: string,
+    from: string,
+    to: string,
+  ): Promise<ReadonlyMap<string, string>> {
+    const holidays = await this.events.holidaysForStudentsBetween(tx, institutionId, from, to);
+    const days = new Map<string, string>();
+    for (const holiday of await this.coveringClass(tx, holidays, classId)) {
+      const row = holidays.find((candidate) => candidate.id === holiday.eventId)!;
+      for (const day of eachDay(
+        row.start_date > from ? row.start_date : from,
+        row.end_date < to ? row.end_date : to,
+      )) {
+        if (!days.has(day)) days.set(day, holiday.title);
+      }
+    }
+    return days;
+  }
+
+  /** The holidays that cover the class, in the order given. */
+  private async coveringClass(
+    tx: Tx,
+    holidays: readonly { id: string; title: string }[],
+    classId: string,
+  ): Promise<ClassHoliday[]> {
+    if (holidays.length === 0) return [];
     const limits = await this.events.classesOf(
       tx,
       holidays.map((holiday) => holiday.id),
     );
+    const covering: ClassHoliday[] = [];
     for (const holiday of holidays) {
       const predefined = limits.get(holiday.id) ?? [];
       if (
         predefined.length === 0 ||
         (await this.classes.ofPredefined(tx, predefined)).has(classId)
       ) {
-        return { eventId: holiday.id, title: holiday.title };
+        covering.push({ eventId: holiday.id, title: holiday.title });
       }
     }
-    return undefined;
+    return covering;
   }
 }

@@ -38,6 +38,17 @@ describe('EventRepository', () => {
     expect(locked.queries[0]!.sql).toMatch(/where "id" = \$1 for update$/);
   });
 
+  it('lists the active holidays for students with a day in a span, the Society’s and the Institution’s', async () => {
+    const { tx, queries } = sqlRecorder();
+    await repository.holidaysForStudentsBetween(tx, 'inst-1', '2026-11-01', '2026-11-30');
+    const { sql, parameters } = queries[0]!;
+    expect(sql).toContain(
+      '"status" = $1 and "is_holiday" = $2 and "holiday_for_students" = $3 and "start_date" <= $4 and "end_date" >= $5',
+    );
+    expect(sql).toContain('"institution_id" is null or "institution_id" = $6');
+    expect(parameters).toEqual([1, true, true, '2026-11-30', '2026-11-01', 'inst-1']);
+  });
+
   it('inserts and updates one event and returns it', async () => {
     const insert = sqlRecorder();
     await expect(

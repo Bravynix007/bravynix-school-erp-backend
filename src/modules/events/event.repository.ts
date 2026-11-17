@@ -66,6 +66,30 @@ export class EventRepository {
       .execute();
   }
 
+  /** The active holidays for students with a day between `from` and `to`, as `holidaysForStudentsOn` reads them. */
+  holidaysForStudentsBetween(
+    tx: Tx,
+    institutionId: string,
+    from: string,
+    to: string,
+  ): Promise<EventRow[]> {
+    return tx
+      .selectFrom('events')
+      .selectAll()
+      .where('status', '=', 1)
+      .where('is_holiday', '=', true)
+      .where('holiday_for_students', '=', true)
+      .where('start_date', '<=', to)
+      .where('end_date', '>=', from)
+      .where((eb) =>
+        eb.or([eb('institution_id', 'is', null), eb('institution_id', '=', institutionId)]),
+      )
+      .orderBy('start_date')
+      .orderBy(sql`lower(title)`)
+      .orderBy('id')
+      .execute();
+  }
+
   async find(tx: Tx, id: string, lock = false): Promise<EventRow | undefined> {
     const query = tx.selectFrom('events').selectAll().where('id', '=', id);
     return (lock ? query.forUpdate() : query).executeTakeFirst();

@@ -3,12 +3,16 @@ import type { ClassDirectory } from '../academic-setup/index.js';
 import type { EventRepository, EventRow } from './event.repository.js';
 import { HolidayCalendar } from './holiday-calendar.js';
 
-const holiday = (id: string, title: string) => ({ id, title }) as EventRow;
+const holiday = (id: string, title: string, start = '2026-11-17', end = start) =>
+  ({ id, title, start_date: start, end_date: end }) as EventRow;
 
 function build(holidays: EventRow[], limits: Record<string, string[]> = {}) {
   const events = {
     holidaysForStudentsOn: vi
       .fn<EventRepository['holidaysForStudentsOn']>()
+      .mockResolvedValue(holidays),
+    holidaysForStudentsBetween: vi
+      .fn<EventRepository['holidaysForStudentsBetween']>()
       .mockResolvedValue(holidays),
     classesOf: vi
       .fn<EventRepository['classesOf']>()
@@ -69,5 +73,48 @@ describe('HolidayCalendar.forClass', () => {
       eventId: 'e1',
       title: 'Up to 8th',
     });
+  });
+});
+
+describe('HolidayCalendar.between', () => {
+  it('names the holiday of each day it covers inside the span, cut to the span', async () => {
+    const { calendar, events } = build([
+      holiday('h1', 'Diwali', '2026-10-30', '2026-11-03'),
+      holiday('h2', 'Founders Day', '2026-11-17'),
+    ]);
+    const days = await calendar.between(tx, 'inst-1', 'class-8a', '2026-11-01', '2026-11-30');
+    expect([...days]).toEqual([
+      ['2026-11-01', 'Diwali'],
+      ['2026-11-02', 'Diwali'],
+      ['2026-11-03', 'Diwali'],
+      ['2026-11-17', 'Founders Day'],
+    ]);
+    expect(events.holidaysForStudentsBetween).toHaveBeenCalledWith(
+      tx,
+      'inst-1',
+      '2026-11-01',
+      '2026-11-30',
+    );
+  });
+
+  it('keeps the earliest holiday of a day, and leaves out one limited to other classes', async () => {
+    const { calendar } = build(
+      [
+        holiday('h1', 'Up to 8th', '2026-11-17'),
+        holiday('h2', 'Also', '2026-11-17'),
+        holiday('h3', 'Twelfth only', '2026-11-18'),
+      ],
+      { h1: ['pre-8'], h3: ['pre-12'] },
+    );
+    const days = await calendar.between(tx, 'inst-1', 'class-8a', '2026-11-01', '2026-11-30');
+    expect([...days]).toEqual([['2026-11-17', 'Up to 8th']]);
+  });
+
+  it('asks nothing of the classes when there is no holiday', async () => {
+    const { calendar, events } = build([]);
+    expect(
+      (await calendar.between(tx, 'inst-1', 'class-8a', '2026-11-01', '2026-11-30')).size,
+    ).toBe(0);
+    expect(events.classesOf).not.toHaveBeenCalled();
   });
 });

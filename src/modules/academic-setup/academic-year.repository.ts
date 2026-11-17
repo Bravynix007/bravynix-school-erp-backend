@@ -57,6 +57,26 @@ export class AcademicYearRepository {
       .executeTakeFirst();
   }
 
+  /** The active year of the Institution that has a day between `from` and `to`: the current one first, then the latest. */
+  overlapping(
+    tx: Tx,
+    institutionId: string,
+    from: string,
+    to: string,
+  ): Promise<AcademicYearRow | undefined> {
+    return tx
+      .selectFrom('academic_years')
+      .selectAll()
+      .where('institution_id', '=', institutionId)
+      .where('status', '=', 1)
+      .where('start_date', '<=', to)
+      .where('end_date', '>=', from)
+      .orderBy('is_current', 'desc')
+      .orderBy('start_date', 'desc')
+      .limit(1)
+      .executeTakeFirst();
+  }
+
   insert(tx: Tx, values: NewAcademicYear): Promise<AcademicYearRow> {
     return tx.insertInto('academic_years').values(values).returningAll().executeTakeFirstOrThrow();
   }
