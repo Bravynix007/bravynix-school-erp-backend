@@ -5,6 +5,7 @@ import { DatabaseService, type TenantContext } from '../../src/platform/database
 import { createPool } from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
 import { writeAcademicSeed } from '../../src/seeds/academic-seed.js';
+import { writeNotificationsSeed } from '../../src/seeds/notifications-seed.js';
 import { writeFilesSeed } from '../../src/seeds/files-seed.js';
 import {
   seededStaffId,
@@ -141,6 +142,7 @@ describe('tenant isolation', () => {
     await writeFilesSeed(ownerDb);
     await writeStaffSeed(ownerDb);
     await writeStudentSeed(ownerDb);
+    await writeNotificationsSeed(ownerDb);
     await clearLoginState(ownerDb);
     // Role 3 grants need a staff record, which arrives with the People module.
     for (const caller of Object.values(callers)) {
@@ -204,6 +206,7 @@ describe('tenant isolation', () => {
         'documents',
         'files',
         'import_runs',
+        'inbox_items',
         'institution_class_categories',
         'institutions',
         'jobs',
@@ -227,15 +230,21 @@ describe('tenant isolation', () => {
     });
 
     it.each([
-      ['owner of A', socA, [a1.id, a2.id]],
-      ['owner of B', socB, [b1.id]],
-      ['admin of A1', socA, [a1.id]],
-      ['admin of B1', socB, [b1.id]],
+      ['owner of A', 'SO-A1', socA, [a1.id, a2.id]],
+      ['owner of B', 'SO-B1', socB, [b1.id]],
+      ['admin of A1', 'IA-A1', socA, [a1.id]],
+      ['admin of B1', 'IA-B1', socB, [b1.id]],
     ])(
       'shows the %s only their own world, and some of it',
-      async (_who, society, institutionIds) => {
+      async (_who, personaKey, society, institutionIds) => {
         for (const table of await tenantTables()) {
-          const rows = await visible(table.name, { societyId: society.id, institutionIds });
+          // An inbox belongs to its receiver, not to a Society: it is read as the person it was written for.
+          const personId = table.name === 'inbox_items' ? personaByKey(personaKey).id : undefined;
+          const rows = await visible(table.name, {
+            societyId: society.id,
+            institutionIds,
+            personId,
+          });
           // Only a member with a second Institution has extra Institutions, and Society B has one Institution.
           const mayBeEmpty = table.name === 'staff_institutions' && society.id === socB.id;
           if (!mayBeEmpty) {

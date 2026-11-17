@@ -15,6 +15,7 @@ import { AuditModule } from './platform/audit/audit.module.js';
 import { DatabaseModule } from './platform/database/database.module.js';
 import { EmailModule } from './platform/email/email.module.js';
 import { FilesModule } from './platform/files/index.js';
+import { NotificationsModule } from './platform/notifications/index.js';
 import { IdentityNumbersModule } from './platform/identity-numbers/index.js';
 import { IdempotencyModule } from './platform/idempotency/idempotency.module.js';
 import { IdentityModule } from './platform/identity/identity.module.js';
@@ -77,6 +78,7 @@ import { TenancyModule } from './platform/tenancy/tenancy.module.js';
     IdempotencyModule,
     NumberingModule,
     FilesModule,
+    NotificationsModule,
     JobsModule,
     SweepsModule,
     IdentityNumbersModule,
