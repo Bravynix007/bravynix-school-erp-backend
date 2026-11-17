@@ -211,7 +211,7 @@ describe('EVT-01 to EVT-06 events and holidays (PRD 7.12, API design 10.26)', ()
 
     it('checks the fields that go together, naming each one that is wrong', async () => {
       const backwards = await add(owner.token, { endDate: '2026-12-21' });
-      expect(fieldsOf(backwards)).toEqual({ endDate: 'INVALID_VALUE' });
+      expect(fieldsOf(backwards)).toEqual({ endDate: 'OUT_OF_RANGE' });
       const bare = await add(owner.token, { isHoliday: true });
       expect(fieldsOf(bare)).toEqual({ holidayType: 'REQUIRED', holidayForStudents: 'REQUIRED' });
       const notHoliday = await add(owner.token, {
@@ -443,7 +443,7 @@ describe('EVT-01 to EVT-06 events and holidays (PRD 7.12, API design 10.26)', ()
     it('checks the whole event as it will be, not only the fields sent', async () => {
       const made = await added({ startDate: '2026-12-22', endDate: '2026-12-24' });
       const early = await edit(made.id, { version: 1, endDate: '2026-12-21' });
-      expect(fieldsOf(early)).toEqual({ endDate: 'INVALID_VALUE' });
+      expect(fieldsOf(early)).toEqual({ endDate: 'OUT_OF_RANGE' });
       const holidayNoType = await edit(made.id, { version: 1, isHoliday: true });
       expect(fieldsOf(holidayNoType)).toEqual({
         holidayType: 'REQUIRED',

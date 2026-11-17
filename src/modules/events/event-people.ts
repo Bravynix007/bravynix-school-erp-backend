@@ -1,9 +1,7 @@
-import type { Principal } from '../../common/auth/access-token-verifier.js';
-import type { Tx, TenantContext } from '../../platform/database/index.js';
+import type { Tx } from '../../platform/database/index.js';
 
 /**
- * What Events asks of People: who the people of an audience are, and the tenant in which a parent reads their child's
- * calendar. The staff and guardians belong to People, which provides this (SDD 9.3 rules 1 and 7); every call runs in
+ * What Events asks of People: who the people of an audience are. The staff and guardians belong to People, which provides this (SDD 9.3 rules 1 and 7); every call runs in
  * the caller's transaction, under row-level security.
  */
 export abstract class EventPeople {
@@ -26,7 +24,4 @@ export abstract class EventPeople {
     institutionId: string | null,
     predefinedClassIds: readonly string[],
   ): Promise<readonly string[]>;
-
-  /** The tenant of a parent's request for one of their children (404, 423 or 403 when the child is not open to them). */
-  abstract childTenant(principal: Principal, studentId: string): Promise<TenantContext>;
 }
