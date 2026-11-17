@@ -3,7 +3,11 @@ import { AppException } from '../../common/http/app-exception.js';
 import type { AuditService } from '../../platform/audit/index.js';
 import type { DatabaseService, TenantContext, Tx } from '../../platform/database/index.js';
 import type { PersonDirectory } from '../../platform/identity/index.js';
-import type { InstitutionContext, ScopeService } from '../../platform/tenancy/index.js';
+import type {
+  ChildContexts,
+  InstitutionContext,
+  ScopeService,
+} from '../../platform/tenancy/index.js';
 import type {
   AcademicYearDirectory,
   SectionDirectory,
@@ -176,7 +180,7 @@ function build(current: TimetableEntryRow | null = entry()) {
   const parentNames = vi
     .fn<TimetableStaff['namesForParent']>()
     .mockResolvedValue(new Map([['staff-1', 'Asha Rao']]));
-  const childContextOf = vi.fn<TimetableChildren['childContext']>().mockResolvedValue(childContext);
+  const childContextOf = vi.fn<ChildContexts['of']>().mockResolvedValue(childContext);
   const currentSectionId = vi
     .fn<TimetableChildren['currentSectionId']>()
     .mockResolvedValue('section-1');
@@ -207,7 +211,8 @@ function build(current: TimetableEntryRow | null = entry()) {
       names: teacherNames,
       namesForParent: parentNames,
     } as unknown as TimetableStaff,
-    { childContext: childContextOf, currentSectionId } as unknown as TimetableChildren,
+    { currentSectionId } as unknown as TimetableChildren,
+    { of: childContextOf } as unknown as ChildContexts,
     {
       describe: vi.fn<PersonDirectory['describe']>().mockResolvedValue(new Map()),
     } as unknown as PersonDirectory,

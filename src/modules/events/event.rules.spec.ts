@@ -73,7 +73,7 @@ describe('checkEventFields', () => {
 
   it('refuses an end before the start', () => {
     expect(problemsOf(() => checkEventFields({ ...plain, endDate: '2026-12-21' }))).toEqual([
-      { field: 'endDate', code: 'INVALID_VALUE' },
+      { field: 'endDate', code: 'OUT_OF_RANGE' },
     ]);
   });
 

@@ -64,7 +64,7 @@ export function daysBetween(from: string, to: string): number {
 export function checkEventFields(event: EventFields): void {
   const errors = [];
   if (event.endDate < event.startDate) {
-    errors.push(fieldError('endDate', FieldErrorCode.INVALID_VALUE));
+    errors.push(fieldError('endDate', FieldErrorCode.OUT_OF_RANGE));
   }
   if (event.isHoliday) {
     if (event.holidayType === null) errors.push(fieldError('holidayType', FieldErrorCode.REQUIRED));

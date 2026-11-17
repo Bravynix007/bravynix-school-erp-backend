@@ -9,6 +9,7 @@ import { ErrorCode, FieldErrorCode } from '../../common/http/error-codes.js';
 import { requireVersion } from '../../common/http/require-version.js';
 import { newId } from '../../common/ids/ids.js';
 import { fieldError } from '../../common/validation/field-error.js';
+import { parentReadErrors, staffReadErrors } from '../../common/validation/parent-read.js';
 import { AuditService, type AuditValues } from '../../platform/audit/index.js';
 import {
   DatabaseService,
@@ -17,7 +18,11 @@ import {
   type Tx,
 } from '../../platform/database/index.js';
 import { PersonDirectory } from '../../platform/identity/index.js';
-import { ScopeService, type InstitutionContext } from '../../platform/tenancy/index.js';
+import {
+  ChildContexts,
+  ScopeService,
+  type InstitutionContext,
+} from '../../platform/tenancy/index.js';
 import { AcademicYearDirectory } from '../academic-setup/index.js';
 import type {
   CreateTimeSlotDto,
@@ -32,7 +37,6 @@ import {
 import { timeSlotResource, type TimeSlotResource } from './time-slot.resource.js';
 import { clockOf, requireTimes, translateTimeSlotError } from './time-slot.rules.js';
 import { TimetableEntryRepository } from './timetable-entry.repository.js';
-import { TimetableChildren } from './timetable-children.js';
 
 /** What the audit log keeps of a period. */
 function auditView(row: TimeSlotRow): AuditValues {
@@ -60,7 +64,7 @@ export class TimeSlotService {
     private readonly entries: TimetableEntryRepository,
     private readonly scope: ScopeService,
     private readonly years: AcademicYearDirectory,
-    private readonly children: TimetableChildren,
+    private readonly children: ChildContexts,
     private readonly people: PersonDirectory,
     private readonly audit: AuditService,
   ) {}
@@ -199,27 +203,15 @@ export class TimeSlotService {
     query: ListTimeSlotsQueryDto,
   ): Promise<InstitutionContext> {
     if (principal.roleCode === RoleCode.StudentParent) {
-      const errors = [
-        ...(query.studentId === undefined
-          ? [fieldError('studentId', FieldErrorCode.REQUIRED)]
-          : []),
-        ...(query.institutionId === undefined
-          ? []
-          : [fieldError('institutionId', FieldErrorCode.FIELD_NOT_ALLOWED)]),
-        ...(query.academicYearId === undefined
-          ? []
-          : [fieldError('academicYearId', FieldErrorCode.FIELD_NOT_ALLOWED)]),
-      ];
+      const errors = parentReadErrors(query, ['institutionId', 'academicYearId']);
       if (errors.length > 0) throw AppException.validation(errors);
-      return this.children.childContext(principal, query.studentId!);
+      return this.children.of(principal, query.studentId!);
     }
     const errors = [
       ...(query.institutionId === undefined
         ? [fieldError('institutionId', FieldErrorCode.REQUIRED)]
         : []),
-      ...(query.studentId === undefined
-        ? []
-        : [fieldError('studentId', FieldErrorCode.FIELD_NOT_ALLOWED)]),
+      ...staffReadErrors(query),
     ];
     if (errors.length > 0) throw AppException.validation(errors);
     return this.scope.requireInstitution(principal, query.institutionId!);
