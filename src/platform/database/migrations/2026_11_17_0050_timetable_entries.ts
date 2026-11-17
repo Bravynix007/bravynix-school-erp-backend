@@ -123,7 +123,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       language sql
       stable
       security definer
-      set search_path = public, pg_temp
+      set search_path = pg_catalog, public, pg_temp
     as $$
       select m.id, m.first_name::text, m.last_name::text
       from staff_members m
