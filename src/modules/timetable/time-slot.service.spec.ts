@@ -3,12 +3,15 @@ import { AppException } from '../../common/http/app-exception.js';
 import type { AuditService } from '../../platform/audit/index.js';
 import type { DatabaseService, TenantContext, Tx } from '../../platform/database/index.js';
 import type { PersonDirectory } from '../../platform/identity/index.js';
-import type { InstitutionContext, ScopeService } from '../../platform/tenancy/index.js';
+import type {
+  ChildContexts,
+  InstitutionContext,
+  ScopeService,
+} from '../../platform/tenancy/index.js';
 import type { AcademicYearDirectory } from '../academic-setup/index.js';
 import type { CreateTimeSlotDto } from './time-slot.dto.js';
 import type { TimeSlotRepository, TimeSlotRow } from './time-slot.repository.js';
 import { TimeSlotService } from './time-slot.service.js';
-import type { TimetableChildren } from './timetable-children.js';
 import type { TimetableEntryRepository } from './timetable-entry.repository.js';
 
 const principal = (roleCode: number) =>
@@ -112,7 +115,7 @@ function build(current: TimeSlotRow | null = slot()) {
     .fn<AcademicYearDirectory['openYear']>()
     .mockResolvedValue({ open: true, startDate: '2026-06-01', endDate: '2027-03-31' });
   const requireActive = vi.fn<AcademicYearDirectory['requireActive']>().mockResolvedValue();
-  const childContextOf = vi.fn<TimetableChildren['childContext']>().mockResolvedValue(childContext);
+  const childContextOf = vi.fn<ChildContexts['of']>().mockResolvedValue(childContext);
   const record = vi.fn<AuditService['record']>().mockResolvedValue('audit-1');
   const usesSlot = vi.fn<TimetableEntryRepository['usesSlot']>().mockResolvedValue(false);
   const service = new TimeSlotService(
@@ -121,7 +124,7 @@ function build(current: TimeSlotRow | null = slot()) {
     { usesSlot } as unknown as TimetableEntryRepository,
     { forPrincipal, requireInstitution } as unknown as ScopeService,
     { requireCurrentId, openYear, requireActive } as unknown as AcademicYearDirectory,
-    { childContext: childContextOf } as unknown as TimetableChildren,
+    { of: childContextOf } as unknown as ChildContexts,
     {
       describe: vi.fn<PersonDirectory['describe']>().mockResolvedValue(new Map()),
     } as unknown as PersonDirectory,
@@ -376,6 +379,7 @@ describe('TimeSlotService.deactivate', () => {
   it('deactivates an active period and audits it', async () => {
     const t = build();
     expect(await t.service.deactivate(admin, 'slot-1')).toEqual({ id: 'slot-1', status: 0 });
+    expect(t.find).toHaveBeenLastCalledWith(expect.anything(), 'slot-1', true);
     expect(t.update).toHaveBeenCalledWith(
       expect.anything(),
       'slot-1',

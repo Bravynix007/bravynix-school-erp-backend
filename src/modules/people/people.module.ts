@@ -1,4 +1,5 @@
 import { Global, Module } from '@nestjs/common';
+import { ChildContexts } from '../../platform/tenancy/index.js';
 import { AttendanceStaff, SectionRoster } from '../attendance/index.js';
 import { EventPeople } from '../events/index.js';
 import { TimetableChildren, TimetableStaff } from '../timetable/index.js';
@@ -28,6 +29,7 @@ import { GuardianService } from './guardian.service.js';
 import { IdentityRepository } from './identity.repository.js';
 import { InstitutionAdminController } from './institution-admin.controller.js';
 import { InstitutionAdminService } from './institution-admin.service.js';
+import { PeopleChildContexts } from './people-child-contexts.js';
 import { PeopleEventPeople } from './people-event-people.js';
 import { PeopleFileReaders } from './people-file-readers.js';
 import { PeopleTimetableChildren } from './people-timetable-children.js';
@@ -112,6 +114,8 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
     { provide: FileReaders, useExisting: PeopleFileReaders },
     PeopleEventPeople,
     { provide: EventPeople, useExisting: PeopleEventPeople },
+    PeopleChildContexts,
+    { provide: ChildContexts, useExisting: PeopleChildContexts },
     PeopleTimetableChildren,
     { provide: TimetableChildren, useExisting: PeopleTimetableChildren },
     PeopleTimetableStaff,
@@ -126,6 +130,7 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
     SectionStudents,
     FileReaders,
     EventPeople,
+    ChildContexts,
     TimetableChildren,
     TimetableStaff,
     SectionRoster,
