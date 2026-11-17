@@ -3,6 +3,7 @@ import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { ApiResult } from '../../common/http/api-result.js';
 import { AppException } from '../../common/http/app-exception.js';
 import { FixedClock } from '../../common/time/clock.js';
+import { VersionedStatedReasonDto } from '../../common/validation/reason.dto.js';
 import type { AuditService } from '../../platform/audit/index.js';
 import type { DatabaseService, TenantContext, Tx } from '../../platform/database/index.js';
 import type {
@@ -17,13 +18,7 @@ import type {
   InstitutionName,
   InstitutionRef,
 } from '../../platform/tenancy/index.js';
-import type {
-  CancelDueDto,
-  ListDuesQueryDto,
-  MarkDuePaidDto,
-  RaiseDueDto,
-  UpdateDueDto,
-} from './due.dto.js';
+import type { ListDuesQueryDto, MarkDuePaidDto, RaiseDueDto, UpdateDueDto } from './due.dto.js';
 import type { DueRepository, DueRow, NewDue } from './due.repository.js';
 import { DueService } from './due.service.js';
 import type { PriceRateRepository, PriceRateRow } from './price-rate.repository.js';
@@ -211,8 +206,8 @@ const edit = (overrides: Partial<UpdateDueDto> = {}) =>
   ({ version: 1, ...overrides }) as UpdateDueDto;
 const paid = (overrides: Partial<MarkDuePaidDto> = {}) =>
   ({ version: 1, paidDate: '2026-10-30', paymentMode: 2, ...overrides }) as MarkDuePaidDto;
-const cancelBody = (overrides: Partial<CancelDueDto> = {}) =>
-  ({ version: 1, reason: 'Raised twice', ...overrides }) as CancelDueDto;
+const cancelBody = (overrides: Partial<VersionedStatedReasonDto> = {}) =>
+  ({ version: 1, reason: 'Raised twice', ...overrides }) as VersionedStatedReasonDto;
 
 async function refusal(work: Promise<unknown>): Promise<AppException> {
   try {
