@@ -1,10 +1,16 @@
-import type { Tx } from '../../platform/database/index.js';
+import { AppException } from '../../common/http/app-exception.js';
+import type { Principal } from '../../common/auth/access-token-verifier.js';
+import type { DatabaseService, Tx } from '../../platform/database/index.js';
+import type { InstitutionContext, ScopeService } from '../../platform/tenancy/index.js';
 import { SectionDirectory } from './section-directory.js';
 import type { SectionRepository, SectionRow } from './section.repository.js';
 
 const tx = {} as Tx;
 const section = (overrides: Partial<SectionRow> = {}) =>
   ({ id: 'section-1', institution_id: 'institution-1', status: 1, ...overrides }) as SectionRow;
+
+const principal = { personId: 'person-1' } as Principal;
+const context = { institutionId: 'institution-1' } as InstitutionContext;
 
 const build = (found?: SectionRow) => {
   const find = vi.fn<SectionRepository['find']>().mockResolvedValue(found);
@@ -14,8 +20,20 @@ const build = (found?: SectionRow) => {
     .mockResolvedValue(
       new Map([['section-1', { displayName: 'A', classId: 'c', className: '5' }]]),
     );
+  const transaction = vi.fn<DatabaseService['transaction']>((_tenant, work) => work(tx));
+  const forPrincipal = vi
+    .fn<ScopeService['forPrincipal']>()
+    .mockResolvedValue({ tenant: { societyId: 'society-1' } } as Awaited<
+      ReturnType<ScopeService['forPrincipal']>
+    >);
+  const requireInstitution = vi.fn<ScopeService['requireInstitution']>().mockResolvedValue(context);
   return {
-    directory: new SectionDirectory({ find, keptOpen, namesOf } as unknown as SectionRepository),
+    directory: new SectionDirectory(
+      { find, keptOpen, namesOf } as unknown as SectionRepository,
+      { transaction } as unknown as DatabaseService,
+      { forPrincipal, requireInstitution } as unknown as ScopeService,
+    ),
+    requireInstitution,
     find,
     keptOpen,
     namesOf,
@@ -44,6 +62,25 @@ describe('SectionDirectory', () => {
       ).rejects.toMatchObject({
         status: 422,
         options: { errors: [{ field: 'sectionId', code: 'REFERENCE_INACTIVE' }] },
+      });
+    });
+  });
+
+  describe('contextOf', () => {
+    it('gives the Institution of a section the caller reaches', async () => {
+      const t = build(section());
+      await expect(t.directory.contextOf(principal, 'section-1')).resolves.toBe(context);
+      expect(t.requireInstitution).toHaveBeenCalledWith(principal, 'institution-1');
+    });
+
+    it('is 404 for a section the caller cannot see, and for an Institution out of their reach', async () => {
+      await expect(build().directory.contextOf(principal, 'section-1')).rejects.toMatchObject({
+        status: 404,
+      });
+      const t = build(section());
+      t.requireInstitution.mockRejectedValue(AppException.notFound());
+      await expect(t.directory.contextOf(principal, 'section-1')).rejects.toMatchObject({
+        status: 404,
       });
     });
   });

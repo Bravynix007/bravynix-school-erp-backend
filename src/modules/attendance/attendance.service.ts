@@ -87,7 +87,7 @@ export class AttendanceService {
    * caller may mark it now. A day that cannot be marked still loads, so the screen can show it.
    */
   async rosterOf(principal: Principal, query: RosterQueryDto): Promise<RosterResource> {
-    const context = await this.contextOfSection(principal, query.sectionId);
+    const context = await this.sections.contextOf(principal, query.sectionId);
     return this.database.transaction(context.tenant, async (tx) => {
       const place = await this.sections.placeOf(tx, query.sectionId);
       if (!place) throw AppException.notFound();
@@ -156,7 +156,7 @@ export class AttendanceService {
     body: SubmitAttendanceDto,
   ): Promise<ApiResult<AttendanceSessionResource>> {
     requireEachStudentOnce(body.exceptions);
-    const context = await this.contextOfSection(principal, body.sectionId);
+    const context = await this.sections.contextOf(principal, body.sectionId);
     try {
       return await this.idempotency.run(
         {
@@ -584,19 +584,6 @@ export class AttendanceService {
     });
   }
 
-  /** The Institution of a section the caller reaches; 404 for any other. */
-  private async contextOfSection(
-    principal: Principal,
-    sectionId: string,
-  ): Promise<InstitutionContext> {
-    const { tenant } = await this.scope.forPrincipal(principal);
-    const place = await this.database.transaction(tenant, (tx) =>
-      this.sections.placeOf(tx, sectionId),
-    );
-    if (!place) throw AppException.notFound();
-    return this.scope.requireInstitution(principal, place.institutionId);
-  }
-
   /** ATT-03: the Institution of one section, or the one named (400 `REQUIRED` for neither). */
   private async contextOf(
     principal: Principal,
@@ -608,7 +595,7 @@ export class AttendanceService {
           fieldError('institutionId', FieldErrorCode.FIELD_NOT_ALLOWED),
         ]);
       }
-      return this.contextOfSection(principal, query.sectionId);
+      return this.sections.contextOf(principal, query.sectionId);
     }
     if (query.institutionId === undefined) {
       throw AppException.validation([fieldError('institutionId', FieldErrorCode.REQUIRED)]);

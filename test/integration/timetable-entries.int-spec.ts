@@ -1,5 +1,5 @@
 import { sql, Kysely, PostgresDialect } from 'kysely';
-import { DatabaseService } from '../../src/platform/database/index.js';
+import { DatabaseService, type Tx } from '../../src/platform/database/index.js';
 import { createPool } from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
@@ -141,6 +141,17 @@ describe('TT-01 to TT-04 the class timetable (API design 9.7, 12.6)', () => {
   /** The rows of the timetable a session reads when the request names these children. */
   const seenAsParent = (childIds: string[]) =>
     database.transaction({ personId: owner.person, roleCode: 5, childIds }, async (tx) =>
+      (await tx.selectFrom('timetable_entries').select('id').execute()).map((row) => row.id),
+    );
+
+  /** The entries a staff session of these Institutions of the Society reads, and can touch. */
+  const asStaffOf = <T>(institutionIds: string[], work: (tx: Tx) => Promise<T>) =>
+    database.transaction(
+      { societyId: societyA, institutionIds, roleCode: 3, personId: owner.person },
+      work,
+    );
+  const idsOf = (institutionIds: string[]) =>
+    asStaffOf(institutionIds, async (tx) =>
       (await tx.selectFrom('timetable_entries').select('id').execute()).map((row) => row.id),
     );
 
@@ -707,6 +718,85 @@ describe('TT-01 to TT-04 the class timetable (API design 9.7, 12.6)', () => {
     });
   });
 
+  describe('what the policies let each reader see', () => {
+    it('keeps another Institution’s timetable from staff of the same Society: not read, not added, not changed', async () => {
+      const made = await added();
+      expect(await idsOf([first])).toEqual([made.id]);
+      expect(await idsOf([second])).toEqual([]);
+      await expect(
+        asStaffOf([second], (tx) =>
+          sql`insert into timetable_entries (society_id, institution_id, academic_year_id, section_id, day_of_week, time_slot_id, is_break)
+                values (${societyA}, ${first}, ${year}, ${sectionA}, 4, ${slotOne}, true)`.execute(
+            tx,
+          ),
+        ),
+      ).rejects.toMatchObject({ code: '42501' });
+      const changed = await asStaffOf([second], (tx) =>
+        sql`update timetable_entries set day_of_week = 5 where id = ${made.id}`.execute(tx),
+      );
+      expect(changed.numAffectedRows).toBe(0n);
+      expect((await week(`sectionId=${sectionA}`)).map((e) => e.dayOfWeek)).toEqual([1]);
+    });
+
+    it('shows a parent the week of the section their child sits in now, and none of a section they left', async () => {
+      const inA = await added({ dayOfWeek: 1 });
+      const inB = await added({ sectionId: sectionB, dayOfWeek: 2, staffMemberId: ben.id });
+      expect(await seenAsParent([childId])).toEqual([inA.id]);
+      succeeded(
+        await api('patch', `/v1/students/${childId}/placement`, owner.token, {
+          sectionId: sectionB,
+          rollNumber: '1',
+        }),
+        200,
+        'move',
+      );
+      expect(await seenAsParent([childId])).toEqual([inB.id]);
+    });
+
+    it('shows a parent nothing of a section the child’s placement in it is over', async () => {
+      await added();
+      expect(await seenAsParent([childId])).toHaveLength(1);
+      await database.transaction(
+        { societyId: societyA, institutionIds: [first], roleCode: 2, personId: owner.person },
+        (tx) =>
+          sql`update student_section_placements set end_date = start_date
+              where student_enrolment_id in (select id from student_enrolments where student_id = ${childId})`.execute(
+            tx,
+          ),
+      );
+      expect(await seenAsParent([childId])).toEqual([]);
+    });
+
+    it('shows a parent nothing of a child whose enrolment is no longer active', async () => {
+      await added();
+      expect(await seenAsParent([childId])).toHaveLength(1);
+      await database.transaction(
+        { societyId: societyA, institutionIds: [first], roleCode: 2, personId: owner.person },
+        (tx) =>
+          sql`update student_enrolments set status = 0 where student_id = ${childId}`.execute(tx),
+      );
+      expect(await seenAsParent([childId])).toEqual([]);
+    });
+
+    it('does not show a parent an entry that was removed', async () => {
+      const made = await added();
+      const kept = await added({ dayOfWeek: 2, staffMemberId: ben.id });
+      expect((await seenAsParent([childId])).toSorted()).toEqual([made.id, kept.id].toSorted());
+      succeeded(await remove(made.id), 200, 'removed');
+      expect(await seenAsParent([childId])).toEqual([kept.id]);
+    });
+
+    it('shows a parent the subjects of their child’s Society and no other Society’s', async () => {
+      const foreign = await kit.subject(otherOwner.token, 'Physics');
+      const seen = await database.transaction(
+        { personId: owner.person, roleCode: 5, childIds: [childId] },
+        async (tx) => (await tx.selectFrom('subjects').select('id').execute()).map((r) => r.id),
+      );
+      expect(seen).toEqual(expect.arrayContaining([maths, english]));
+      expect(seen).not.toContain(foreign);
+    });
+  });
+
   describe('the table and the names a parent reads', () => {
     it('keeps a lesson without a teacher, a break with one, and a teacher of another Institution out', async () => {
       await expect(insert(sql`is_break`, sql`false`)).rejects.toMatchObject({ code: '23514' });
@@ -750,6 +840,18 @@ describe('TT-01 to TT-04 the class timetable (API design 9.7, 12.6)', () => {
           (await sql`select * from app_staff_names(${[anna.id]}::uuid[])`.execute(tx)).rows,
       );
       expect(asStaff).toEqual([]);
+    });
+
+    it('does not answer the name of a teacher who has been deactivated', async () => {
+      const namesOfAnna = () =>
+        database.transaction(
+          { personId: owner.person, roleCode: 5, childIds: [childId] },
+          async (tx) =>
+            (await sql`select * from app_staff_names(${[anna.id]}::uuid[])`.execute(tx)).rows,
+        );
+      expect(await namesOfAnna()).toHaveLength(1);
+      succeeded(await api('delete', `/v1/staff/${anna.id}`, owner.token), 200, 'deactivated');
+      expect(await namesOfAnna()).toEqual([]);
     });
   });
 });
