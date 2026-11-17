@@ -49,4 +49,20 @@ export class SweepsRepository {
     `.execute(this.database.db);
     return rows[0]!.removed;
   }
+
+  /** Makes the monthly partitions of the inboxes from this month on; says how many were new. */
+  async ensureInboxPartitions(monthsAhead: number): Promise<number> {
+    const { rows } = await sql<{ made: number }>`
+      select maintenance.ensure_inbox_partitions(current_date, ${monthsAhead}::integer) as made
+    `.execute(this.database.db);
+    return rows[0]!.made;
+  }
+
+  /** Drops the inbox partitions that ended `days` ago; says how many. */
+  async dropInboxPartitions(days: number): Promise<number> {
+    const { rows } = await sql<{ dropped: number }>`
+      select maintenance.drop_inbox_partitions(${days}::integer) as dropped
+    `.execute(this.database.db);
+    return rows[0]!.dropped;
+  }
 }

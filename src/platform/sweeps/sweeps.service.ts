@@ -3,7 +3,9 @@ import {
   FILE_BATCH,
   DOCUMENT_FILE_DAYS,
   IMPORT_RUN_DAYS,
+  INBOX_KEEP_DAYS,
   MAX_FILE_BATCHES,
+  PARTITIONS_AHEAD,
   UNREFERENCED_GRACE_HOURS,
 } from './sweeps.rules.js';
 import { IdempotencyService } from '../idempotency/index.js';
@@ -20,6 +22,10 @@ export interface SweepReport {
   importRunsRemoved: number;
   /** Stored answers of `idempotency_keys` past their 24 hours. */
   answersRemoved: number;
+  /** Monthly partitions of the inboxes made ahead of time. */
+  inboxPartitionsMade: number;
+  /** Inbox partitions dropped for being past their keeping. */
+  inboxPartitionsDropped: number;
 }
 
 /**
@@ -42,6 +48,8 @@ export class SweepsService {
       filesRemoved: 0,
       importRunsRemoved: 0,
       answersRemoved: 0,
+      inboxPartitionsMade: 0,
+      inboxPartitionsDropped: 0,
     };
     report.filesExpired = await this.part('expire files', () =>
       this.sweeps.expireFiles(DOCUMENT_FILE_DAYS, UNREFERENCED_GRACE_HOURS),
@@ -52,6 +60,14 @@ export class SweepsService {
     );
     report.answersRemoved = await this.part('expire stored answers', () =>
       this.idempotency.sweepExpired(),
+    );
+    // Ahead first: a row that arrives in a month with no partition has nowhere to go (DDD 14.5). The audit log's
+    // partitions are not made here: that function is the platform role's, and the app role is refused it (migration 0002).
+    report.inboxPartitionsMade = await this.part('make inbox partitions', () =>
+      this.sweeps.ensureInboxPartitions(PARTITIONS_AHEAD),
+    );
+    report.inboxPartitionsDropped = await this.part('drop old inbox partitions', () =>
+      this.sweeps.dropInboxPartitions(INBOX_KEEP_DAYS),
     );
     this.logger.log(report, 'Sweep done');
     return report;

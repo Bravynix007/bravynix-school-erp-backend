@@ -48,6 +48,19 @@ describe('worker sweeps', () => {
   let institutionId: string;
   let place: StudentPlace;
 
+  const exists = async (name: string) =>
+    (
+      await sql<{
+        found: string | null;
+      }>`select to_regclass(${`public.${name}`}) as found`.execute(ownerDb)
+    ).rows[0]!.found !== null;
+  const monthName = (table: string, monthsFromNow: number) =>
+    sql<{ name: string }>`
+      select ${`${table}_`} || to_char(date_trunc('month', now()) + make_interval(months => ${monthsFromNow}), 'YYYY_MM') as name
+    `
+      .execute(ownerDb)
+      .then((r) => r.rows[0]!.name);
+
   /** A Ready file of `purpose`, uploaded and confirmed through the API. */
   const readyFile = async (purpose: number, bytes: Buffer, contentType: string) => {
     const res = await api('post', '/v1/files/uploads', owner.token, {
@@ -448,6 +461,36 @@ describe('worker sweeps', () => {
       await sweeps.sweep();
       expect((await file(loose)).file_status).toBe(4);
       expect(await objectExists(loose)).toBe(false);
+    });
+  });
+
+  describe('partitions (DDD 9.8, 14.5)', () => {
+    it('makes the inbox partitions three months ahead, when they are missing', async () => {
+      const ahead = await monthName('inbox_items', 3);
+      await sql`drop table ${sql.table(ahead)}`.execute(ownerDb);
+      expect((await sweeps.sweep()).inboxPartitionsMade).toBe(1);
+      expect(await exists(ahead)).toBe(true);
+      expect((await sweeps.sweep()).inboxPartitionsMade).toBe(0);
+    });
+
+    it('drops an inbox month that ended more than 180 days ago, with its rows, and keeps the others', async () => {
+      await sql`select maintenance.ensure_inbox_partitions(date '2025-01-01', 0)`.execute(ownerDb);
+      const lastMonth = await monthName('inbox_items', -1);
+      await sql`select maintenance.ensure_inbox_partitions((date_trunc('month', now()) - interval '1 month')::date, 0)`.execute(
+        ownerDb,
+      );
+      expect(await exists('inbox_items_2025_01')).toBe(true);
+      const report = await sweeps.sweep();
+      expect(report.inboxPartitionsDropped).toBeGreaterThanOrEqual(1);
+      expect(await exists('inbox_items_2025_01')).toBe(false);
+      expect(await exists(lastMonth)).toBe(true);
+      expect(await exists(await monthName('inbox_items', 0))).toBe(true);
+    });
+
+    it('refuses a keeping of under 30 days', async () => {
+      await expect(
+        sql`select maintenance.drop_inbox_partitions(10)`.execute(database.db),
+      ).rejects.toThrow(/at least 30/);
     });
   });
 

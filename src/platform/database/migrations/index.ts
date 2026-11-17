@@ -44,6 +44,7 @@ import * as m0042 from './2026_11_16_0042_people_staff_role_staff_id.js';
 import * as m0043 from './2026_11_16_0043_people_parent_contexts.js';
 import * as m0044 from './2026_11_16_0044_people_parent_files.js';
 import * as m0045 from './2026_11_16_0045_notifications_inbox_push.js';
+import * as m0046 from './2026_11_16_0046_notifications_fanout.js';
 
 /**
  * Every migration, in order. Listed explicitly (not read from disk) so the
@@ -99,6 +100,7 @@ const migrations: Record<string, Migration> = {
   '2026_11_16_0043_people_parent_contexts': m0043,
   '2026_11_16_0044_people_parent_files': m0044,
   '2026_11_16_0045_notifications_inbox_push': m0045,
+  '2026_11_16_0046_notifications_fanout': m0046,
 };
 
 export const migrationProvider: MigrationProvider = {

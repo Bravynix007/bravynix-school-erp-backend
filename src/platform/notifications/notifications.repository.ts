@@ -8,7 +8,7 @@ import {
   type CursorPosition,
 } from '../../common/pagination/pagination.js';
 import type { Tx } from '../database/index.js';
-import type { InboxItemsTable } from './notifications.tables.js';
+import type { InboxItemsTable, PushDevicesTable } from './notifications.tables.js';
 
 /** The unread count stops here: the bell shows "9+" (DDD 9.8). */
 const UNREAD_CAP = 10;
@@ -30,6 +30,27 @@ export type InboxRow = Pick<
   | 'target_id'
   | 'read_at'
 > & { cursorAt: CursorAt };
+
+/** A notice to be written to some receivers. */
+export interface DeliveredNotice {
+  societyId: string;
+  institutionId: string | null;
+  sourceKey: string;
+  occurredAt: string;
+  category: number;
+  tab: number;
+  title: string;
+  body: string;
+  senderDisplayName: string | null;
+  target: { type: number; id: string } | null;
+  receivers: { userId: string; studentId: string | null }[];
+}
+
+/** A phone a push can go to. */
+export type PushDeviceRow = Pick<
+  Selectable<PushDevicesTable>,
+  'fcm_token' | 'platform' | 'app_language'
+>;
 
 export interface NewPushDevice {
   userId: string;
@@ -159,5 +180,38 @@ export class NotificationsRepository {
         }),
       )
       .execute();
+  }
+
+  /**
+   * Writes a notice to receivers (`maintenance.deliver_inbox_items`, which refuses another Society than the job's) and
+   * answers the people whose row it added; a person who already had it, from an earlier run, is left out.
+   */
+  async deliver(tx: Tx, notice: DeliveredNotice): Promise<string[]> {
+    const { rows } = await sql<{ receiver_id: string }>`
+      select receiver_id from maintenance.deliver_inbox_items(
+        ${notice.societyId}::uuid, ${notice.institutionId}::uuid, ${notice.sourceKey}, ${notice.occurredAt}::timestamptz,
+        ${notice.category}::smallint, ${notice.tab}::smallint, ${notice.title}, ${notice.body},
+        ${notice.senderDisplayName}, ${notice.target?.type ?? null}::smallint, ${notice.target?.id ?? null}::uuid,
+        ${JSON.stringify(notice.receivers)}::jsonb
+      )
+    `.execute(tx);
+    return rows.map((row) => row.receiver_id);
+  }
+
+  /** The phones of these people. */
+  devicesOf(tx: Tx, userIds: string[]): Promise<PushDeviceRow[]> {
+    if (userIds.length === 0) return Promise.resolve([]);
+    return tx
+      .selectFrom('push_devices')
+      .select(['fcm_token', 'platform', 'app_language'])
+      .where('user_id', 'in', userIds)
+      .orderBy('id')
+      .execute();
+  }
+
+  /** Removes the tokens a provider said are no longer valid. */
+  async removeDevices(tx: Tx, tokens: string[]): Promise<void> {
+    if (tokens.length === 0) return;
+    await tx.deleteFrom('push_devices').where('fcm_token', 'in', tokens).execute();
   }
 }

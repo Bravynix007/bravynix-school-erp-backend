@@ -1,7 +1,7 @@
 import type { ObjectStorage } from '../files/index.js';
 import type { IdempotencyService } from '../idempotency/index.js';
 import type { DueFile, SweepsRepository } from './sweeps.repository.js';
-import { FILE_BATCH, MAX_FILE_BATCHES } from './sweeps.rules.js';
+import { FILE_BATCH, INBOX_KEEP_DAYS, MAX_FILE_BATCHES, PARTITIONS_AHEAD } from './sweeps.rules.js';
 import { SweepsService } from './sweeps.service.js';
 
 const due = (id: string): DueFile => ({ id, objectKey: `k/${id}`, status: 1 });
@@ -12,6 +12,8 @@ function build(batches: DueFile[][] = []) {
     dueFiles: vi.fn<SweepsRepository['dueFiles']>(),
     markDeleted: vi.fn<SweepsRepository['markDeleted']>().mockResolvedValue(true),
     removeImportRuns: vi.fn<SweepsRepository['removeImportRuns']>().mockResolvedValue(3),
+    ensureInboxPartitions: vi.fn<SweepsRepository['ensureInboxPartitions']>().mockResolvedValue(2),
+    dropInboxPartitions: vi.fn<SweepsRepository['dropInboxPartitions']>().mockResolvedValue(1),
   };
   for (const batch of batches) repository.dueFiles.mockResolvedValueOnce(batch);
   repository.dueFiles.mockResolvedValue([]);
@@ -39,6 +41,8 @@ describe('SweepsService.sweep', () => {
       filesRemoved: 2,
       importRunsRemoved: 3,
       answersRemoved: 4,
+      inboxPartitionsMade: 2,
+      inboxPartitionsDropped: 1,
     });
   });
 
@@ -117,6 +121,22 @@ describe('SweepsService.sweep', () => {
       filesRemoved: 0,
       importRunsRemoved: 3,
       answersRemoved: 4,
+      inboxPartitionsMade: 2,
+      inboxPartitionsDropped: 1,
     });
+  });
+
+  it('makes the partitions of the inboxes ahead, and drops those past their keeping', async () => {
+    const { service, repository } = build();
+    await service.sweep();
+    expect(repository.ensureInboxPartitions).toHaveBeenCalledWith(PARTITIONS_AHEAD);
+    expect(repository.dropInboxPartitions).toHaveBeenCalledWith(INBOX_KEEP_DAYS);
+  });
+
+  it('still drops the old partitions when the new ones could not be made', async () => {
+    const { service, repository } = build();
+    repository.ensureInboxPartitions.mockRejectedValue(new Error('database is busy'));
+    const report = await service.sweep();
+    expect(report).toMatchObject({ inboxPartitionsMade: 0, inboxPartitionsDropped: 1 });
   });
 });
