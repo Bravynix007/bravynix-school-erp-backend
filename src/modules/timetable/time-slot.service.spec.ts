@@ -12,6 +12,7 @@ import type { AcademicYearDirectory } from '../academic-setup/index.js';
 import type { CreateTimeSlotDto } from './time-slot.dto.js';
 import type { TimeSlotRepository, TimeSlotRow } from './time-slot.repository.js';
 import { TimeSlotService } from './time-slot.service.js';
+import type { TimetableEntryRepository } from './timetable-entry.repository.js';
 
 const principal = (roleCode: number) =>
   ({
@@ -116,9 +117,11 @@ function build(current: TimeSlotRow | null = slot()) {
   const requireActive = vi.fn<AcademicYearDirectory['requireActive']>().mockResolvedValue();
   const childContextOf = vi.fn<ChildContexts['of']>().mockResolvedValue(childContext);
   const record = vi.fn<AuditService['record']>().mockResolvedValue('audit-1');
+  const usesSlot = vi.fn<TimetableEntryRepository['usesSlot']>().mockResolvedValue(false);
   const service = new TimeSlotService(
     { transaction } as unknown as DatabaseService,
     { active, find, insert, update } as unknown as TimeSlotRepository,
+    { usesSlot } as unknown as TimetableEntryRepository,
     { forPrincipal, requireInstitution } as unknown as ScopeService,
     { requireCurrentId, openYear, requireActive } as unknown as AcademicYearDirectory,
     { of: childContextOf } as unknown as ChildContexts,
@@ -140,6 +143,7 @@ function build(current: TimeSlotRow | null = slot()) {
     openYear,
     requireActive,
     childContextOf,
+    usesSlot,
     record,
   };
 }
@@ -385,6 +389,17 @@ describe('TimeSlotService.deactivate', () => {
       expect.anything(),
       expect.objectContaining({ action: 'time_slot.deactivated', entityId: 'slot-1' }),
     );
+  });
+
+  it('is 409 TIME_SLOT_IN_USE while an active timetable entry sits in the period, and changes nothing', async () => {
+    const t = build();
+    t.usesSlot.mockResolvedValue(true);
+    expect(await refusal(t.service.deactivate(admin, 'slot-1'))).toMatchObject({
+      status: 409,
+      code: 'TIME_SLOT_IN_USE',
+    });
+    expect(t.update).not.toHaveBeenCalled();
+    expect(t.record).not.toHaveBeenCalled();
   });
 
   it('is 404 for a period that is gone or already deactivated', async () => {

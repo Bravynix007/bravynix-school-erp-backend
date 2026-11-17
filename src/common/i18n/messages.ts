@@ -99,6 +99,12 @@ const en: Catalogue = {
   CURRENT_YEAR_REQUIRED: 'This Institution has no current academic year; make one current first',
   // Period timings (API design 9.4)
   TIME_SLOT_OVERLAP: 'This period overlaps another period of the same year',
+  TIME_SLOT_IN_USE: 'Timetable entries use this period; remove them first',
+  // Class timetable (API design 12.6)
+  INVALID_SLOT:
+    'This period is not one of the Institution’s current year, or is a break and takes only a break',
+  SECTION_SLOT_TAKEN: 'This section already has an entry in that period',
+  TEACHER_DOUBLE_BOOKED: 'This teacher already has an entry in that period',
   // Classes and sections (API design 10.4j, 10.4c)
   CLASS_NOT_OFFERED: 'This Institution does not offer the category of this class',
   STREAM_NOT_ALLOWED: 'Only Pre-University classes have a stream',

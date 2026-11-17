@@ -5,7 +5,7 @@ import { ApiResult } from '../../common/http/api-result.js';
 import { AppException } from '../../common/http/app-exception.js';
 import { authorIdsOf } from '../../common/http/author-stamps.js';
 import { changedColumns } from '../../common/http/changed-columns.js';
-import { FieldErrorCode } from '../../common/http/error-codes.js';
+import { ErrorCode, FieldErrorCode } from '../../common/http/error-codes.js';
 import { requireVersion } from '../../common/http/require-version.js';
 import { newId } from '../../common/ids/ids.js';
 import { fieldError } from '../../common/validation/field-error.js';
@@ -36,6 +36,7 @@ import {
 } from './time-slot.repository.js';
 import { timeSlotResource, type TimeSlotResource } from './time-slot.resource.js';
 import { clockOf, requireTimes, translateTimeSlotError } from './time-slot.rules.js';
+import { TimetableEntryRepository } from './timetable-entry.repository.js';
 
 /** What the audit log keeps of a period. */
 function auditView(row: TimeSlotRow): AuditValues {
@@ -60,6 +61,7 @@ export class TimeSlotService {
   constructor(
     private readonly database: DatabaseService,
     private readonly slots: TimeSlotRepository,
+    private readonly entries: TimetableEntryRepository,
     private readonly scope: ScopeService,
     private readonly years: AcademicYearDirectory,
     private readonly children: ChildContexts,
@@ -170,11 +172,16 @@ export class TimeSlotService {
     return this.resource(row);
   }
 
-  /** TTS-04: deactivates the period, and its number and times are free again. Nothing is deleted. */
+  /**
+   * TTS-04: deactivates the period, and its number and times are free again. 409 `TIME_SLOT_IN_USE` while an active
+   * timetable entry sits in it. Nothing is deleted.
+   */
   async deactivate(principal: Principal, id: string): Promise<{ id: string; status: 0 }> {
     const context = await this.contextOf(principal, id);
     await this.database.transaction(context.tenant, async (tx) => {
       const current = await this.lockedActive(tx, id);
+      if (await this.entries.usesSlot(tx, id))
+        throw AppException.conflict(ErrorCode.TIME_SLOT_IN_USE);
       const updated = await this.slots.update(tx, id, {
         status: 0,
         ...updateStamp(principal.personId),
