@@ -8,6 +8,7 @@ import { requireVersion } from '../../common/http/require-version.js';
 import { fieldError } from '../../common/validation/field-error.js';
 import { Clock } from '../../common/time/clock.js';
 import { formatDay } from '../../common/time/format-day.js';
+import { VersionedStatedReasonDto } from '../../common/validation/reason.dto.js';
 import { AuditService } from '../../platform/audit/index.js';
 import {
   DatabaseService,
@@ -28,7 +29,6 @@ import type {
   ListSessionsQueryDto,
   RosterQueryDto,
   SubmitAttendanceDto,
-  VoidAttendanceDto,
 } from './attendance.dto.js';
 import { AttendanceRepository, type SessionRow } from './attendance.repository.js';
 import {
@@ -374,7 +374,7 @@ export class AttendanceService {
   async voidSession(
     principal: Principal,
     sessionId: string,
-    body: VoidAttendanceDto,
+    body: VersionedStatedReasonDto,
   ): Promise<{ id: string; status: 0 }> {
     const context = await this.contextOfSession(principal, sessionId);
     await this.database.transaction(context.tenant, async (tx) => {

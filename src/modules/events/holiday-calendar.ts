@@ -30,7 +30,7 @@ export class HolidayCalendar {
     classId: string,
     date: string,
   ): Promise<ClassHoliday | undefined> {
-    const holidays = await this.events.holidaysForStudentsOn(tx, institutionId, date);
+    const holidays = await this.events.holidaysForStudentsBetween(tx, institutionId, date, date);
     return (await this.coveringClass(tx, holidays, classId))[0];
   }
 

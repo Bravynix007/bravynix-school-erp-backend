@@ -6,6 +6,7 @@ import { ErrorCode } from '../../common/http/error-codes.js';
 import { requireVersion } from '../../common/http/require-version.js';
 import { pageMeta, pageOffset, parseSort } from '../../common/pagination/pagination.js';
 import { Clock } from '../../common/time/clock.js';
+import { VersionedStatedReasonDto } from '../../common/validation/reason.dto.js';
 import { AuditService, type AuditValues } from '../../platform/audit/index.js';
 import {
   DatabaseService,
@@ -25,7 +26,6 @@ import { InstitutionDirectory, type InstitutionRef } from '../../platform/tenanc
 import { dueRaisedEmail } from './due-email.js';
 import {
   DUE_SORT_FIELDS,
-  type CancelDueDto,
   type DueQuoteQueryDto,
   type ListDuesQueryDto,
   type MarkDuePaidDto,
@@ -336,7 +336,11 @@ export class DueService {
   }
 
   /** PLT-30: the due is withdrawn, with the reason kept. The row stays; only a due that is still Due can be cancelled. */
-  async cancel(principal: Principal, dueId: string, body: CancelDueDto): Promise<DueResource> {
+  async cancel(
+    principal: Principal,
+    dueId: string,
+    body: VersionedStatedReasonDto,
+  ): Promise<DueResource> {
     return this.change(principal, dueId, body.version, () => ({
       action: 'platform_due.cancel',
       changes: {

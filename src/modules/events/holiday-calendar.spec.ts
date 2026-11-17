@@ -8,9 +8,6 @@ const holiday = (id: string, title: string, start = '2026-11-17', end = start) =
 
 function build(holidays: EventRow[], limits: Record<string, string[]> = {}) {
   const events = {
-    holidaysForStudentsOn: vi
-      .fn<EventRepository['holidaysForStudentsOn']>()
-      .mockResolvedValue(holidays),
     holidaysForStudentsBetween: vi
       .fn<EventRepository['holidaysForStudentsBetween']>()
       .mockResolvedValue(holidays),
@@ -41,6 +38,12 @@ describe('HolidayCalendar.forClass', () => {
   it('is a school day when no holiday covers the date', async () => {
     const { calendar, events } = build([]);
     expect(await calendar.forClass(tx, 'inst-1', 'class-8a', '2026-11-17')).toBeUndefined();
+    expect(events.holidaysForStudentsBetween).toHaveBeenCalledWith(
+      tx,
+      'inst-1',
+      '2026-11-17',
+      '2026-11-17',
+    );
     expect(events.classesOf).not.toHaveBeenCalled();
   });
 

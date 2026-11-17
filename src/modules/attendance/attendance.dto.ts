@@ -8,9 +8,7 @@ import {
   IsInt,
   IsObject,
   IsOptional,
-  IsString,
   IsUUID,
-  Length,
   Max,
   Min,
   ValidateNested,
@@ -130,12 +128,4 @@ export class CorrectAttendanceDto extends VersionDto {
   @ValidateNested({ each: true })
   @Type(() => MarkChangeDto)
   changes!: MarkChangeDto[];
-}
-
-/** ATT-06 body: the version the admin saw, and why the session is void (5 to 500 characters, kept in the audit). */
-export class VoidAttendanceDto extends VersionDto {
-  @ApiProperty({ minLength: 5, maxLength: 500 })
-  @IsString()
-  @Length(5, 500)
-  reason!: string;
 }

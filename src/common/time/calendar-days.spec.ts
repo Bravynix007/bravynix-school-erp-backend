@@ -1,4 +1,4 @@
-import { addDays, eachDay, isSunday, monthSpan } from './calendar-days.js';
+import { addDays, daysBetween, eachDay, isSunday, monthSpan } from './calendar-days.js';
 
 describe('calendar days', () => {
   it('moves a date by days across months and years', () => {
@@ -6,6 +6,13 @@ describe('calendar days', () => {
     expect(addDays('2026-12-31', 1)).toBe('2027-01-01');
     expect(addDays('2026-03-01', -1)).toBe('2026-02-28');
     expect(addDays('2028-02-28', 1)).toBe('2028-02-29');
+  });
+
+  it('counts whole days, across a month end and a leap day, backwards too', () => {
+    expect(daysBetween('2026-12-22', '2026-12-22')).toBe(0);
+    expect(daysBetween('2026-12-22', '2027-01-02')).toBe(11);
+    expect(daysBetween('2028-02-28', '2028-03-01')).toBe(2);
+    expect(daysBetween('2026-11-18', '2026-11-17')).toBe(-1);
   });
 
   it('lists the days from one to another, both included, and none backwards', () => {

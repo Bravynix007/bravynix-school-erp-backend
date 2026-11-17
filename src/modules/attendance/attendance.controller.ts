@@ -6,13 +6,13 @@ import { Policy } from '../../common/auth/policy.decorator.js';
 import { RoleCode } from '../../common/auth/roles.js';
 import type { ApiResult } from '../../common/http/api-result.js';
 import { UuidParamPipe } from '../../common/http/uuid-param.pipe.js';
+import { VersionedStatedReasonDto } from '../../common/validation/reason.dto.js';
 import { IDEMPOTENCY_HEADER } from '../../platform/idempotency/index.js';
 import {
   CorrectAttendanceDto,
   ListSessionsQueryDto,
   RosterQueryDto,
   SubmitAttendanceDto,
-  VoidAttendanceDto,
 } from './attendance.dto.js';
 import type {
   AttendanceSessionDetailResource,
@@ -113,7 +113,7 @@ export class AttendanceController {
   voidSession(
     @CurrentPrincipal() principal: Principal,
     @Param('sessionId', UuidParamPipe) sessionId: string,
-    @Body() body: VoidAttendanceDto,
+    @Body() body: VersionedStatedReasonDto,
   ): Promise<{ id: string; status: 0 }> {
     return this.attendance.voidSession(principal, sessionId, body);
   }

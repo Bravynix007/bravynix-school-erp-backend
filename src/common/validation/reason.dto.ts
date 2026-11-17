@@ -12,3 +12,11 @@ export class ReasonDto {
 
 /** The version read and why: an account block (PLT-15). */
 export class VersionedReasonDto extends IntersectionType(VersionDto, ReasonDto) {}
+
+/** The version read and a stated reason of 5 to 500 characters: cancelling a due (PLT-30), voiding a session (ATT-06). */
+export class VersionedStatedReasonDto extends VersionDto {
+  @ApiProperty({ minLength: 5, maxLength: 500 })
+  @IsString()
+  @Length(5, 500)
+  reason!: string;
+}

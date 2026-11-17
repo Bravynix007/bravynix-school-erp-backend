@@ -2,6 +2,7 @@ import { HttpStatus } from '@nestjs/common';
 import { RoleCode } from '../../common/auth/roles.js';
 import { AppException } from '../../common/http/app-exception.js';
 import { ErrorCode, FieldErrorCode } from '../../common/http/error-codes.js';
+import { daysBetween } from '../../common/time/calendar-days.js';
 import { fieldError } from '../../common/validation/field-error.js';
 
 /** Who an event is for (DDD 9.8). */
@@ -47,13 +48,6 @@ export interface EventFields {
   holidayForStudents: boolean;
   holidayForStaff: boolean;
   holidayPredefinedClassIds: readonly string[];
-}
-
-const DAY_MS = 86_400_000;
-
-/** Whole days from `from` to `to`, both `YYYY-MM-DD`. */
-export function daysBetween(from: string, to: string): number {
-  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS);
 }
 
 /**

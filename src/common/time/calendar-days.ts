@@ -13,6 +13,11 @@ export function addDays(date: string, days: number): string {
   return dayOf(at(date) + days * DAY_MS);
 }
 
+/** Whole days from `from` to `to`, both `YYYY-MM-DD`: 0 for the same day, negative when `to` is first. */
+export function daysBetween(from: string, to: string): number {
+  return Math.round((at(to) - at(from)) / DAY_MS);
+}
+
 /** Every date from `from` to `to`, both included; none when `to` is before `from`. */
 export function eachDay(from: string, to: string): string[] {
   const days: string[] = [];

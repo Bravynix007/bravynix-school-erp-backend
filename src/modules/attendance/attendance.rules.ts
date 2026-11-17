@@ -81,7 +81,7 @@ export function requireMarkableDate(date: string, today: string, year: YearSpan)
 }
 
 /** One student whose mark a correction really changes. */
-export interface MarkChange {
+interface MarkChange {
   studentEnrolmentId: string;
   before: number;
   after: number;
