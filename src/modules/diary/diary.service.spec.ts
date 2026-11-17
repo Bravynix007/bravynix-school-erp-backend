@@ -103,12 +103,7 @@ function build(current: DiaryEntryRow | undefined = entry()) {
     .fn<AcademicYearDirectory['requireCurrentId']>()
     .mockResolvedValue('year-1');
   const openYear = vi.fn<AcademicYearDirectory['openYear']>().mockResolvedValue(year);
-  const placeOf = vi.fn<SectionDirectory['placeOf']>().mockResolvedValue({
-    classId: 'class-1',
-    institutionId: 'inst-1',
-    active: true,
-    capacity: null,
-  });
+  const contextOf = vi.fn<SectionDirectory['contextOf']>().mockResolvedValue(context);
   const requireSection = vi.fn<SectionDirectory['requireActive']>().mockResolvedValue();
   const sectionNames = vi
     .fn<SectionDirectory['names']>()
@@ -144,7 +139,11 @@ function build(current: DiaryEntryRow | undefined = entry()) {
     { list, find, insert, update } as unknown as DiaryRepository,
     { forPrincipal, requireInstitution } as unknown as ScopeService,
     { requireCurrentId, openYear } as unknown as AcademicYearDirectory,
-    { placeOf, requireActive: requireSection, names: sectionNames } as unknown as SectionDirectory,
+    {
+      contextOf,
+      requireActive: requireSection,
+      names: sectionNames,
+    } as unknown as SectionDirectory,
     { requireActive: requireSubject, names: subjectNames } as unknown as SubjectDirectory,
     { ownSectionIds } as unknown as TeachingStaff,
     {
@@ -170,6 +169,7 @@ function build(current: DiaryEntryRow | undefined = entry()) {
     insert,
     update,
     requireInstitution,
+    contextOf,
     requireSection,
     requireSubject,
     requireCurrentId,
@@ -199,7 +199,7 @@ describe('DiaryService.list', () => {
   it('reads the section’s entries on the date, with the section and teacher names', async () => {
     const t = build();
     const result = await t.service.list(admin, { sectionId: 'section-1', date: '2026-11-17' });
-    expect(t.requireInstitution).toHaveBeenCalledWith(admin, 'inst-1');
+    expect(t.contextOf).toHaveBeenCalledWith(admin, 'section-1');
     expect(t.list).toHaveBeenCalledWith(expect.anything(), 'section-1', '2026-11-17');
     expect(result.data[0]).toMatchObject({
       sectionName: 'A',

@@ -112,7 +112,7 @@ export class DiaryService {
    * transaction.
    */
   async create(principal: Principal, body: CreateDiaryEntryDto): Promise<DiaryEntryResource> {
-    const context = await this.contextOfSection(principal, body.sectionId);
+    const context = await this.sections.contextOf(principal, body.sectionId);
     const { row, names } = await this.database.transaction(context.tenant, async (tx) => {
       await this.sections.requireActive(tx, body.sectionId, 'sectionId');
       await this.subjects.requireActive(tx, [body.subjectId], 'subjectId');
@@ -244,7 +244,7 @@ export class DiaryService {
     ];
     if (errors.length > 0) throw AppException.validation(errors);
     return {
-      context: await this.contextOfSection(principal, query.sectionId!),
+      context: await this.sections.contextOf(principal, query.sectionId!),
       sectionId: query.sectionId,
     };
   }
@@ -350,19 +350,6 @@ export class DiaryService {
   ): Promise<DiaryEntryResource[]> {
     const people = await this.people.describe(authorIdsOf(rows));
     return rows.map((row) => diaryEntryResource(row, names, people));
-  }
-
-  /** The Institution of a section named by its ID, which the caller must reach (404 otherwise). */
-  private async contextOfSection(
-    principal: Principal,
-    sectionId: string,
-  ): Promise<InstitutionContext> {
-    const { tenant } = await this.scope.forPrincipal(principal);
-    const place = await this.database.transaction(tenant, (tx) =>
-      this.sections.placeOf(tx, sectionId),
-    );
-    if (!place) throw AppException.notFound();
-    return this.scope.requireInstitution(principal, place.institutionId);
   }
 
   /** The Institution of an entry named by its ID alone, which the caller must reach (404 otherwise, and when removed). */
