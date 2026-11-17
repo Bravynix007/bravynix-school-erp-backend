@@ -1,6 +1,5 @@
 import { body, problems } from '../../../test/support/dto-validation.js';
 import {
-  CancelDueDto,
   DueQuoteQueryDto,
   ListDuesQueryDto,
   MarkDuePaidDto,
@@ -132,23 +131,6 @@ describe('MarkDuePaidDto', () => {
     [{ ...paid, dueStatus: 2 }, 'dueStatus', 'FIELD_NOT_ALLOWED'],
   ])('refuses %j', async (value, field, code) => {
     expect(await problems(body(MarkDuePaidDto, value))).toContainEqual({ field, code });
-  });
-});
-
-describe('CancelDueDto', () => {
-  it('needs a reason of 5 to 500 characters', async () => {
-    for (const reason of ['Wrong', 'Raised twice', 'r'.repeat(500)]) {
-      expect(await problems(body(CancelDueDto, { version: 1, reason }))).toEqual([]);
-    }
-  });
-
-  it.each([
-    [{ version: 1 }, 'reason', 'INVALID_TYPE'],
-    [{ version: 1, reason: 'Oops' }, 'reason', 'TOO_SHORT'],
-    [{ version: 1, reason: 'r'.repeat(501) }, 'reason', 'TOO_LONG'],
-    [{ reason: 'Raised twice' }, 'version', 'INVALID_TYPE'],
-  ])('refuses %j', async (value, field, code) => {
-    expect(await problems(body(CancelDueDto, value))).toContainEqual({ field, code });
   });
 });
 

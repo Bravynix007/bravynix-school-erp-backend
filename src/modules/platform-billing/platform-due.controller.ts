@@ -5,9 +5,9 @@ import { CurrentPrincipal } from '../../common/auth/current-principal.decorator.
 import { superAdminPolicy } from '../../common/auth/platform-policy.js';
 import type { ApiResult } from '../../common/http/api-result.js';
 import { UuidParamPipe } from '../../common/http/uuid-param.pipe.js';
+import { VersionedStatedReasonDto } from '../../common/validation/reason.dto.js';
 import { IDEMPOTENCY_HEADER } from '../../platform/idempotency/index.js';
 import {
-  CancelDueDto,
   DueQuoteQueryDto,
   ListDuesQueryDto,
   MarkDuePaidDto,
@@ -96,7 +96,7 @@ export class PlatformDueController {
   cancel(
     @CurrentPrincipal() principal: Principal,
     @Param('dueId', UuidParamPipe) dueId: string,
-    @Body() body: CancelDueDto,
+    @Body() body: VersionedStatedReasonDto,
   ): Promise<DueResource> {
     return this.dues.cancel(principal, dueId, body);
   }

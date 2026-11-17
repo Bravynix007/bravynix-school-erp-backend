@@ -4,7 +4,6 @@ import {
   ListSessionsQueryDto,
   RosterQueryDto,
   SubmitAttendanceDto,
-  VoidAttendanceDto,
 } from './attendance.dto.js';
 
 const uuid = '0192f3b0-0000-7000-8000-000000000001';
@@ -123,23 +122,6 @@ describe('CorrectAttendanceDto', () => {
     ).toEqual([
       { field: 'changes[0].studentEnrolmentId', code: 'INVALID_FORMAT' },
       { field: 'changes[0].attendanceStatus', code: 'INVALID_CODE' },
-    ]);
-  });
-});
-
-describe('VoidAttendanceDto', () => {
-  it('needs the version and a reason of 5 to 500 characters', async () => {
-    expect(
-      await problems(body(VoidAttendanceDto, { version: 2, reason: 'Wrong section' })),
-    ).toEqual([]);
-    expect(await problems(body(VoidAttendanceDto, { version: 2, reason: 'oops' }))).toEqual([
-      { field: 'reason', code: 'TOO_SHORT' },
-    ]);
-    expect(
-      await problems(body(VoidAttendanceDto, { version: 2, reason: 'x'.repeat(501) })),
-    ).toEqual([{ field: 'reason', code: 'TOO_LONG' }]);
-    expect(await problems(body(VoidAttendanceDto, { reason: 'Wrong section' }))).toEqual([
-      { field: 'version', code: 'INVALID_TYPE' },
     ]);
   });
 });

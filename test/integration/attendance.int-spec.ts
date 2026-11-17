@@ -749,8 +749,9 @@ describe('ATT-01 to ATT-04 mark attendance (API design 10.10, 10.11)', () => {
       student_enrolment_id: string;
       attendance_status: number;
       corrected_by: string | null;
+      corrected_at: Date | null;
     }>(
-      `select student_enrolment_id, attendance_status, corrected_by from attendance_exceptions where attendance_session_id = '${id}' order by attendance_status`,
+      `select student_enrolment_id, attendance_status, corrected_by, corrected_at from attendance_exceptions where attendance_session_id = '${id}' order by attendance_status`,
     );
   const keys = async () =>
     (await readJobs(ownerDb, societyA, 'notify')).map(
@@ -851,6 +852,72 @@ describe('ATT-01 to ATT-04 mark attendance (API design 10.10, 10.11)', () => {
           sql`entity_id = ${session.id} and action = 'attendance.corrected'`,
         ),
       ).toEqual([]);
+    });
+
+    it('stamps a changed mark with who corrected it and when, and a removed one is gone', async () => {
+      const session = await submitted();
+      const before = (await marks(session.id))[0]!;
+      expect(before).toMatchObject({
+        attendance_status: 2,
+        corrected_by: null,
+        corrected_at: null,
+      });
+      succeeded(
+        await correct(session.id, { version: 1, changes: [change('bea', 3)] }, annaToken),
+        200,
+        'absent to late',
+      );
+      const after = await marks(session.id);
+      expect(after).toHaveLength(1);
+      expect(after[0]).toMatchObject({
+        student_enrolment_id: enrolments.bea,
+        attendance_status: 3,
+      });
+      expect(after[0]!.corrected_by).toBe(anna.person.id);
+      expect(after[0]!.corrected_at).not.toBeNull();
+    });
+
+    it('alerts no one for a student who becomes Late, Half day or Leave, only for one who becomes Absent', async () => {
+      const session = await submitted({ exceptions: [] });
+      succeeded(
+        await correct(session.id, {
+          version: 1,
+          changes: [change('asha', 3), change('bea', 4), change('cy', 5)],
+        }),
+        200,
+        'not absent',
+      );
+      expect(await keys()).toEqual([]);
+    });
+
+    it('leaves the marks of a session that was voided alone when the day is submitted again and corrected', async () => {
+      const original = await submitted();
+      succeeded(
+        await voided(original.id, { version: 1, reason: 'Marked the wrong day' }, firstAdmin.token),
+        200,
+        'void',
+      );
+      const again = await submitted();
+      succeeded(
+        await correct(again.id, { version: 1, changes: [change('bea', 3)] }),
+        200,
+        'changed',
+      );
+      expect(await marks(original.id)).toMatchObject([
+        { student_enrolment_id: enrolments.bea, attendance_status: 2 },
+      ]);
+      expect(await marks(again.id)).toMatchObject([
+        { student_enrolment_id: enrolments.bea, attendance_status: 3 },
+      ]);
+      succeeded(
+        await correct(again.id, { version: 2, changes: [change('bea', 1)] }),
+        200,
+        'removed',
+      );
+      expect(await marks(original.id)).toMatchObject([
+        { student_enrolment_id: enrolments.bea, attendance_status: 2 },
+      ]);
+      expect(await marks(again.id)).toEqual([]);
     });
 
     it('alerts a guardian when the child becomes Absent, once, and never when a child stops being Absent', async () => {
@@ -1113,6 +1180,35 @@ describe('ATT-01 to ATT-04 mark attendance (API design 10.10, 10.11)', () => {
           [first],
         ),
       ).rejects.toThrow();
+    });
+
+    it('keeps marks from being changed by another Institution or by a parent, or moved out of their own Institution (policy)', async () => {
+      const made = await submitted();
+      const sessionMarks = () =>
+        rows<{ attendance_status: number; institution_id: string }>(
+          `select attendance_status, institution_id from attendance_exceptions where attendance_session_id = '${made.id}'`,
+        );
+      await rows(
+        `update attendance_exceptions set attendance_status = 3 where attendance_session_id = '${made.id}'`,
+        [second],
+      );
+      expect(await sessionMarks()).toEqual([{ attendance_status: 2, institution_id: first }]);
+      // However a parent comes to read their child's mark, the table gives them no right to change it.
+      const byParent = await database.transaction(
+        { personId: owner.person, roleCode: 5, childIds: [studentIds.bea!] },
+        async (tx) =>
+          (await sql`update attendance_exceptions set attendance_status = 3`.execute(tx))
+            .numAffectedRows,
+      );
+      expect(byParent).toBe(0n);
+      expect(await sessionMarks()).toEqual([{ attendance_status: 2, institution_id: first }]);
+      await expect(
+        rows(
+          `update attendance_exceptions set institution_id = '${second}' where attendance_session_id = '${made.id}'`,
+          [first],
+        ),
+      ).rejects.toMatchObject({ code: '42501' });
+      expect(await sessionMarks()).toEqual([{ attendance_status: 2, institution_id: first }]);
     });
 
     it('refuses a mark for another Institution’s session, whatever Institution it names (policy, 42501)', async () => {
