@@ -5,7 +5,9 @@ import { sql, type Kysely } from 'kysely';
  *
  * - `push_devices`: the push token of one phone, tied to the session that registered it. Like the other identity
  *   tables it carries no tenant and is touched only by the Notifications module. The token is unique, so a
- *   reinstall moves it to the new session; the session's end removes it (`on delete cascade`).
+ *   reinstall moves it to the new session; a trigger removes it
+ *   when the session ends (`ended_at` set), because the session row itself stays for 30 days; deleting the session
+ *   or the person removes it by cascade as well.
  * - `inbox_items`: one row per receiver (fan-out on write), partitioned by month on `created_at`, so old months are
  *   dropped whole. A person reads, marks read and clears only their own rows (row-level security on `user_id`); the
  *   worker writes them for a Society's job. `uq_inbox_items_source` makes a rerun of a fan-out add nothing twice,
