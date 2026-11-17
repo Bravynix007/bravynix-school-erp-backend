@@ -7,6 +7,7 @@ import {
   down,
   up,
 } from '../../src/platform/database/migrations/2026_11_12_0035_people_student_block_documents.js';
+import * as parentFiles from '../../src/platform/database/migrations/2026_11_16_0044_people_parent_files.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
 import { personaByKey } from '../../src/seeds/two-worlds.js';
 import { apiCaller } from '../support/api.js';
@@ -537,8 +538,11 @@ describe('a student’s block and documents', () => {
       });
       expect(letter.status).toBe(201);
       await ownerDb.transaction().execute(async (tx) => {
+        // The parents' policies on documents (migration 0044) stand on the column that goes, so they go first.
+        await parentFiles.down(tx);
         await down(tx);
         await up(tx);
+        await parentFiles.up(tx);
       });
       expect(await listed(diya)).toEqual([]);
       // Down lifted the force on documents to delete the student documents, and put it back.

@@ -145,17 +145,26 @@ export class FilesService {
   /**
    * FIL-03: a five-minute link to a Ready file. Society Owners and Institution Admins get it for the Institutions
    * they reach (row-level security narrows them); a teacher gets it only where the module that owns the purpose says so
-   * (`FileReaders`: their own staff documents). Any other file, and any file that is not Ready, is 404. The links of
-   * purposes that hold documents are written to the audit log before the link is made.
+   * (`FileReaders`: their own staff documents); a parent only for the photo or a document of a child they guard
+   * (`FileReaders.parentTenant` names the child, and row-level security shows that child's files and no others). Any
+   * other file, and any file that is not Ready, is 404. The links of purposes that hold documents are written to the
+   * audit log before the link is made.
    */
   async download(principal: Principal, fileId: string): Promise<DownloadTicket> {
-    const { tenant } = await this.scope.forPrincipal(principal);
+    const parent = principal.roleCode === RoleCode.StudentParent;
+    const tenant = parent
+      ? await this.readers.parentTenant(principal, fileId)
+      : (await this.scope.forPrincipal(principal)).tenant;
     const file = await this.database.transaction(tenant, async (tx) => {
       const found = await this.files.find(tx, fileId);
       // A purpose nobody registered has no rule that lets anyone fetch it.
       const rule = found && PURPOSES[found.purpose as FilePurpose];
       if (!found || !rule || found.file_status !== 2) throw AppException.notFound();
-      if (!isAdmin(principal) && !(await this.readers.mayOpen(tx, principal.personId, found))) {
+      if (
+        !parent &&
+        !isAdmin(principal) &&
+        !(await this.readers.mayOpen(tx, principal.personId, found))
+      ) {
         throw AppException.notFound();
       }
       if (rule.auditedDownload) {

@@ -19,10 +19,10 @@ export class StudentDocumentController {
   constructor(private readonly documents: DocumentService) {}
 
   @Policy({
-    roles: ADMINS,
+    roles: [...ADMINS, RoleCode.StudentParent],
     scope: 'institution',
     operationId: 'DOC-01',
-    rule: 'The active documents of a student whose Institution the caller reaches, newest first; a teacher gets 403',
+    rule: 'The active documents of a student whose Institution the caller reaches, newest first; a parent reads their own child’s (404 for any other, 403 CHILD_ACCESS_BLOCKED for a blocked child); a teacher gets 403',
   })
   @Get(':studentId/documents')
   list(
