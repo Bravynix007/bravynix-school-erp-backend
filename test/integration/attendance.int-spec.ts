@@ -15,6 +15,7 @@ import { readAuditRows } from '../support/audit-rows.js';
 import { FixtureModule } from '../support/fixture.module.js';
 import { readJobs } from '../support/job-rows.js';
 import { clearLoginState } from '../support/login-state.js';
+import { rollBackTo } from '../support/migrations.js';
 import { PlatformFixtures, type SignedInPerson } from '../support/platform-fixtures.js';
 import { SchoolKit, succeeded, type SchoolStaff } from '../support/school-kit.js';
 import { signInMobile } from '../support/sessions.js';
@@ -23,6 +24,8 @@ import { createTestApp, type TestApp } from '../support/test-app.js';
 const migrationUrl = process.env.TEST_DATABASE_MIGRATION_URL!;
 const superAdmin = personaByKey('SA1');
 const TEACHER = 4;
+/** The migration before attendance: migrating forward from it runs the attendance migration alone. */
+const BEFORE_ATTENDANCE = '2026_11_17_0050_timetable_entries';
 /** The IST day of the clock the test sets: 06:30 IST on this date, a moment before any real run of the suite. */
 const TODAY = '2026-11-17';
 const YESTERDAY = '2026-11-16';
@@ -857,6 +860,28 @@ describe('ATT-01 to ATT-04 mark attendance (API design 10.10, 10.11)', () => {
         rows(`select maintenance.ensure_attendance_partitions(2026, 9)`),
       ).rejects.toThrow(/years_ahead/);
       await sql`drop table attendance_exceptions_2090, attendance_exceptions_2091`.execute(ownerDb);
+    });
+  });
+
+  describe('the migration', () => {
+    // Last in the file: it drops the attendance tables and makes them again, empty.
+    it('makes last year’s, this year’s and next year’s partitions itself, before any sweep runs', async () => {
+      await rollBackTo(migrationUrl, BEFORE_ATTENDANCE);
+      const migrated = await rollBackTo(migrationUrl, '2026_11_17_0051_attendance_sessions');
+      expect(migrated.error).toBeUndefined();
+      const year = new Date().getUTCFullYear();
+      const found = await sql<{ name: string }>`
+        select c.relname as name from pg_inherits i
+        join pg_class c on c.oid = i.inhrelid
+        where i.inhparent = 'public.attendance_exceptions'::regclass
+        order by c.relname`.execute(ownerDb);
+      expect(found.rows.map((row) => row.name)).toEqual([
+        `attendance_exceptions_${(year - 1).toString()}`,
+        `attendance_exceptions_${year.toString()}`,
+        `attendance_exceptions_${(year + 1).toString()}`,
+        'attendance_exceptions_default',
+      ]);
+      await runMigrations(migrationUrl, 'latest');
     });
   });
 
