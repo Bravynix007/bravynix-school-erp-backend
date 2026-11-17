@@ -87,6 +87,7 @@ describe('ATT-01 to ATT-04 mark attendance (API design 10.10, 10.11)', () => {
   let first: string;
   let second: string;
   let year: string;
+  let secondYear: string;
   let classId: string;
   let owner: SignedInPerson;
   let firstAdmin: SignedInPerson;
@@ -203,7 +204,7 @@ describe('ATT-01 to ATT-04 mark attendance (API design 10.10, 10.11)', () => {
     first = await kit.institution(owner.token, categoryId);
     second = await kit.institution(owner.token, categoryId);
     year = await kit.year(owner.token, first);
-    await kit.year(owner.token, second);
+    secondYear = await kit.year(owner.token, second);
     firstAdmin = await fixtures.institutionAdmin(societyA, [first]);
     secondAdmin = await fixtures.institutionAdmin(societyA, [second]);
     otherOwner = await fixtures.owner(await kit.society(admin));
@@ -716,6 +717,24 @@ describe('ATT-01 to ATT-04 mark attendance (API design 10.10, 10.11)', () => {
       expect(await onThen(new Date(Date.now() - 86_400_000))).toEqual([]);
       expect(await onThen(new Date(Date.now() + 86_400_000))).toEqual(['Asha', 'Bea', 'Cy']);
     });
+
+    it('takes a child off the old section’s roster for the days after their placement ended', async () => {
+      expect((await roster(sectionA, TODAY)).data.students.map((s) => s.firstName)).toContain(
+        'Asha',
+      );
+      await rows(
+        `update student_section_placements set start_date = '2026-06-02', end_date = '${YESTERDAY}' where student_enrolment_id = '${enrolments.asha}'`,
+      );
+      expect((await roster(sectionA, TODAY)).data.students.map((s) => s.firstName)).toEqual([
+        'Bea',
+        'Cy',
+      ]);
+      const res = await submit({
+        rosterCount: 2,
+        exceptions: [{ studentEnrolmentId: enrolments.asha, attendanceStatus: 2 }],
+      });
+      expect([res.status, res.body.code]).toEqual([422, 'STUDENT_NOT_IN_SECTION']);
+    });
   });
 
   describe('the tables', () => {
@@ -763,6 +782,43 @@ describe('ATT-01 to ATT-04 mark attendance (API design 10.10, 10.11)', () => {
           [first],
         ),
       ).rejects.toThrow();
+    });
+
+    it('refuses a mark for another Institution’s session, whatever Institution it names (policy, 42501)', async () => {
+      const otherClass = await kit.klass(owner.token, second, predefinedClass);
+      const otherSection = await kit.section(
+        owner.token,
+        otherClass,
+        predefinedSections.find((s) => s.code === 'A')!.id,
+      );
+      const foreign = (
+        await rows<{ id: string }>(
+          `insert into attendance_sessions (society_id, institution_id, academic_year_id, section_id, attendance_date, roster_count, submitted_by)
+             values ('${societyA}', '${second}', '${secondYear}', '${otherSection}', '${TODAY}', 1, '${owner.person}') returning id`,
+          [second],
+        )
+      )[0]!.id;
+      await expect(
+        rows(
+          `insert into attendance_exceptions (attendance_session_id, student_enrolment_id, attendance_date, institution_id, attendance_status) values ('${foreign}', '${enrolments.asha}', '${TODAY}', '${second}', 2)`,
+          [first],
+        ),
+      ).rejects.toMatchObject({ code: '42501' });
+    });
+
+    it('keeps a session’s taker to a staff member of its own Institution (23503)', async () => {
+      await expect(
+        rows(
+          `insert into attendance_sessions (society_id, institution_id, academic_year_id, section_id, attendance_date, roster_count, submitted_by, taken_by_staff_member_id)
+             values ('${societyA}', '${first}', '${year}', '${sectionA}', '${YESTERDAY}', 0, '${owner.person}', '${eve.id}')`,
+        ),
+      ).rejects.toMatchObject({ code: '23503' });
+      await expect(
+        rows(
+          `insert into attendance_sessions (society_id, institution_id, academic_year_id, section_id, attendance_date, roster_count, submitted_by, taken_by_staff_member_id)
+             values ('${societyA}', '${first}', '${year}', '${sectionA}', '${YESTERDAY}', 0, '${owner.person}', '${anna.id}')`,
+        ),
+      ).resolves.toBeDefined();
     });
 
     it('gives the app role no right on a partition addressed by name', async () => {

@@ -129,6 +129,7 @@ function build() {
       .mockResolvedValue({ open: true, startDate: '2026-06-01', endDate: '2027-03-31' }),
   };
   const sections = {
+    contextOf: vi.fn<SectionDirectory['contextOf']>().mockResolvedValue(context),
     placeOf: vi.fn<SectionDirectory['placeOf']>().mockResolvedValue({
       classId: 'class-1',
       institutionId: 'inst-1',
@@ -412,10 +413,11 @@ describe('AttendanceService.submit', () => {
 
   it('is 404 for a section out of reach and 422 for one that is deactivated', async () => {
     const { service, sections } = build();
-    sections.placeOf.mockResolvedValue(undefined);
+    sections.contextOf.mockRejectedValue(AppException.notFound());
     expect(await refusal(service.submit(admin, 'key-1', submission))).toMatchObject({
       status: 404,
     });
+    sections.contextOf.mockResolvedValue(context);
     sections.placeOf.mockResolvedValue({
       classId: 'class-1',
       institutionId: 'inst-1',
@@ -533,14 +535,9 @@ describe('AttendanceService.rosterOf', () => {
 
   it('is 404 for a section out of reach, and 422 CURRENT_YEAR_REQUIRED without a current year', async () => {
     const { service, sections, years } = build();
-    sections.placeOf.mockResolvedValue(undefined);
+    sections.contextOf.mockRejectedValue(AppException.notFound());
     expect(await refusal(service.rosterOf(admin, query))).toMatchObject({ status: 404 });
-    sections.placeOf.mockResolvedValue({
-      classId: 'class-1',
-      institutionId: 'inst-1',
-      active: true,
-      capacity: null,
-    });
+    sections.contextOf.mockResolvedValue(context);
     years.requireCurrentId.mockRejectedValue(AppException.businessRule('CURRENT_YEAR_REQUIRED'));
     expect(await refusal(service.rosterOf(admin, query))).toMatchObject({
       status: 422,
