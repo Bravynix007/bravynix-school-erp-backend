@@ -1,6 +1,6 @@
 import { Global, Module } from '@nestjs/common';
+import { ChildContexts } from '../../platform/tenancy/index.js';
 import { EventPeople } from '../events/index.js';
-import { TimetableChildren } from '../timetable/index.js';
 import { AcademicSetupModule, SectionStudents, TeachingStaff } from '../academic-setup/index.js';
 import { FileReaders, FilesModule } from '../../platform/files/index.js';
 import { IdempotencyModule } from '../../platform/idempotency/index.js';
@@ -27,9 +27,9 @@ import { GuardianService } from './guardian.service.js';
 import { IdentityRepository } from './identity.repository.js';
 import { InstitutionAdminController } from './institution-admin.controller.js';
 import { InstitutionAdminService } from './institution-admin.service.js';
+import { PeopleChildContexts } from './people-child-contexts.js';
 import { PeopleEventPeople } from './people-event-people.js';
 import { PeopleFileReaders } from './people-file-readers.js';
-import { PeopleTimetableChildren } from './people-timetable-children.js';
 import { PeopleSectionStudents } from './people-section-students.js';
 import { PeopleTeachingStaff } from './people-teaching-staff.js';
 import { StaffDocumentController } from './staff-document.controller.js';
@@ -108,9 +108,9 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
     { provide: FileReaders, useExisting: PeopleFileReaders },
     PeopleEventPeople,
     { provide: EventPeople, useExisting: PeopleEventPeople },
-    PeopleTimetableChildren,
-    { provide: TimetableChildren, useExisting: PeopleTimetableChildren },
+    PeopleChildContexts,
+    { provide: ChildContexts, useExisting: PeopleChildContexts },
   ],
-  exports: [TeachingStaff, SectionStudents, FileReaders, EventPeople, TimetableChildren],
+  exports: [TeachingStaff, SectionStudents, FileReaders, EventPeople, ChildContexts],
 })
 export class PeopleModule {}

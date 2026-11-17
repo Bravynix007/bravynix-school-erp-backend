@@ -1,8 +1,6 @@
-import type { Principal } from '../../common/auth/access-token-verifier.js';
-import type { TenantContext, Tx } from '../../platform/database/index.js';
+import type { Tx } from '../../platform/database/index.js';
 import type { GrantDirectory } from '../../platform/identity/index.js';
 import type { ClassDirectory } from '../academic-setup/index.js';
-import type { ChildAccess } from './child-access.js';
 import { PeopleEventPeople } from './people-event-people.js';
 import type { StaffRepository } from './staff.repository.js';
 import type { StudentRepository } from './student.repository.js';
@@ -25,18 +23,11 @@ function build() {
   const ofPredefined = vi
     .fn<ClassDirectory['ofPredefined']>()
     .mockResolvedValue(new Set(['class-1']));
-  const tenant: TenantContext = { personId: 'parent-1', roleCode: 5, childIds: ['child-1'] };
-  const of = vi.fn<ChildAccess['of']>().mockResolvedValue({
-    institutionId: 'inst-1',
-    societyId: 'society-1',
-    tenant,
-  });
   const people = new PeopleEventPeople(
     { societyOwners, adminUserIds } as unknown as GrantDirectory,
     { activeUserIds } as unknown as StaffRepository,
     { guardianUserIds } as unknown as StudentRepository,
     { ofPredefined } as unknown as ClassDirectory,
-    { of } as unknown as ChildAccess,
   );
   return {
     people,
@@ -45,8 +36,6 @@ function build() {
     activeUserIds,
     guardianUserIds,
     ofPredefined,
-    of,
-    tenant,
   };
 }
 
@@ -75,12 +64,5 @@ describe('PeopleEventPeople', () => {
     await t.people.parentUserIds(tx, null, ['p-1']);
     expect(t.ofPredefined).toHaveBeenCalledWith(tx, ['p-1']);
     expect(t.guardianUserIds).toHaveBeenCalledWith(tx, null, new Set(['class-1']));
-  });
-
-  it('gives a parent the tenant of one child, as the child access checked it', async () => {
-    const t = build();
-    const parent = { personId: 'parent-1', roleCode: 5 } as Principal;
-    expect(await t.people.childTenant(parent, 'child-1')).toBe(t.tenant);
-    expect(t.of).toHaveBeenCalledWith(parent, 'child-1');
   });
 });

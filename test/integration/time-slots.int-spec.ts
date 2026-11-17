@@ -330,11 +330,11 @@ describe('TTS-01 to TTS-04 period timings (API design 9.4)', () => {
 
   describe('TTS-01 read', () => {
     it('shows the current year’s periods, earliest first, to the Owner, the Admin and a teacher of the Institution', async () => {
-      await added({ periodNo: 2, startTime: '09:10', endTime: '09:50' });
-      await added();
+      await added({ periodNo: 1, startTime: '09:10', endTime: '09:50' });
+      await added({ periodNo: 2, startTime: '08:30', endTime: '09:10' });
       for (const token of [owner.token, firstAdmin.token, teacherToken]) {
         expect((await periods(`institutionId=${first}`, token)).map((p) => p.periodNo)).toEqual([
-          1, 2,
+          2, 1,
         ]);
       }
     });
@@ -489,6 +489,34 @@ describe('TTS-01 to TTS-04 period timings (API design 9.4)', () => {
       expect((await del(otherOwner.token)).status).toBe(404);
       expect((await del(owner.token)).status).toBe(200);
       expect((await del(owner.token)).status).toBe(404);
+    });
+  });
+
+  describe('what a parent’s row-level security shows', () => {
+    it('shows the periods and the years of the child’s Institution only, and no period deactivated', async () => {
+      const mine = await added();
+      const gone = await added({ periodNo: 2, startTime: '09:10', endTime: '09:50' });
+      await added({ institutionId: second, academicYearId: await kit.year(owner.token, second) });
+      const foreign = await kit.institution(otherOwner.token, categoryId);
+      await added(
+        { institutionId: foreign, academicYearId: await kit.year(otherOwner.token, foreign) },
+        otherOwner.token,
+      );
+      succeeded(
+        await api('delete', `/v1/timetable/time-slots/${gone.id}`, owner.token),
+        200,
+        'deactivated period',
+      );
+      const parentTenant = { personId: owner.person, roleCode: 5, childIds: [childId] };
+      const slots = await database.transaction(parentTenant, async (tx) =>
+        tx.selectFrom('time_slots').select(['id', 'institution_id']).execute(),
+      );
+      expect(slots).toEqual([{ id: mine.id, institution_id: first }]);
+      const years = await database.transaction(parentTenant, async (tx) =>
+        tx.selectFrom('academic_years').select('institution_id').execute(),
+      );
+      expect(years.length).toBeGreaterThan(0);
+      expect(new Set(years.map((row) => row.institution_id))).toEqual(new Set([first]));
     });
   });
 

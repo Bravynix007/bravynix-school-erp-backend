@@ -4,7 +4,11 @@ import type { AuditService } from '../../platform/audit/index.js';
 import type { DatabaseService, TenantContext, Tx } from '../../platform/database/index.js';
 import type { PersonDirectory } from '../../platform/identity/index.js';
 import type { MasterReferences } from '../../platform/masters/index.js';
-import type { InstitutionContext, ScopeService } from '../../platform/tenancy/index.js';
+import type {
+  ChildContexts,
+  InstitutionContext,
+  ScopeService,
+} from '../../platform/tenancy/index.js';
 import type { Notifications } from '../../platform/notifications/index.js';
 import type { AcademicYearDirectory } from '../academic-setup/index.js';
 import type { EventPeople } from './event-people.js';
@@ -35,6 +39,11 @@ const childTenantValue: TenantContext = {
   personId: 'parent-9',
   roleCode: 5,
   childIds: ['child-1'],
+};
+const childContext: InstitutionContext = {
+  institutionId: 'inst-1',
+  societyId: 'society-1',
+  tenant: childTenantValue,
 };
 const parent = principal(5);
 const narrowed: TenantContext = { ...tenant, institutionIds: ['inst-2'] };
@@ -134,7 +143,7 @@ function build(current: EventRow | null = event(), currentClasses: string[] = []
   const parentUserIds = vi
     .fn<EventPeople['parentUserIds']>()
     .mockResolvedValue(['parent-1', 'staff-2']);
-  const childTenant = vi.fn<EventPeople['childTenant']>().mockResolvedValue(childTenantValue);
+  const childTenant = vi.fn<ChildContexts['of']>().mockResolvedValue(childContext);
   const service = new EventService(
     { transaction } as unknown as DatabaseService,
     { list, find, insert, update, classesOf, replaceClasses } as unknown as EventRepository,
@@ -146,7 +155,8 @@ function build(current: EventRow | null = event(), currentClasses: string[] = []
     } as unknown as PersonDirectory,
     { record } as unknown as AuditService,
     { notify } as unknown as Notifications,
-    { staffUserIds, parentUserIds, childTenant } as unknown as EventPeople,
+    { staffUserIds, parentUserIds } as unknown as EventPeople,
+    { of: childTenant } as unknown as ChildContexts,
   );
   return {
     service,

@@ -9,6 +9,7 @@ import { ErrorCode, FieldErrorCode } from '../../common/http/error-codes.js';
 import { requireVersion } from '../../common/http/require-version.js';
 import { newId } from '../../common/ids/ids.js';
 import { fieldError } from '../../common/validation/field-error.js';
+import { parentReadErrors, staffReadErrors } from '../../common/validation/parent-read.js';
 import { AuditService, type AuditValues } from '../../platform/audit/index.js';
 import {
   DatabaseService,
@@ -20,7 +21,7 @@ import {
 import { PersonDirectory } from '../../platform/identity/index.js';
 import { MAX_RECEIVERS, Notifications } from '../../platform/notifications/index.js';
 import { MasterReferences } from '../../platform/masters/index.js';
-import { ScopeService } from '../../platform/tenancy/index.js';
+import { ChildContexts, ScopeService } from '../../platform/tenancy/index.js';
 import { AcademicYearDirectory } from '../academic-setup/index.js';
 import type {
   ChangeEventScopeDto,
@@ -89,6 +90,7 @@ export class EventService {
     private readonly audit: AuditService,
     private readonly notifications: Notifications,
     private readonly audience: EventPeople,
+    private readonly children: ChildContexts,
   ) {}
 
   /**
@@ -330,23 +332,12 @@ export class EventService {
     query: Pick<ListEventsQueryDto, 'studentId' | 'institutionId' | 'academicYearId'>,
   ): Promise<TenantContext> {
     if (principal.roleCode === RoleCode.StudentParent) {
-      const errors = [
-        ...(query.studentId === undefined
-          ? [fieldError('studentId', FieldErrorCode.REQUIRED)]
-          : []),
-        ...(query.institutionId === undefined
-          ? []
-          : [fieldError('institutionId', FieldErrorCode.FIELD_NOT_ALLOWED)]),
-        ...(query.academicYearId === undefined
-          ? []
-          : [fieldError('academicYearId', FieldErrorCode.FIELD_NOT_ALLOWED)]),
-      ];
+      const errors = parentReadErrors(query, ['institutionId', 'academicYearId']);
       if (errors.length > 0) throw AppException.validation(errors);
-      return this.audience.childTenant(principal, query.studentId!);
+      return (await this.children.of(principal, query.studentId!)).tenant;
     }
-    if (query.studentId !== undefined) {
-      throw AppException.validation([fieldError('studentId', FieldErrorCode.FIELD_NOT_ALLOWED)]);
-    }
+    const errors = staffReadErrors(query);
+    if (errors.length > 0) throw AppException.validation(errors);
     const scope = await this.scopes.forPrincipal(principal);
     if (scope.societyId === null) throw AppException.forbidden();
     return query.institutionId

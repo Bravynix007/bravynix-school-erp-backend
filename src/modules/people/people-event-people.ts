@@ -1,14 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import type { Principal } from '../../common/auth/access-token-verifier.js';
-import type { Tx, TenantContext } from '../../platform/database/index.js';
+import type { Tx } from '../../platform/database/index.js';
 import { GrantDirectory } from '../../platform/identity/index.js';
 import { ClassDirectory } from '../academic-setup/index.js';
 import { EventPeople } from '../events/index.js';
-import { ChildAccess } from './child-access.js';
 import { StaffRepository } from './staff.repository.js';
 import { StudentRepository } from './student.repository.js';
 
-/** What People tells Events (`EventPeople`): the staff and the parents of an audience, and a parent's tenant for a child. */
+/** What People tells Events (`EventPeople`): the staff and the parents of an audience. */
 @Injectable()
 export class PeopleEventPeople extends EventPeople {
   constructor(
@@ -16,7 +14,6 @@ export class PeopleEventPeople extends EventPeople {
     private readonly staff: StaffRepository,
     private readonly students: StudentRepository,
     private readonly classes: ClassDirectory,
-    private readonly access: ChildAccess,
   ) {
     super();
   }
@@ -44,9 +41,5 @@ export class PeopleEventPeople extends EventPeople {
         ? null
         : await this.classes.ofPredefined(tx, predefinedClassIds);
     return this.students.guardianUserIds(tx, institutionId, classIds);
-  }
-
-  async childTenant(principal: Principal, studentId: string): Promise<TenantContext> {
-    return (await this.access.of(principal, studentId)).tenant;
   }
 }

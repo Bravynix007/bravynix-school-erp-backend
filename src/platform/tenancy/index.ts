@@ -6,4 +6,5 @@ export {
   type InstitutionName,
   type InstitutionRef,
 } from './institution-directory.js';
+export { ChildContexts } from './child-contexts.js';
 export { SocietyDues } from './society-dues.js';
