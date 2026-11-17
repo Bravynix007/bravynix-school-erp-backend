@@ -268,16 +268,18 @@ describe('EventService.list', () => {
 
 describe('EventService.get', () => {
   it('shows an active event for an audience of the role, and is 404 for another, a deactivated one or none', async () => {
-    expect((await build(event({ audience: 3 })).service.get(teacher, 'event-1')).id).toBe(
+    expect((await build(event({ audience: 3 })).service.get(teacher, 'event-1', {})).id).toBe(
       'event-1',
     );
     expect(
-      await refusal(build(event({ audience: 2 })).service.get(teacher, 'event-1')),
+      await refusal(build(event({ audience: 2 })).service.get(teacher, 'event-1', {})),
     ).toMatchObject({ status: 404 });
-    expect(await refusal(build(event({ status: 0 })).service.get(owner, 'event-1'))).toMatchObject({
+    expect(
+      await refusal(build(event({ status: 0 })).service.get(owner, 'event-1', {})),
+    ).toMatchObject({
       status: 404,
     });
-    expect(await refusal(build(null).service.get(owner, 'event-1'))).toMatchObject({
+    expect(await refusal(build(null).service.get(owner, 'event-1', {}))).toMatchObject({
       status: 404,
     });
   });
