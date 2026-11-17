@@ -6,7 +6,7 @@ import { personaByKey } from './two-worlds.js';
 const seedId = (n: number): string => `00000000-0000-7000-8000-${n.toString().padStart(12, '0')}`;
 
 /** A school day inside the seeded year (Tuesday 16 June 2026), after every seeded child was placed. */
-export const SEEDED_ATTENDANCE_DATE = '2026-06-16';
+const SEEDED_ATTENDANCE_DATE = '2026-06-16';
 
 /**
  * One day's attendance for every seeded section that has students: the first child on the roll is Absent and the rest

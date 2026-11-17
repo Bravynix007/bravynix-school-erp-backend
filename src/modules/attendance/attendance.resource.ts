@@ -3,13 +3,13 @@ import type { SessionRow } from './attendance.repository.js';
 import type { MarkedStudent, RosterStudent } from './section-roster.js';
 
 /** The person who submitted, as the screens say "Marked by". */
-export interface SubmitterRef {
+interface SubmitterRef {
   id: string;
   displayName: string;
 }
 
 /** The section and its class, by name. */
-export interface SectionRef {
+interface SectionRef {
   id: string;
   displayName: string;
   classId: string;

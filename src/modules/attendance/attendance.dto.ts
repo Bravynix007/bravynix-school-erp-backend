@@ -17,7 +17,7 @@ import { LowerCaseUuid } from '../../common/validation/lower-case-uuid.js';
 import { EXCEPTION_STATUSES } from './attendance.rules.js';
 
 /** The most students one section can have to mark: the roster the screen loads (API design 10.10). */
-export const MAX_ROSTER = 1000;
+const MAX_ROSTER = 1000;
 
 /** ATT-01 query: one roster for a section and day (API design 10.10). */
 export class RosterQueryDto {
