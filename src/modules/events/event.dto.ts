@@ -61,6 +61,25 @@ export class ListEventsQueryDto {
   @ApiPropertyOptional({ description: 'Only holidays' })
   @BooleanQuery()
   holidays?: boolean;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'A parent’s own child, whose Society and Institution the events are read for (parents only)',
+  })
+  @IsOptional()
+  @LowerCaseUuid()
+  @IsUUID()
+  studentId?: string;
+}
+
+/** EVT-03 query: a parent names their own child. */
+export class GetEventQueryDto {
+  @ApiPropertyOptional({ format: 'uuid', description: 'A parent’s own child (parents only)' })
+  @IsOptional()
+  @LowerCaseUuid()
+  @IsUUID()
+  studentId?: string;
 }
 
 /** The fields EVT-02 takes and EVT-04 may change (API design 10.26). */

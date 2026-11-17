@@ -9,6 +9,7 @@ import { ErrorCode, FieldErrorCode } from '../../common/http/error-codes.js';
 import { requireVersion } from '../../common/http/require-version.js';
 import { newId } from '../../common/ids/ids.js';
 import { fieldError } from '../../common/validation/field-error.js';
+import { parentReadErrors, staffReadErrors } from '../../common/validation/parent-read.js';
 import { AuditService, type AuditValues } from '../../platform/audit/index.js';
 import {
   DatabaseService,
@@ -18,12 +19,14 @@ import {
   type Tx,
 } from '../../platform/database/index.js';
 import { PersonDirectory } from '../../platform/identity/index.js';
+import { MAX_RECEIVERS, Notifications } from '../../platform/notifications/index.js';
 import { MasterReferences } from '../../platform/masters/index.js';
-import { ScopeService } from '../../platform/tenancy/index.js';
+import { ChildContexts, ScopeService } from '../../platform/tenancy/index.js';
 import { AcademicYearDirectory } from '../academic-setup/index.js';
 import type {
   ChangeEventScopeDto,
   CreateEventDto,
+  GetEventQueryDto,
   ListEventsQueryDto,
   UpdateEventDto,
 } from './event.dto.js';
@@ -33,13 +36,17 @@ import {
   type EventFilter,
   type EventRow,
 } from './event.repository.js';
+import { EventPeople } from './event-people.js';
+import { eventNotice, type EventNoticeKind } from './event.notice.js';
 import { eventResource, type EventResource } from './event.resource.js';
 import {
   EventScope,
+  audienceGroups,
   checkEventFields,
   checkRange,
   checkScope,
   mayEdit,
+  parentsAreTold,
   visibleAudiences,
   type EventFields,
 } from './event.rules.js';
@@ -81,6 +88,9 @@ export class EventService {
     private readonly years: AcademicYearDirectory,
     private readonly people: PersonDirectory,
     private readonly audit: AuditService,
+    private readonly notifications: Notifications,
+    private readonly audience: EventPeople,
+    private readonly children: ChildContexts,
   ) {}
 
   /**
@@ -89,17 +99,15 @@ export class EventService {
    * naming an Institution narrows it to the Society-wide events and that Institution's.
    */
   async list(principal: Principal, query: ListEventsQueryDto): Promise<ApiResult<EventResource[]>> {
-    const scope = await this.scopes.forPrincipal(principal);
-    if (scope.societyId === null) throw AppException.forbidden();
-    const tenant = query.institutionId
-      ? (await this.scopes.requireInstitution(principal, query.institutionId)).tenant
-      : scope.tenant;
+    const parent = principal.roleCode === RoleCode.StudentParent;
+    const tenant = await this.readTenant(principal, query);
     const { rows, classes } = await this.database.transaction(tenant, async (tx) => {
       const span = await this.span(tx, query);
       const found = await this.events.list(tx, {
         ...span,
         holidaysOnly: query.holidays === true,
         audiences: visibleAudiences(principal.roleCode),
+        forStudents: parent,
       });
       return {
         rows: found,
@@ -116,15 +124,23 @@ export class EventService {
     );
   }
 
-  /** EVT-03: one active event the caller reads; one that is not theirs, or not for their audience, is 404. */
-  async get(principal: Principal, id: string): Promise<EventResource> {
-    const { tenant } = await this.societyOf(principal);
+  /**
+   * EVT-03: one active event the caller reads; one that is not theirs, or not for their audience, is 404. A parent
+   * names their child, and reads the Society's events and their child's Institution's for the parents' audiences.
+   */
+  async get(principal: Principal, id: string, query: GetEventQueryDto): Promise<EventResource> {
+    const tenant = await this.readTenant(principal, query);
     const found = await this.database.transaction(tenant, async (tx) => {
       const row = await this.events.find(tx, id);
       if (
         !row ||
         row.status === 0 ||
-        !visibleAudiences(principal.roleCode).includes(row.audience)
+        !visibleAudiences(principal.roleCode).includes(row.audience) ||
+        (principal.roleCode === RoleCode.StudentParent &&
+          !parentsAreTold({
+            isHoliday: row.is_holiday,
+            holidayForStudents: row.holiday_for_students,
+          }))
       ) {
         throw AppException.notFound();
       }
@@ -170,6 +186,7 @@ export class EventService {
       await this.record(tx, 'event.created', row, {
         after: auditView(row, fields.holidayPredefinedClassIds),
       });
+      await this.announce(tx, principal, row, fields.holidayPredefinedClassIds, 'created');
       return { row, classIds: fields.holidayPredefinedClassIds.toSorted() };
     });
     return this.resource(principal, created.row, created.classIds);
@@ -242,6 +259,7 @@ export class EventService {
         before: auditView(current, currentClasses),
         after: auditView(updated, fields.holidayPredefinedClassIds),
       });
+      await this.announce(tx, principal, updated, fields.holidayPredefinedClassIds, 'updated');
       return { row: updated, classIds: fields.holidayPredefinedClassIds.toSorted() };
     });
     return this.resource(principal, result.row, result.classIds);
@@ -297,6 +315,30 @@ export class EventService {
       return { row: updated, classIds };
     });
     return this.resource(principal, result.row, result.classIds);
+  }
+
+  /**
+   * The tenant a read runs in. A parent names their own child (400 `REQUIRED`) and reads in that child's scope, so
+   * row-level security shows them the child's Society and Institution only; they may not choose an Institution or a
+   * year. Everyone else reads their Society, narrowed to an Institution they reach when one is named, and has no child
+   * to name (400 `FIELD_NOT_ALLOWED`).
+   */
+  private async readTenant(
+    principal: Principal,
+    query: Pick<ListEventsQueryDto, 'studentId' | 'institutionId' | 'academicYearId'>,
+  ): Promise<TenantContext> {
+    if (principal.roleCode === RoleCode.StudentParent) {
+      const errors = parentReadErrors(query, ['institutionId', 'academicYearId']);
+      if (errors.length > 0) throw AppException.validation(errors);
+      return (await this.children.of(principal, query.studentId!)).tenant;
+    }
+    const errors = staffReadErrors(query);
+    if (errors.length > 0) throw AppException.validation(errors);
+    const scope = await this.scopes.forPrincipal(principal);
+    if (scope.societyId === null) throw AppException.forbidden();
+    return query.institutionId
+      ? (await this.scopes.requireInstitution(principal, query.institutionId)).tenant
+      : scope.tenant;
   }
 
   /** The days a list covers: the dates asked for, or the academic year named (400 `REQUIRED` for what is missing). */
@@ -411,6 +453,48 @@ export class EventService {
       principal.roleCode,
       await this.people.describe(authorIdsOf([row])),
     );
+  }
+
+  /**
+   * Tells the people the event is for, in the transaction of the change (SDD 9.3 rule 4, PRD 7.12): the staff, the
+   * parents, or both, of the Institution or of the whole Society, except the person who made the change. The parents
+   * of a holiday limited to classes are those of children in those classes; a holiday for staff alone is not told to
+   * parents. A large audience is sent as several notices.
+   */
+  private async announce(
+    tx: Tx,
+    principal: Principal,
+    event: EventRow,
+    predefinedClassIds: readonly string[],
+    kind: EventNoticeKind,
+  ): Promise<void> {
+    const groups = audienceGroups(event.audience);
+    const [staff, parents] = await Promise.all([
+      groups.staff
+        ? this.audience.staffUserIds(tx, event.society_id, event.institution_id)
+        : Promise.resolve([]),
+      groups.parents &&
+      parentsAreTold({
+        isHoliday: event.is_holiday,
+        holidayForStudents: event.holiday_for_students,
+      })
+        ? this.audience.parentUserIds(
+            tx,
+            event.institution_id,
+            event.is_holiday && event.holiday_for_students ? predefinedClassIds : [],
+          )
+        : Promise.resolve([]),
+    ]);
+    const receivers = [...new Set([...staff, ...parents])].filter(
+      (id) => id !== principal.personId,
+    );
+    for (let from = 0; from < receivers.length; from += MAX_RECEIVERS) {
+      await this.notifications.notify(
+        tx,
+        eventNotice(event, kind, receivers.slice(from, from + MAX_RECEIVERS)),
+        principal.personId,
+      );
+    }
   }
 
   /** The entry carries the event's Institution when it has one (API design 20.3). */

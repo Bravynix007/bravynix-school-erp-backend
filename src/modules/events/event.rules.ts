@@ -64,7 +64,7 @@ export function daysBetween(from: string, to: string): number {
 export function checkEventFields(event: EventFields): void {
   const errors = [];
   if (event.endDate < event.startDate) {
-    errors.push(fieldError('endDate', FieldErrorCode.INVALID_VALUE));
+    errors.push(fieldError('endDate', FieldErrorCode.OUT_OF_RANGE));
   }
   if (event.isHoliday) {
     if (event.holidayType === null) errors.push(fieldError('holidayType', FieldErrorCode.REQUIRED));
@@ -133,4 +133,43 @@ export function visibleAudiences(role: RoleCode | null): readonly number[] {
 export function mayEdit(role: RoleCode | null, scope: number): boolean {
   if (role === RoleCode.SocietyOwner) return true;
   return role === RoleCode.InstitutionAdmin && scope === EventScope.Institution;
+}
+
+/** Which people an audience is made of: the staff (Owners, Admins, Teachers and Staff), the parents, or both. */
+export function audienceGroups(audience: number): { staff: boolean; parents: boolean } {
+  switch (audience) {
+    case Audience.StudentsAndParents:
+      return { staff: false, parents: true };
+    case Audience.Staff:
+      return { staff: true, parents: false };
+    default:
+      return { staff: true, parents: true };
+  }
+}
+
+/** Whether the parents are told: not of a holiday that is for staff alone. */
+export function parentsAreTold(
+  event: Pick<EventFields, 'isHoliday' | 'holidayForStudents'>,
+): boolean {
+  return !event.isHoliday || event.holidayForStudents;
+}
+
+/** The inbox tab a notice about the audience sits in: 2 All, 3 All teachers, 4 All students (API design 16.1). */
+export function inboxTabOf(audience: number): 2 | 3 | 4 {
+  switch (audience) {
+    case Audience.StudentsAndParents:
+      return 4;
+    case Audience.Staff:
+      return 3;
+    default:
+      return 2;
+  }
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** A date as a notice shows it: `22 Dec 2026`. */
+export function formatDay(date: string): string {
+  const [year, month, day] = date.split('-');
+  return `${Number(day).toString()} ${MONTHS[Number(month) - 1]!} ${year!}`;
 }

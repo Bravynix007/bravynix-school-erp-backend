@@ -268,3 +268,41 @@ describe('StudentRepository', () => {
     });
   });
 });
+
+describe('StudentRepository.guardianUserIds', () => {
+  const repository = new StudentRepository();
+
+  it('reads the active guardians with a login of active students, each person once', async () => {
+    const { tx, queries } = recorder();
+    expect(await repository.guardianUserIds(tx, null, null)).toEqual([]);
+    const { sql, parameters } = queries[0]!;
+    expect(sql).toMatch(
+      /^select distinct "g"\."user_id" from "student_guardians" as "g" inner join "students" as "s" on "s"\."id" = "g"\."student_id" where "g"\."status" = \$1 and "g"\."user_id" is not null and "s"\."status" = \$2$/,
+    );
+    expect(parameters).toEqual([1, 1]);
+  });
+
+  it('narrows to one Institution', async () => {
+    const { tx, queries } = recorder();
+    await repository.guardianUserIds(tx, 'institution-1', null);
+    expect(queries[0]!.sql).toContain('"s"."institution_id" = $3');
+    expect(queries[0]!.parameters).toEqual([1, 1, 'institution-1']);
+  });
+
+  it('narrows to the students now placed in the classes, and reads nothing for no class', async () => {
+    const { tx, queries } = recorder();
+    await repository.guardianUserIds(tx, null, new Set(['class-1', 'class-2']));
+    const { sql, parameters } = queries[0]!;
+    expect(sql).toContain('exists (select 1 as "one" from "student_section_placements" as "p"');
+    expect(sql).toContain(
+      'inner join "student_enrolments" as "e" on "e"."id" = "p"."student_enrolment_id"',
+    );
+    expect(sql).toContain(
+      '"e"."student_id" = "s"."id" and "e"."status" = $3 and "p"."end_date" is null and "p"."class_id" in ($4, $5)',
+    );
+    expect(parameters).toEqual([1, 1, 1, 'class-1', 'class-2']);
+    const none = recorder();
+    expect(await repository.guardianUserIds(none.tx, null, new Set())).toEqual([]);
+    expect(none.queries).toEqual([]);
+  });
+});

@@ -35,6 +35,23 @@ export class GrantDirectory {
     return rows.flatMap((row) => (row.institution_id === null ? [] : [row.institution_id]));
   }
 
+  /**
+   * The people with an active Institution Admin grant in a Society, each once: those of one Institution, or of every
+   * Institution of the Society when `institutionId` is null. Who a notice to the Society's staff reaches.
+   */
+  async adminUserIds(societyId: string, institutionId: string | null): Promise<string[]> {
+    const rows = await this.database.db
+      .selectFrom('role_assignments')
+      .select('user_id')
+      .distinct()
+      .where('role_code', '=', 3)
+      .where('society_id', '=', societyId)
+      .where('revoked_at', 'is', null)
+      .$if(institutionId !== null, (query) => query.where('institution_id', '=', institutionId))
+      .execute();
+    return rows.map((row) => row.user_id);
+  }
+
   /** The Admins of one Institution, by name, a page at a time (INS-08). */
   async institutionAdmins(
     institutionId: string,

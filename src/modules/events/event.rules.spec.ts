@@ -1,11 +1,15 @@
 import { RoleCode } from '../../common/auth/roles.js';
 import { AppException } from '../../common/http/app-exception.js';
 import {
+  audienceGroups,
   checkEventFields,
   checkRange,
   checkScope,
   daysBetween,
+  formatDay,
+  inboxTabOf,
   mayEdit,
+  parentsAreTold,
   visibleAudiences,
   type EventFields,
 } from './event.rules.js';
@@ -70,7 +74,7 @@ describe('checkEventFields', () => {
 
   it('refuses an end before the start', () => {
     expect(problemsOf(() => checkEventFields({ ...plain, endDate: '2026-12-21' }))).toEqual([
-      { field: 'endDate', code: 'INVALID_VALUE' },
+      { field: 'endDate', code: 'OUT_OF_RANGE' },
     ]);
   });
 
@@ -178,5 +182,36 @@ describe('mayEdit', () => {
     expect(mayEdit(RoleCode.TeacherStaff, 2)).toBe(false);
     expect(mayEdit(RoleCode.StudentParent, 1)).toBe(false);
     expect(mayEdit(null, 2)).toBe(false);
+  });
+});
+
+describe('audienceGroups', () => {
+  it('makes Everyone of the staff and the parents, and the others of one group', () => {
+    expect(audienceGroups(1)).toEqual({ staff: true, parents: true });
+    expect(audienceGroups(2)).toEqual({ staff: false, parents: true });
+    expect(audienceGroups(3)).toEqual({ staff: true, parents: false });
+  });
+});
+
+describe('parentsAreTold', () => {
+  it('tells the parents of every event and of a holiday for students, and not of a holiday for staff alone', () => {
+    expect(parentsAreTold({ isHoliday: false, holidayForStudents: false })).toBe(true);
+    expect(parentsAreTold({ isHoliday: true, holidayForStudents: true })).toBe(true);
+    expect(parentsAreTold({ isHoliday: true, holidayForStudents: false })).toBe(false);
+  });
+});
+
+describe('inboxTabOf', () => {
+  it('puts Everyone in All, the staff in All teachers and the students and parents in All students', () => {
+    expect(inboxTabOf(1)).toBe(2);
+    expect(inboxTabOf(3)).toBe(3);
+    expect(inboxTabOf(2)).toBe(4);
+  });
+});
+
+describe('formatDay', () => {
+  it('writes a date as a notice shows it, with no leading zero on the day', () => {
+    expect(formatDay('2026-12-22')).toBe('22 Dec 2026');
+    expect(formatDay('2027-01-05')).toBe('5 Jan 2027');
   });
 });

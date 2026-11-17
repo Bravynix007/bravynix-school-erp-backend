@@ -148,6 +148,35 @@ export class StaffRepository {
     return rows.map((row) => row.home_institution_id);
   }
 
+  /**
+   * The people with an active staff record, each once: those who work at one Institution (as their home or as an extra
+   * one), or in the whole Society for no Institution. Read under the caller's row-level security.
+   */
+  async activeUserIds(tx: Tx, institutionId: string | null): Promise<string[]> {
+    const rows = await tx
+      .selectFrom('staff_members')
+      .select('user_id')
+      .distinct()
+      .where('status', '=', 1)
+      .$if(institutionId !== null, (query) =>
+        query.where((eb) =>
+          eb.or([
+            eb('home_institution_id', '=', institutionId),
+            eb(
+              'id',
+              'in',
+              eb
+                .selectFrom('staff_institutions')
+                .select('staff_member_id')
+                .where('institution_id', '=', institutionId),
+            ),
+          ]),
+        ),
+      )
+      .execute();
+    return rows.map((row) => row.user_id);
+  }
+
   /** The active staff record of this person in the caller's Society: a person holds at most one. */
   activeOfUser(tx: Tx, userId: string): Promise<StaffRow | undefined> {
     return tx

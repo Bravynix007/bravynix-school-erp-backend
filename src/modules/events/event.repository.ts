@@ -14,6 +14,8 @@ export interface EventFilter {
   to: string;
   holidaysOnly: boolean;
   audiences: readonly number[];
+  /** Leaves out the holidays that are not for students: what a parent's calendar shows. */
+  forStudents?: boolean;
 }
 
 /** Queries on `events` and `event_holiday_classes`; each runs in the caller's transaction, under row-level security. */
@@ -30,6 +32,11 @@ export class EventRepository {
       .where('end_date', '>=', filter.from)
       .where('audience', 'in', filter.audiences)
       .$if(filter.holidaysOnly, (query) => query.where('is_holiday', '=', true))
+      .$if(filter.forStudents === true, (query) =>
+        query.where((eb) =>
+          eb.or([eb('is_holiday', '=', false), eb('holiday_for_students', '=', true)]),
+        ),
+      )
       .orderBy('start_date')
       .orderBy('end_date')
       .orderBy(sql`lower(title)`)

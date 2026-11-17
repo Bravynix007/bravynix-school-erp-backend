@@ -106,6 +106,44 @@ const SORT_COLUMN = {
 /** Queries on the student tables; every one runs in the caller's transaction, under row-level security. */
 @Injectable()
 export class StudentRepository {
+  /**
+   * The people with an active login as a guardian of an active student, each once: of one Institution, or of the
+   * whole Society for none. With `classIds` only guardians of a student whose open placement is in one of those
+   * classes. Read under the caller's row-level security.
+   */
+  async guardianUserIds(
+    tx: Tx,
+    institutionId: string | null,
+    classIds: ReadonlySet<string> | null,
+  ): Promise<string[]> {
+    if (classIds?.size === 0) return [];
+    const rows = await tx
+      .selectFrom('student_guardians as g')
+      .innerJoin('students as s', 's.id', 'g.student_id')
+      .select('g.user_id')
+      .distinct()
+      .where('g.status', '=', 1)
+      .where('g.user_id', 'is not', null)
+      .where('s.status', '=', 1)
+      .$if(institutionId !== null, (query) => query.where('s.institution_id', '=', institutionId))
+      .$if(classIds !== null, (query) =>
+        query.where((eb) =>
+          eb.exists(
+            eb
+              .selectFrom('student_section_placements as p')
+              .innerJoin('student_enrolments as e', 'e.id', 'p.student_enrolment_id')
+              .select(sql.lit(1).as('one'))
+              .whereRef('e.student_id', '=', 's.id')
+              .where('e.status', '=', 1)
+              .where('p.end_date', 'is', null)
+              .where('p.class_id', 'in', [...classIds!]),
+          ),
+        ),
+      )
+      .execute();
+    return rows.flatMap((row) => (row.user_id === null ? [] : [row.user_id]));
+  }
+
   async find(tx: Tx, id: string, lock = false): Promise<StudentRow | undefined> {
     const query = tx.selectFrom('students').selectAll().where('id', '=', id);
     return (lock ? query.forUpdate() : query).executeTakeFirst();

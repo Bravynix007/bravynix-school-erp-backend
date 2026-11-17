@@ -124,6 +124,18 @@ export class ClassRepository {
     );
   }
 
+  /** The IDs of the active classes, in the Institutions the caller reaches, made from these predefined classes. */
+  async idsOfPredefined(tx: Tx, predefinedClassIds: readonly string[]): Promise<string[]> {
+    if (predefinedClassIds.length === 0) return [];
+    const rows = await tx
+      .selectFrom('classes')
+      .select('id')
+      .where('status', '=', 1)
+      .where('predefined_class_id', 'in', predefinedClassIds)
+      .execute();
+    return rows.map((row) => row.id);
+  }
+
   /** The classes with these IDs, with their names, in the order of the lists. */
   views(tx: Tx, ids: readonly string[]): Promise<ClassView[]> {
     return this.view(tx)
