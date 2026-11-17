@@ -13,7 +13,7 @@ interface SeedPeriod {
 const seedId = (n: number): string => `00000000-0000-7000-8000-${n.toString().padStart(12, '0')}`;
 
 /** The school day of every two-worlds Institution: eight periods of 40 minutes with lunch after the fourth. */
-export const periods: readonly SeedPeriod[] = [
+const periods: readonly SeedPeriod[] = [
   { periodNo: 1, label: 'Period 1', startTime: '08:30', endTime: '09:10', isBreak: false },
   { periodNo: 2, label: 'Period 2', startTime: '09:10', endTime: '09:50', isBreak: false },
   { periodNo: 3, label: 'Period 3', startTime: '09:50', endTime: '10:30', isBreak: false },
@@ -26,7 +26,7 @@ export const periods: readonly SeedPeriod[] = [
 ];
 
 /** The seeded period of this number in a two-worlds Institution, so a test can find its row. */
-export function seededTimeSlotId(institutionKey: string, periodNo: number): string {
+function seededTimeSlotId(institutionKey: string, periodNo: number): string {
   const index = institutions.findIndex((i) => i.key === institutionKey);
   if (index < 0) throw new Error(`Unknown two-worlds Institution ${institutionKey}`);
   if (!periods.some((p) => p.periodNo === periodNo))
