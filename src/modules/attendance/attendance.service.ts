@@ -240,7 +240,7 @@ export class AttendanceService {
    * ATT-05: changes the marks of a submitted session. 409 `VERSION_CONFLICT` first, then `SESSION_VOIDED`; 403
    * `NOT_ASSIGNED` for a teacher away from their home Institution and 403 `FORBIDDEN` for a teacher correcting a past
    * year, which only an Owner or an Admin may; 422 `STUDENT_NOT_IN_SECTION`. A request that changes nothing writes
-   * nothing. One transaction: the marks, the counts, the audit for each student, and an alert for each student who
+   * nothing. One transaction: the marks, the counts, the audit of the correction, and an alert for each student who
    * is now Absent and was not.
    */
   async correct(
@@ -340,23 +340,19 @@ export class AttendanceService {
         last_corrected_by: correction.by,
         ...updateStamp(principal.personId),
       });
-      for (const change of outcome.changes) {
-        await this.audit.record(tx, {
-          action: 'attendance.corrected',
-          societyId: updated.society_id,
-          institutionId: updated.institution_id,
-          entityType: 'attendance_session',
-          entityId: updated.id,
-          before: {
-            student_enrolment_id: change.studentEnrolmentId,
-            attendance_status: change.before,
-          },
-          after: {
-            student_enrolment_id: change.studentEnrolmentId,
-            attendance_status: change.after,
-          },
-        });
-      }
+      await this.audit.record(tx, {
+        action: 'attendance.corrected',
+        societyId: updated.society_id,
+        institutionId: updated.institution_id,
+        entityType: 'attendance_session',
+        entityId: updated.id,
+        before: {
+          marks: Object.fromEntries(outcome.changes.map((c) => [c.studentEnrolmentId, c.before])),
+        },
+        after: {
+          marks: Object.fromEntries(outcome.changes.map((c) => [c.studentEnrolmentId, c.after])),
+        },
+      });
       await this.alertParents(
         tx,
         updated,
@@ -395,13 +391,9 @@ export class AttendanceService {
         institutionId: updated.institution_id,
         entityType: 'attendance_session',
         entityId: updated.id,
+        reason: body.reason,
         before: { status: session.status },
-        after: {
-          status: updated.status,
-          section_id: updated.section_id,
-          attendance_date: updated.attendance_date,
-          reason: body.reason,
-        },
+        after: { status: updated.status },
       });
     });
     return { id: sessionId, status: 0 };

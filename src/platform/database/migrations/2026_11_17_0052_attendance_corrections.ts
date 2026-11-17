@@ -30,6 +30,10 @@ export async function up(db: Kysely<unknown>): Promise<void> {
 }
 
 export async function down(db: Kysely<unknown>): Promise<void> {
+  // Production migrations only add (SDD 16.6).
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('Refusing to drop attendance corrections in production');
+  }
   await sql`
     do $$
     begin
@@ -39,6 +43,10 @@ export async function down(db: Kysely<unknown>): Promise<void> {
     end;
     $$
   `.execute(db);
-  await sql`drop policy if exists attendance_exceptions_delete on attendance_exceptions`.execute(db);
-  await sql`drop policy if exists attendance_exceptions_update on attendance_exceptions`.execute(db);
+  await sql`drop policy if exists attendance_exceptions_delete on attendance_exceptions`.execute(
+    db,
+  );
+  await sql`drop policy if exists attendance_exceptions_update on attendance_exceptions`.execute(
+    db,
+  );
 }

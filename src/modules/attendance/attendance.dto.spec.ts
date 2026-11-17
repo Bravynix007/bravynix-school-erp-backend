@@ -1,5 +1,11 @@
 import { body, problems } from '../../../test/support/dto-validation.js';
-import { ListSessionsQueryDto, RosterQueryDto, SubmitAttendanceDto } from './attendance.dto.js';
+import {
+  CorrectAttendanceDto,
+  ListSessionsQueryDto,
+  RosterQueryDto,
+  SubmitAttendanceDto,
+  VoidAttendanceDto,
+} from './attendance.dto.js';
 
 const uuid = '0192f3b0-0000-7000-8000-000000000001';
 const submission = {
@@ -69,5 +75,71 @@ describe('SubmitAttendanceDto', () => {
     [{ ...submission, timeSlotId: uuid }, 'timeSlotId', 'FIELD_NOT_ALLOWED'],
   ])('refuses %j', async (value, field, code) => {
     expect(await problems(body(SubmitAttendanceDto, value))).toContainEqual({ field, code });
+  });
+});
+
+describe('CorrectAttendanceDto', () => {
+  const correction = {
+    version: 1,
+    changes: [{ studentEnrolmentId: uuid, attendanceStatus: 1 }],
+  };
+
+  it('takes Present as well as the four exceptions', async () => {
+    expect(await problems(body(CorrectAttendanceDto, correction))).toEqual([]);
+    for (const attendanceStatus of [2, 3, 4, 5]) {
+      expect(
+        await problems(
+          body(CorrectAttendanceDto, {
+            ...correction,
+            changes: [{ studentEnrolmentId: uuid, attendanceStatus }],
+          }),
+        ),
+      ).toEqual([]);
+    }
+  });
+
+  it('needs a version and one to 200 changes, each a student and a status 1 to 5', async () => {
+    expect(await problems(body(CorrectAttendanceDto, { changes: correction.changes }))).toEqual([
+      { field: 'version', code: 'INVALID_TYPE' },
+    ]);
+    expect(await problems(body(CorrectAttendanceDto, { ...correction, changes: [] }))).toEqual([
+      { field: 'changes', code: 'TOO_FEW' },
+    ]);
+    expect(
+      await problems(
+        body(CorrectAttendanceDto, {
+          ...correction,
+          changes: Array.from({ length: 201 }, () => correction.changes[0]),
+        }),
+      ),
+    ).toEqual([{ field: 'changes', code: 'TOO_MANY' }]);
+    expect(
+      await problems(
+        body(CorrectAttendanceDto, {
+          ...correction,
+          changes: [{ studentEnrolmentId: 'x', attendanceStatus: 6 }],
+        }),
+      ),
+    ).toEqual([
+      { field: 'changes[0].studentEnrolmentId', code: 'INVALID_FORMAT' },
+      { field: 'changes[0].attendanceStatus', code: 'INVALID_CODE' },
+    ]);
+  });
+});
+
+describe('VoidAttendanceDto', () => {
+  it('needs the version and a reason of 5 to 500 characters', async () => {
+    expect(
+      await problems(body(VoidAttendanceDto, { version: 2, reason: 'Wrong section' })),
+    ).toEqual([]);
+    expect(await problems(body(VoidAttendanceDto, { version: 2, reason: 'oops' }))).toEqual([
+      { field: 'reason', code: 'TOO_SHORT' },
+    ]);
+    expect(
+      await problems(body(VoidAttendanceDto, { version: 2, reason: 'x'.repeat(501) })),
+    ).toEqual([{ field: 'reason', code: 'TOO_LONG' }]);
+    expect(await problems(body(VoidAttendanceDto, { reason: 'Wrong section' }))).toEqual([
+      { field: 'version', code: 'INVALID_TYPE' },
+    ]);
   });
 });
