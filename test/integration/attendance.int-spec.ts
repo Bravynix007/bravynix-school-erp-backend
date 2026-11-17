@@ -869,16 +869,16 @@ describe('ATT-01 to ATT-04 mark attendance (API design 10.10, 10.11)', () => {
       await rollBackTo(migrationUrl, BEFORE_ATTENDANCE);
       const migrated = await rollBackTo(migrationUrl, '2026_11_17_0051_attendance_sessions');
       expect(migrated.error).toBeUndefined();
-      const year = new Date().getUTCFullYear();
+      const thisYear = new Date().getUTCFullYear();
       const found = await sql<{ name: string }>`
         select c.relname as name from pg_inherits i
         join pg_class c on c.oid = i.inhrelid
         where i.inhparent = 'public.attendance_exceptions'::regclass
         order by c.relname`.execute(ownerDb);
       expect(found.rows.map((row) => row.name)).toEqual([
-        `attendance_exceptions_${(year - 1).toString()}`,
-        `attendance_exceptions_${year.toString()}`,
-        `attendance_exceptions_${(year + 1).toString()}`,
+        `attendance_exceptions_${(thisYear - 1).toString()}`,
+        `attendance_exceptions_${thisYear.toString()}`,
+        `attendance_exceptions_${(thisYear + 1).toString()}`,
         'attendance_exceptions_default',
       ]);
       await runMigrations(migrationUrl, 'latest');
