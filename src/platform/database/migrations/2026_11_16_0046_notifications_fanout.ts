@@ -53,6 +53,9 @@ export async function up(db: Kysely<unknown>): Promise<void> {
         select p_occurred_at, r."userId", p_society, p_institution, r."studentId", p_category, p_tab, p_title,
           p_body, p_sender, p_source_key, p_target_type, p_target_id
         from jsonb_to_recordset(p_receivers) as r ("userId" uuid, "studentId" uuid)
+        -- A receiver who is no person (removed since the notice was asked for) is passed over, so one bad ID never
+        -- fails the batch and keeps the notice from the rest.
+        join public.users u on u.id = r."userId"
         on conflict (user_id, source_key, created_at) do nothing
         returning user_id;
     end;

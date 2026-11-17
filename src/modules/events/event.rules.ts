@@ -5,7 +5,7 @@ import { ErrorCode, FieldErrorCode } from '../../common/http/error-codes.js';
 import { fieldError } from '../../common/validation/field-error.js';
 
 /** Who an event is for (DDD 9.8). */
-export const Audience = { Everyone: 1, StudentsAndParents: 2, Staff: 3 } as const;
+const Audience = { Everyone: 1, StudentsAndParents: 2, Staff: 3 } as const;
 export const AUDIENCES = [1, 2, 3] as const;
 
 /** Who may change an event (PRD 7.12): 1 the Society's, shown in every Institution; 2 one Institution's. */
@@ -36,7 +36,7 @@ export const PRESET_IMAGES = [
 export const MAX_HOLIDAY_CLASSES = 40;
 
 /** The longest span of dates one list asks for (API design 13.2). */
-export const MAX_RANGE_DAYS = 366;
+const MAX_RANGE_DAYS = 366;
 
 /** What an event holds that rules look at, as a request or a stored row has it. */
 export interface EventFields {

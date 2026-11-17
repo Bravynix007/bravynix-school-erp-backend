@@ -44,7 +44,7 @@ export interface EventsTable {
 }
 
 /** The predefined classes a holiday is limited to; no rows means every class. */
-export interface EventHolidayClassesTable {
+interface EventHolidayClassesTable {
   event_id: string;
   predefined_class_id: string;
   society_id: string;
