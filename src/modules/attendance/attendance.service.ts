@@ -21,9 +21,12 @@ import { IdempotencyService } from '../../platform/idempotency/index.js';
 import { PersonDirectory } from '../../platform/identity/index.js';
 import { Notifications, type Notice } from '../../platform/notifications/index.js';
 import { ScopeService, type InstitutionContext } from '../../platform/tenancy/index.js';
-import { AcademicYearDirectory, SectionDirectory } from '../academic-setup/index.js';
+import {
+  AcademicYearDirectory,
+  SectionDirectory,
+  StaffDirectory,
+} from '../academic-setup/index.js';
 import { HolidayCalendar } from '../events/index.js';
-import { AttendanceStaff } from './attendance-staff.js';
 import type {
   CorrectAttendanceDto,
   ListSessionsQueryDto,
@@ -74,7 +77,7 @@ export class AttendanceService {
     private readonly sections: SectionDirectory,
     private readonly holidays: HolidayCalendar,
     private readonly roster: SectionRoster,
-    private readonly staff: AttendanceStaff,
+    private readonly staff: StaffDirectory,
     private readonly people: PersonDirectory,
     private readonly idempotency: IdempotencyService,
     private readonly notifications: Notifications,

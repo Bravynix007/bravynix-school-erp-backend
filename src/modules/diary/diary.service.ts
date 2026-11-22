@@ -29,6 +29,7 @@ import {
 import {
   AcademicYearDirectory,
   SectionDirectory,
+  StaffDirectory,
   SubjectDirectory,
   TeachingStaff,
 } from '../academic-setup/index.js';
@@ -79,7 +80,8 @@ export class DiaryService {
     private readonly sections: SectionDirectory,
     private readonly subjects: SubjectDirectory,
     private readonly teaching: TeachingStaff,
-    private readonly staff: DiaryPeople,
+    private readonly staff: StaffDirectory,
+    private readonly diary: DiaryPeople,
     private readonly childContexts: ChildContexts,
     private readonly people: PersonDirectory,
     private readonly notifications: Notifications,
@@ -252,7 +254,7 @@ export class DiaryService {
   /** The section to read, inside its transaction: a parent's child's (`null` for a child in none) or the one named. */
   private async sectionOf(tx: Tx, principal: Principal, target: Target): Promise<string | null> {
     if (target.studentId !== undefined) {
-      return (await this.staff.currentSectionId(tx, target.studentId)) ?? null;
+      return (await this.diary.currentSectionId(tx, target.studentId)) ?? null;
     }
     if (principal.roleCode === RoleCode.TeacherStaff) {
       const own = await this.teaching.ownSectionIds(
@@ -275,7 +277,7 @@ export class DiaryService {
   ): Promise<void> {
     const allowed =
       own?.homeInstitutionId === institutionId &&
-      (await this.staff.mayWrite(tx, own.staffMemberId, yearId, place.sectionId, place.subjectId));
+      (await this.diary.mayWrite(tx, own.staffMemberId, yearId, place.sectionId, place.subjectId));
     if (!allowed) throw AppException.forbidden(ErrorCode.NOT_ASSIGNED);
   }
 
@@ -304,7 +306,7 @@ export class DiaryService {
     principal: Principal,
     today: string,
   ): Promise<void> {
-    const receivers = await this.staff.receiversOf(tx, entry.section_id, today);
+    const receivers = await this.diary.receiversOf(tx, entry.section_id, today);
     if (receivers.length === 0) return;
     await this.notifications.notify(
       tx,

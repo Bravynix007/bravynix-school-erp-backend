@@ -3,6 +3,7 @@ import { AppException } from '../../common/http/app-exception.js';
 import { ErrorCode, FieldErrorCode } from '../../common/http/error-codes.js';
 import type { FieldError } from '../../common/http/field-error.type.js';
 import { fieldError } from '../../common/validation/field-error.js';
+import type { YearSpan } from '../academic-setup/index.js';
 
 /** What a student's day can be marked (API design 9.7, DDD M3). Present is never stored: an unmarked student was Present. */
 export const AttendanceStatus = { Present: 1, Absent: 2, Late: 3, HalfDay: 4, Leave: 5 } as const;
@@ -52,12 +53,6 @@ export function requireEachStudentOnce(
     seen.add(mark.studentEnrolmentId);
   });
   if (errors.length > 0) throw AppException.validation(errors);
-}
-
-/** The first and last day of the current academic year, as the date rules need them. */
-export interface YearSpan {
-  startDate: string;
-  endDate: string;
 }
 
 /**

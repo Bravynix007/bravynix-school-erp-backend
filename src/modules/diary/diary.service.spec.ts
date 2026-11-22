@@ -13,6 +13,7 @@ import type {
 import type {
   AcademicYearDirectory,
   SectionDirectory,
+  StaffDirectory,
   SubjectDirectory,
   TeachingStaff,
 } from '../academic-setup/index.js';
@@ -118,14 +119,14 @@ function build(current: DiaryEntryRow | undefined = entry()) {
     .fn<TeachingStaff['ownSectionIds']>()
     .mockResolvedValue(new Set(['section-1']));
   const ownRecord = vi
-    .fn<DiaryPeople['ownRecord']>()
+    .fn<StaffDirectory['ownRecord']>()
     .mockResolvedValue({ staffMemberId: 'staff-1', homeInstitutionId: 'inst-1' });
   const mayWrite = vi.fn<DiaryPeople['mayWrite']>().mockResolvedValue(true);
   const teacherNames = vi
-    .fn<DiaryPeople['names']>()
+    .fn<StaffDirectory['names']>()
     .mockResolvedValue(new Map([['staff-1', 'Asha Rao']]));
   const parentNames = vi
-    .fn<DiaryPeople['namesForParent']>()
+    .fn<StaffDirectory['namesForParent']>()
     .mockResolvedValue(new Map([['staff-1', 'Asha Rao']]));
   const currentSectionId = vi.fn<DiaryPeople['currentSectionId']>().mockResolvedValue('section-1');
   const receiversOf = vi
@@ -146,14 +147,8 @@ function build(current: DiaryEntryRow | undefined = entry()) {
     } as unknown as SectionDirectory,
     { requireActive: requireSubject, names: subjectNames } as unknown as SubjectDirectory,
     { ownSectionIds } as unknown as TeachingStaff,
-    {
-      ownRecord,
-      mayWrite,
-      names: teacherNames,
-      namesForParent: parentNames,
-      currentSectionId,
-      receiversOf,
-    } as unknown as DiaryPeople,
+    { ownRecord, names: teacherNames, namesForParent: parentNames } as unknown as StaffDirectory,
+    { mayWrite, currentSectionId, receiversOf } as unknown as DiaryPeople,
     { of: childContextOf } as unknown as ChildContexts,
     {
       describe: vi.fn<PersonDirectory['describe']>().mockResolvedValue(new Map()),
@@ -349,6 +344,30 @@ describe('DiaryService.create', () => {
     expect(t.notify).not.toHaveBeenCalled();
   });
 
+  it('tells the guardians of the students placed in the section today, not on the day the entry is dated', async () => {
+    const t = build();
+    await t.service.create(admin, body({ diaryDate: '2026-11-12' }));
+    expect(t.receiversOf).toHaveBeenCalledWith(expect.anything(), 'section-1', '2026-11-17');
+    expect(t.notify).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ body: 'Maths: a diary entry for 12 Nov 2026.' }),
+      'person-1',
+    );
+  });
+
+  it('is 422 REFERENCE_INACTIVE for a section that is closed, and writes nothing', async () => {
+    const t = build();
+    t.requireSection.mockRejectedValue(AppException.referenceInactive('sectionId'));
+    expect(await refusal(t.service.create(admin, body()))).toMatchObject({
+      status: 422,
+      code: 'REFERENCE_INACTIVE',
+      fields: ['sectionId:REFERENCE_INACTIVE'],
+    });
+    expect(t.requireSection).toHaveBeenCalledWith(expect.anything(), 'section-1', 'sectionId');
+    expect(t.insert).not.toHaveBeenCalled();
+    expect(t.notify).not.toHaveBeenCalled();
+  });
+
   it('passes on what the directories refuse: a section out of reach, a closed subject, no current year', async () => {
     const t = build();
     t.requireSubject.mockRejectedValue(AppException.referenceInactive('subjectId'));
@@ -381,6 +400,12 @@ describe('DiaryService.update', () => {
       }),
     );
     expect(t.notify).not.toHaveBeenCalled();
+  });
+
+  it('reads the entry with the lock, so that two changes at once cannot both pass', async () => {
+    const t = build();
+    await t.service.update(admin, 'entry-1', { version: 1, description: 'Redo 4.2' });
+    expect(t.find).toHaveBeenCalledWith(expect.anything(), 'entry-1', true);
   });
 
   it('writes nothing for a request that changes nothing', async () => {
@@ -455,6 +480,12 @@ describe('DiaryService.deactivate', () => {
       expect.anything(),
       expect.objectContaining({ action: 'diary_entry.deactivated' }),
     );
+  });
+
+  it('reads the entry with the lock, so that two removals at once cannot both pass', async () => {
+    const t = build();
+    await t.service.deactivate(admin, 'entry-1');
+    expect(t.find).toHaveBeenCalledWith(expect.anything(), 'entry-1', true);
   });
 
   it('lets a teacher remove their own entry only, and is 404 for one already removed', async () => {

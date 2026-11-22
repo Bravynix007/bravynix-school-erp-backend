@@ -47,6 +47,9 @@ describe('CreateDiaryEntryDto', () => {
     expect(
       await problems(body(CreateDiaryEntryDto, { ...entry, description: 'x'.repeat(2001) })),
     ).toEqual([{ field: 'description', code: 'TOO_LONG' }]);
+    expect(await problems(body(CreateDiaryEntryDto, { ...entry, description: ' \t ' }))).toEqual([
+      { field: 'description', code: 'INVALID_FORMAT' },
+    ]);
   });
 
   it('refuses the wrong shapes and names each field', async () => {
@@ -95,6 +98,9 @@ describe('UpdateDiaryEntryDto', () => {
       { field: 'subjectId', code: 'INVALID_FORMAT' },
       { field: 'diaryDate', code: 'INVALID_FORMAT' },
       { field: 'description', code: 'TOO_SHORT' },
+    ]);
+    expect(await problems(body(UpdateDiaryEntryDto, { version: 1, description: '   ' }))).toEqual([
+      { field: 'description', code: 'INVALID_FORMAT' },
     ]);
   });
 });

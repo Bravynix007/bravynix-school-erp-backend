@@ -4,6 +4,12 @@ import { ErrorCode } from '../../common/http/error-codes.js';
 import type { Tx } from '../../platform/database/index.js';
 import { AcademicYearRepository } from './academic-year.repository.js';
 
+/** The first and last day of an academic year, as the date rules of Attendance and Diary need them. */
+export interface YearSpan {
+  startDate: string;
+  endDate: string;
+}
+
 /**
  * What the Academic setup module tells other modules about an Institution's academic years. The `academic_years`
  * table stays private to it (SDD 9.3 rule 1). It reads under the caller's row-level security.
@@ -30,7 +36,7 @@ export class AcademicYearDirectory {
     tx: Tx,
     yearId: string,
     institutionId: string,
-  ): Promise<{ open: boolean; startDate: string; endDate: string } | undefined> {
+  ): Promise<(YearSpan & { open: boolean }) | undefined> {
     const year = await this.years.find(tx, yearId);
     return year?.institution_id === institutionId
       ? { open: year.status === 1, startDate: year.start_date, endDate: year.end_date }
@@ -46,7 +52,7 @@ export class AcademicYearDirectory {
     institutionId: string,
     from: string,
     to: string,
-  ): Promise<{ id: string; startDate: string; endDate: string } | undefined> {
+  ): Promise<(YearSpan & { id: string }) | undefined> {
     const year = await this.years.overlapping(tx, institutionId, from, to);
     return year && { id: year.id, startDate: year.start_date, endDate: year.end_date };
   }

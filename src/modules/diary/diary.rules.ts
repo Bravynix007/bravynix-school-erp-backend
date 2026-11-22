@@ -2,18 +2,13 @@ import { HttpStatus } from '@nestjs/common';
 import { AppException } from '../../common/http/app-exception.js';
 import { ErrorCode } from '../../common/http/error-codes.js';
 import { addDays } from '../../common/time/calendar-days.js';
+import type { YearSpan } from '../academic-setup/index.js';
 
 /** How many days back an entry may be dated (PRD 7.9, DDD 9.7). */
 export const MAX_BACKDATE_DAYS = 7;
 
 /** The longest description (DDD 9.7). */
 export const MAX_DESCRIPTION_LENGTH = 2000;
-
-/** The first and last day of the academic year an entry is written in. */
-export interface YearSpan {
-  startDate: string;
-  endDate: string;
-}
 
 const refuse = (code: string): never => {
   throw new AppException(HttpStatus.UNPROCESSABLE_ENTITY, code);

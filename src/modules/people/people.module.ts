@@ -1,15 +1,15 @@
 import { Global, Module } from '@nestjs/common';
 import { ChildContexts } from '../../platform/tenancy/index.js';
-import {
-  AttendanceModule,
-  AttendanceStaff,
-  SectionRoster,
-  StudentAttendanceAccess,
-} from '../attendance/index.js';
+import { AttendanceModule, SectionRoster, StudentAttendanceAccess } from '../attendance/index.js';
 import { DiaryPeople } from '../diary/index.js';
 import { EventPeople } from '../events/index.js';
 import { TimetableChildren, TimetableStaff } from '../timetable/index.js';
-import { AcademicSetupModule, SectionStudents, TeachingStaff } from '../academic-setup/index.js';
+import {
+  AcademicSetupModule,
+  SectionStudents,
+  StaffDirectory,
+  TeachingStaff,
+} from '../academic-setup/index.js';
 import { FileReaders, FilesModule } from '../../platform/files/index.js';
 import { IdempotencyModule } from '../../platform/idempotency/index.js';
 import { JobsModule } from '../../platform/jobs/index.js';
@@ -40,7 +40,7 @@ import { PeopleEventPeople } from './people-event-people.js';
 import { PeopleFileReaders } from './people-file-readers.js';
 import { PeopleDiary } from './people-diary.js';
 import { PeopleTimetableChildren } from './people-timetable-children.js';
-import { PeopleAttendanceStaff } from './people-attendance-staff.js';
+import { PeopleStaffDirectory } from './people-staff-directory.js';
 import { PeopleStudentAttendance } from './people-student-attendance.js';
 import { PeopleSectionRoster } from './people-section-roster.js';
 import { PeopleTimetableStaff } from './people-timetable-staff.js';
@@ -141,8 +141,8 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
     { provide: SectionRoster, useExisting: PeopleSectionRoster },
     PeopleStudentAttendance,
     { provide: StudentAttendanceAccess, useExisting: PeopleStudentAttendance },
-    PeopleAttendanceStaff,
-    { provide: AttendanceStaff, useExisting: PeopleAttendanceStaff },
+    PeopleStaffDirectory,
+    { provide: StaffDirectory, useExisting: PeopleStaffDirectory },
   ],
   exports: [
     TeachingStaff,
@@ -155,7 +155,7 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
     TimetableStaff,
     SectionRoster,
     StudentAttendanceAccess,
-    AttendanceStaff,
+    StaffDirectory,
   ],
 })
 export class PeopleModule {}

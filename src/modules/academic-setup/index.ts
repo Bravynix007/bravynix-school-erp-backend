@@ -1,7 +1,8 @@
 export { AcademicSetupModule } from './academic-setup.module.js';
-export { AcademicYearDirectory } from './academic-year-directory.js';
+export { AcademicYearDirectory, type YearSpan } from './academic-year-directory.js';
 export { ClassDirectory } from './class-directory.js';
 export { SectionStudents } from './section-students.js';
 export { SectionDirectory, type OpenSection, type SectionName } from './section-directory.js';
+export { StaffDirectory } from './staff-directory.js';
 export { SubjectDirectory } from './subject-directory.js';
 export { TeachingStaff, type ClassTeacherRef } from './teaching-staff.js';

@@ -1,6 +1,6 @@
 import { sql, Kysely, PostgresDialect } from 'kysely';
 import { newId } from '../../src/common/ids/ids.js';
-import { DatabaseService } from '../../src/platform/database/index.js';
+import { DatabaseService, type Tx } from '../../src/platform/database/index.js';
 import { createPool } from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
 import { JobRunner } from '../../src/platform/jobs/index.js';
@@ -67,6 +67,7 @@ describe('DIA-01 to DIA-04 the diary (API design 10.14a)', () => {
   let year: string;
   let sectionA: string;
   let sectionB: string;
+  let sectionC: string;
   let maths: string;
   let english: string;
   let owner: SignedInPerson;
@@ -121,6 +122,12 @@ describe('DIA-01 to DIA-04 the diary (API design 10.14a)', () => {
       // the worker drains the queue
     }
   };
+  /** What a staff session of these Institutions of the Society reads and can touch. */
+  const asStaffOf = <T>(institutionIds: string[], work: (tx: Tx) => Promise<T>) =>
+    database.transaction(
+      { societyId: societyA, institutionIds, roleCode: 3, personId: owner.person },
+      work,
+    );
   const asParent = <T>(childIds: string[], query: string) =>
     database.transaction(
       { personId: newId(), roleCode: PARENT, childIds },
@@ -174,6 +181,7 @@ describe('DIA-01 to DIA-04 the diary (API design 10.14a)', () => {
       kit.section(owner.token, classId, predefinedSections.find((s) => s.code === code)!.id);
     sectionA = await sectionOf('A');
     sectionB = await sectionOf('B');
+    sectionC = await sectionOf('C');
     maths = await kit.subject(owner.token, 'Mathematics');
     english = await kit.subject(owner.token, 'English');
     const person = (name: string, home = first) =>
@@ -321,6 +329,10 @@ describe('DIA-01 to DIA-04 the diary (API design 10.14a)', () => {
       const res = await add({ subjectId: english });
       expect([res.status, res.body.code]).toEqual([422, 'REFERENCE_INACTIVE']);
       expect(fieldsOf(res)).toEqual({ subjectId: 'REFERENCE_INACTIVE' });
+      succeeded(await api('delete', `/v1/sections/${sectionC}`, owner.token), 200, 'section');
+      const closed = await add({ sectionId: sectionC });
+      expect([closed.status, closed.body.code]).toEqual([422, 'REFERENCE_INACTIVE']);
+      expect(fieldsOf(closed)).toEqual({ sectionId: 'REFERENCE_INACTIVE' });
     });
 
     it('audits the entry and tells the section’s parents once, and no other section’s', async () => {
@@ -347,6 +359,37 @@ describe('DIA-01 to DIA-04 the diary (API design 10.14a)', () => {
       ]);
       const other = await api('get', '/v1/notifications?tab=1&limit=50', parentB);
       expect(other.body.data).toEqual([]);
+    });
+  });
+
+  describe('DIA-02 the notice for an older day', () => {
+    it('tells the guardians of the students in the section now, not of those who sat in it on the day', async () => {
+      // On the 12th childA sat in section A and childB in section B; today they have swapped places.
+      await rows(
+        `update student_section_placements set start_date = '2026-11-01' where section_id in ('${sectionA}', '${sectionB}')`,
+      );
+      const swap = async (studentId: string, sectionId: string) =>
+        succeeded(
+          await api('patch', `/v1/students/${studentId}/placement`, owner.token, {
+            sectionId,
+            rollNumber: '7',
+          }),
+          200,
+          'move',
+        );
+      await swap(childA, sectionB);
+      await swap(childB, sectionA);
+      await added({ diaryDate: '2026-11-12' });
+      await drain();
+      const told = async (token: string) =>
+        (await api('get', '/v1/notifications?tab=1&limit=50', token)).body.data;
+      expect(await told(parentB)).toEqual([
+        expect.objectContaining({
+          body: 'Mathematics: a diary entry for 12 Nov 2026.',
+          studentId: childB,
+        }),
+      ]);
+      expect(await told(parentA)).toEqual([]);
     });
   });
 
@@ -521,6 +564,69 @@ describe('DIA-01 to DIA-04 the diary (API design 10.14a)', () => {
   });
 
   describe('the table (row-level security)', () => {
+    it('keeps another Institution’s diary from staff of the same Society: not read, not added, not changed', async () => {
+      const made = await added();
+      const idsOf = (institutionIds: string[]) =>
+        asStaffOf(institutionIds, async (tx) =>
+          (await sql<{ id: string }>`select id from diary_entries`.execute(tx)).rows.map(
+            (row) => row.id,
+          ),
+        );
+      expect(await idsOf([first])).toEqual([made.id]);
+      expect(await idsOf([second])).toEqual([]);
+      await expect(
+        asStaffOf([second], (tx) =>
+          sql`insert into diary_entries (society_id, institution_id, academic_year_id, section_id, subject_id, diary_date, description)
+                values (${societyA}, ${first}, ${year}, ${sectionA}, ${maths}, ${TODAY}, 'Sneaked in.')`.execute(
+            tx,
+          ),
+        ),
+      ).rejects.toMatchObject({ code: '42501' });
+      const changed = await asStaffOf([second], (tx) =>
+        sql`update diary_entries set description = 'Changed.' where id = ${made.id}`.execute(tx),
+      );
+      expect(changed.numAffectedRows).toBe(0n);
+      expect(
+        (await listed(`sectionId=${sectionA}&date=${TODAY}`)).map((e) => e.description),
+      ).toEqual([made.description]);
+    });
+
+    it('shows a parent the entries of the section their child sits in now, and none of a section they left', async () => {
+      const inA = await added();
+      const inB = await added({ sectionId: sectionB });
+      expect(
+        (await asParent<{ id: string }>([childA], 'select id from diary_entries')).map((r) => r.id),
+      ).toEqual([inA.id]);
+      succeeded(
+        await api('patch', `/v1/students/${childA}/placement`, owner.token, {
+          sectionId: sectionB,
+          rollNumber: '1',
+        }),
+        200,
+        'move',
+      );
+      expect(
+        (await asParent<{ id: string }>([childA], 'select id from diary_entries')).map((r) => r.id),
+      ).toEqual([inB.id]);
+    });
+
+    it('shows a parent nothing of a child whose enrolment is no longer active', async () => {
+      await added();
+      expect(await asParent([childA], 'select id from diary_entries')).toHaveLength(1);
+      await rows(`update student_enrolments set status = 0 where student_id = '${childA}'`);
+      expect(await asParent([childA], 'select id from diary_entries')).toEqual([]);
+    });
+
+    it('keeps the author to a teacher whose home is the entry’s Institution (23503)', async () => {
+      const insert = (staffMemberId: string) =>
+        rows(
+          `insert into diary_entries (society_id, institution_id, academic_year_id, section_id, subject_id, staff_member_id, diary_date, description)
+           values ('${societyA}', '${first}', '${year}', '${sectionA}', '${maths}', '${staffMemberId}', '${TODAY}', 'Exercise 4.2')`,
+        );
+      await expect(insert(dev.id)).rejects.toMatchObject({ code: '23503' });
+      await expect(insert(anna.id)).resolves.toBeDefined();
+    });
+
     it('shows a parent the active entries of their child’s section and nothing else', async () => {
       const inA = await added();
       const gone = await added({ description: 'Removed.' });
