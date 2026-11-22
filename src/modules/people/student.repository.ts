@@ -321,6 +321,16 @@ export class StudentRepository {
       .executeTakeFirst();
   }
 
+  /** When the placement was made: a register taken before that did not count the student (DDD 13.2). */
+  async placedAt(tx: Tx, placementId: string): Promise<Date> {
+    const row = await tx
+      .selectFrom('student_section_placements')
+      .select('created_at')
+      .where('id', '=', placementId)
+      .executeTakeFirstOrThrow();
+    return row.created_at;
+  }
+
   /** The students of the source whose placement is open, with every filter of a promotion applied. */
   private inSource(tx: Tx, source: PromotionSource) {
     let query = tx
@@ -451,7 +461,11 @@ export class StudentRepository {
       .where('e.status', '=', 1)
       .where((eb) => eb.or([eb('e.left_date', 'is', null), eb('e.left_date', '>=', date)]))
       .where('s.status', '=', 1)
-      .$if(placedBefore !== undefined, (query) => query.where('p.created_at', '<=', placedBefore!))
+      // The cut-off comes from a JavaScript Date, which keeps milliseconds only; the stored time keeps microseconds, so a
+      // placement made in the same millisecond as the session (as the seed does) must not fall after it.
+      .$if(placedBefore !== undefined, (query) =>
+        query.where(sql`date_trunc('milliseconds', p.created_at)`, '<=', placedBefore!),
+      )
       .orderBy(sql`length(p.roll_number)`)
       .orderBy('p.roll_number')
       .orderBy('e.id')

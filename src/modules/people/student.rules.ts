@@ -1,5 +1,6 @@
 import { AppException, type FieldError } from '../../common/http/app-exception.js';
 import { ErrorCode, FieldErrorCode } from '../../common/http/error-codes.js';
+import { addDays } from '../../common/time/calendar-days.js';
 import { fieldError } from '../../common/validation/field-error.js';
 import type { AuditValues } from '../../platform/audit/index.js';
 import type { GuardianDto } from './student.dto.js';
@@ -73,11 +74,21 @@ export function requireValidStudent(input: StudentRuleInput, today: string): voi
 }
 
 /**
- * STU-08: the last day a move can take effect: today, or the day the current placement begins when that is later (a
- * child placed from a later day, as one admitted ahead, is corrected in place), and never after the year ends.
+ * STU-08: the day a move takes effect when none is sent: today, or the day the current placement begins when that is
+ * later (a child placed from a later day, as one admitted ahead, is corrected in place), and never after the year ends.
+ */
+export function defaultMoveDate(currentStart: string, today: string, yearEnd: string): string {
+  const day = today > currentStart ? today : currentStart;
+  return day < yearEnd ? day : yearEnd;
+}
+
+/**
+ * STU-08: the last day a move can be dated: tomorrow, so that a move after today's register takes effect from the next
+ * day, or the day the current placement begins when that is later, and never after the year ends.
  */
 export function latestMoveDate(currentStart: string, today: string, yearEnd: string): string {
-  const latest = today > currentStart ? today : currentStart;
+  const tomorrow = addDays(today, 1);
+  const latest = tomorrow > currentStart ? tomorrow : currentStart;
   return latest < yearEnd ? latest : yearEnd;
 }
 

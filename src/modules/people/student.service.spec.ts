@@ -15,6 +15,7 @@ import type {
   SectionDirectory,
 } from '../academic-setup/index.js';
 import type { StudentClassroomService } from './student-classroom.service.js';
+import type { AttendanceRegisters } from '../attendance/index.js';
 import type { ChildAccess } from './child-access.js';
 import { StudentContext } from './student-context.js';
 import {
@@ -55,7 +56,12 @@ const fail = async (work: Promise<unknown>) => {
     await work;
   } catch (error) {
     if (error instanceof AppException) {
-      return { status: error.status as number, code: error.code, fields: error.options.errors };
+      return {
+        status: error.status as number,
+        code: error.code,
+        fields: error.options.errors,
+        details: error.options.details,
+      };
     }
     throw error;
   }
@@ -183,6 +189,12 @@ function build(found: StudentRow | null = row()) {
     .mockResolvedValue(undefined);
   const isBelow = vi.fn<ClassDirectory['isBelow']>().mockResolvedValue(false);
   const placedNow = vi.fn<StudentRepository['placedNow']>().mockResolvedValue(placedRow);
+  const placedAt = vi
+    .fn<StudentRepository['placedAt']>()
+    .mockResolvedValue(new Date('2026-11-01T05:00:00.000Z'));
+  const latestTakenDay = vi
+    .fn<AttendanceRegisters['latestTakenDay']>()
+    .mockResolvedValue(undefined);
   const sectionCount = vi.fn<StudentRepository['sectionCount']>().mockResolvedValue(1);
   const page = vi
     .fn<StudentRepository['page']>()
@@ -242,6 +254,7 @@ function build(found: StudentRow | null = row()) {
     updateOtherPlacements,
     previousEnrolment,
     placedNow,
+    placedAt,
     sectionCount,
     page,
   } as unknown as StudentRepository;
@@ -286,6 +299,7 @@ function build(found: StudentRow | null = row()) {
     { list: classroomList, get: classroomGet } as unknown as StudentClassroomService,
     { find: identityFind } as unknown as StudentIdentityRepository,
     { seal, write: writeIdentity } as unknown as StudentIdentityService,
+    { latestTakenDay } as unknown as AttendanceRegisters,
   );
   return {
     service,
@@ -307,6 +321,8 @@ function build(found: StudentRow | null = row()) {
     previousEnrolment,
     isBelow,
     placedNow,
+    placedAt,
+    latestTakenDay,
     sectionCount,
     page,
     identityFind,
@@ -1417,10 +1433,22 @@ describe('StudentService', () => {
       expect(moved.data.placement).toMatchObject({ sectionId: 'section-1', rollNumber: '14' });
     });
 
-    it('refuses a day in the future or before the current placement began', async () => {
+    it('takes tomorrow as the day, so a move after today’s register ends the old placement today', async () => {
+      const t = build();
+      t.openPlacement.mockResolvedValue(openAt('2026-06-01'));
+      await t.service.move(
+        owner,
+        'student-1',
+        move({ rollNumber: '15', effectiveDate: '2026-11-12' }),
+      );
+      expect(t.updatePlacement.mock.calls[0]![2]).toMatchObject({ end_date: '2026-11-11' });
+      expect(t.insertPlacement.mock.calls[0]![1]).toMatchObject({ start_date: '2026-11-12' });
+    });
+
+    it('refuses a day after tomorrow or before the current placement began', async () => {
       const t = build();
       t.openPlacement.mockResolvedValue(openAt('2026-11-05'));
-      for (const effectiveDate of ['2026-11-12', '2026-11-04']) {
+      for (const effectiveDate of ['2026-11-13', '2026-11-04']) {
         const refused = await fail(
           t.service.move(owner, 'student-1', move({ rollNumber: '15', effectiveDate })),
         );
@@ -1428,6 +1456,48 @@ describe('StudentService', () => {
         expect(refused.fields).toEqual([expect.objectContaining({ field: 'effectiveDate' })]);
       }
       expect(t.updatePlacement).not.toHaveBeenCalled();
+    });
+
+    it('asks the registers about the old section from the day of a move to another section, and moves when none was taken', async () => {
+      const t = build();
+      t.openPlacement.mockResolvedValue(openAt('2026-06-01'));
+      await t.service.move(
+        owner,
+        'student-1',
+        move({ sectionId: 'section-2', effectiveDate: '2026-11-12' }),
+      );
+      expect(t.placedAt).toHaveBeenCalledWith(expect.anything(), 'placement-1');
+      expect(t.latestTakenDay).toHaveBeenCalledWith(
+        expect.anything(),
+        'section-1',
+        '2026-11-12',
+        new Date('2026-11-01T05:00:00.000Z'),
+      );
+      expect(t.insertPlacement).toHaveBeenCalledTimes(1);
+    });
+
+    it('is 409 ATTENDANCE_TAKEN, naming the latest day, for a move over a day the old register was taken, and writes nothing', async () => {
+      const t = build();
+      t.openPlacement.mockResolvedValue(openAt('2026-06-01'));
+      t.latestTakenDay.mockResolvedValue('2026-11-11');
+      const refused = await fail(
+        t.service.move(owner, 'student-1', move({ sectionId: 'section-2' })),
+      );
+      expect(refused).toMatchObject({
+        status: 409,
+        code: 'ATTENDANCE_TAKEN',
+        details: { attendanceDate: '2026-11-11' },
+      });
+      expect(t.updatePlacement).not.toHaveBeenCalled();
+      expect(t.insertPlacement).not.toHaveBeenCalled();
+      expect(t.record).not.toHaveBeenCalled();
+    });
+
+    it('does not ask the registers for a change of roll number alone, which leaves the section’s roster as it is', async () => {
+      const t = build();
+      t.openPlacement.mockResolvedValue(openAt('2026-06-01'));
+      await t.service.move(owner, 'student-1', move({ rollNumber: '15' }));
+      expect(t.latestTakenDay).not.toHaveBeenCalled();
     });
 
     it('corrects in place, on its first day, a placement that begins later (a child admitted ahead)', async () => {

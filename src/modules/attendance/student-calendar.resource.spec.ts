@@ -73,13 +73,16 @@ describe('dayResource', () => {
     });
   });
 
-  it('has no section and no marker for a day with neither, and shows a marker who has gone as Unknown', () => {
+  it('has no section for a day without a placement, and no marker for a day nobody marked', () => {
     expect(dayResource(unmarked, undefined, people)).toMatchObject({
       section: null,
       markedBy: null,
       markedAt: null,
       lastCorrectedAt: null,
     });
+  });
+
+  it('keeps the section id but no names when the reader may not see them, and shows a marker who has gone as Unknown', () => {
     expect(
       dayResource(
         { ...marked, session: { ...marked.session!, lastCorrectedAt: null } },
@@ -87,7 +90,7 @@ describe('dayResource', () => {
         new Map(),
       ),
     ).toMatchObject({
-      section: null,
+      section: { id: 'section-1', name: null, className: null },
       markedBy: { id: 'person-1', displayName: 'Unknown' },
       lastCorrectedAt: null,
     });

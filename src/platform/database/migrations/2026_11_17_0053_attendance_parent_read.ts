@@ -8,6 +8,8 @@ import { sql, type Kysely } from 'kysely';
  *   and leaves and nothing of any classmate;
  * - `attendance_sessions`: the sessions of the sections the child sits or sat in, which a calendar needs to say which
  *   days were marked at all. A session shows its counts and who submitted it, and no student.
+ * - `classes`: the classes the child sits or sat in, so that a holiday limited to some classes is told on the child's
+ *   calendar as it is for staff (QA B8 D1). The class name stays out of the parent's answers, as the sections do.
  *
  * The enrolments and the placements are read through their own child policies, so a policy never reads the table it
  * guards. Nothing is written: the tables have no INSERT, UPDATE or DELETE policy for role 5.
@@ -32,6 +34,18 @@ export async function up(db: Kysely<unknown>): Promise<void> {
         )
       )
   `.execute(db);
+  await sql`
+    create policy classes_select_child on classes for select
+      using (
+        app_current_role_code() = 5
+        and id in (
+          select p.class_id
+          from student_section_placements p
+          join student_enrolments e on e.id = p.student_enrolment_id
+          where e.student_id = any (app_current_child_ids())
+        )
+      )
+  `.execute(db);
 }
 
 export async function down(db: Kysely<unknown>): Promise<void> {
@@ -39,6 +53,7 @@ export async function down(db: Kysely<unknown>): Promise<void> {
   if (process.env.NODE_ENV === 'production') {
     throw new Error('Refusing to drop the attendance parent read in production');
   }
+  await sql`drop policy if exists classes_select_child on classes`.execute(db);
   await sql`drop policy if exists attendance_sessions_select_child on attendance_sessions`.execute(
     db,
   );
