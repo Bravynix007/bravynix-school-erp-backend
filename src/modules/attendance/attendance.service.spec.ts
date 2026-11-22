@@ -713,7 +713,8 @@ describe('AttendanceService.correct', () => {
       expect.anything(),
       expect.objectContaining({
         sourceKey: 'absent:session-1:enrolment-1',
-        occurredAt: new Date('2026-11-17T06:00:00.000Z'),
+        // dated by the submission, as the first alert is, so the inbox tells a child Absent again once (QA B7 D1)
+        occurredAt: new Date('2026-11-17T04:00:00.000Z'),
         receivers: [{ userId: 'guardian-1', studentId: 'student-1' }],
       }),
       'person-1',
