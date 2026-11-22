@@ -1,6 +1,11 @@
 import { Global, Module } from '@nestjs/common';
 import { ChildContexts } from '../../platform/tenancy/index.js';
-import { AttendanceStaff, SectionRoster, StudentAttendanceAccess } from '../attendance/index.js';
+import {
+  AttendanceModule,
+  AttendanceStaff,
+  SectionRoster,
+  StudentAttendanceAccess,
+} from '../attendance/index.js';
 import { EventPeople } from '../events/index.js';
 import { TimetableChildren, TimetableStaff } from '../timetable/index.js';
 import { AcademicSetupModule, SectionStudents, TeachingStaff } from '../academic-setup/index.js';
@@ -64,7 +69,14 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
  */
 @Global()
 @Module({
-  imports: [MastersModule, FilesModule, AcademicSetupModule, IdempotencyModule, JobsModule],
+  imports: [
+    MastersModule,
+    FilesModule,
+    AcademicSetupModule,
+    AttendanceModule,
+    IdempotencyModule,
+    JobsModule,
+  ],
   controllers: [
     StaffController,
     StaffIdentityController,

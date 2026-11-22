@@ -109,6 +109,8 @@ const en: Catalogue = {
   // Attendance (API design 10.10, 10.11)
   ATTENDANCE_ALREADY_SUBMITTED: 'Attendance for this section and date has already been submitted',
   SESSION_VOIDED: 'This attendance session was voided and can no longer be changed',
+  ATTENDANCE_TAKEN:
+    'The student’s section already has attendance taken from that date; date the move after it, or void that day’s attendance first',
   ROSTER_CHANGED: 'The students of this section changed; reload the list and mark again',
   DATE_IN_FUTURE: 'Attendance cannot be marked for a day that has not come',
   DATE_OUTSIDE_CURRENT_YEAR: 'This date is outside the current academic year',

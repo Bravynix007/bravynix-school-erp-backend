@@ -1039,9 +1039,24 @@ describe('students: add, read and list', () => {
       ).toEqual([]);
     });
 
-    it('refuses a day in the future or before the placement began', async () => {
+    it('takes tomorrow, so a move after today’s register begins the next day', async () => {
       const student = await sinceMay();
-      for (const effectiveDate of ['2026-06-02', '2026-04-30']) {
+      const res = await move(student.id, { rollNumber: '8', effectiveDate: '2026-06-02' });
+      expect(res.status).toBe(200);
+      expect(await placements(student.id)).toEqual([
+        {
+          section_id: sectionA,
+          roll_number: '7',
+          start_date: '2026-05-01',
+          end_date: '2026-06-01',
+        },
+        { section_id: sectionA, roll_number: '8', start_date: '2026-06-02', end_date: null },
+      ]);
+    });
+
+    it('refuses a day after tomorrow or before the placement began', async () => {
+      const student = await sinceMay();
+      for (const effectiveDate of ['2026-06-03', '2026-04-30']) {
         const res = await move(student.id, { rollNumber: '8', effectiveDate });
         expect([res.status, fieldCodes(res)]).toEqual([
           400,

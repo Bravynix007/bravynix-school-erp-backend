@@ -321,6 +321,16 @@ export class StudentRepository {
       .executeTakeFirst();
   }
 
+  /** When the placement was made: a register taken before that did not count the student (DDD 13.2). */
+  async placedAt(tx: Tx, placementId: string): Promise<Date> {
+    const row = await tx
+      .selectFrom('student_section_placements')
+      .select('created_at')
+      .where('id', '=', placementId)
+      .executeTakeFirstOrThrow();
+    return row.created_at;
+  }
+
   /** The students of the source whose placement is open, with every filter of a promotion applied. */
   private inSource(tx: Tx, source: PromotionSource) {
     let query = tx

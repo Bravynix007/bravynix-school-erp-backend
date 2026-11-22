@@ -3,6 +3,7 @@ import type { GuardianRow, PlacedRow, StudentRow } from './student.repository.js
 import {
   enrolmentAuditView,
   guardianAuditView,
+  defaultMoveDate,
   latestMoveDate,
   requireValidDates,
   requireValidMoveDate,
@@ -378,8 +379,14 @@ describe('requireValidMoveDate', () => {
     }
   });
 
-  it('refuses a day in the future and a day before the placement began', () => {
-    for (const day of ['2026-11-12', '2026-11-04']) {
+  it('takes tomorrow, for a move after today’s register', () => {
+    expect(
+      refused(() => requireValidMoveDate('2026-11-12', '2026-11-05', '2026-11-11', END)),
+    ).toBeNull();
+  });
+
+  it('refuses a day after tomorrow and a day before the placement began', () => {
+    for (const day of ['2026-11-13', '2026-11-04']) {
       expect(refused(() => requireValidMoveDate(day, '2026-11-05', '2026-11-11', END))).toEqual({
         status: 400,
         fields: [{ field: 'effectiveDate', code: 'INVALID_VALUE' }],
@@ -391,7 +398,7 @@ describe('requireValidMoveDate', () => {
     expect(
       refused(() => requireValidMoveDate('2026-12-01', '2026-12-01', '2026-11-11', END)),
     ).toBeNull();
-    for (const day of ['2026-11-11', '2026-12-02']) {
+    for (const day of ['2026-11-12', '2026-12-02']) {
       expect(
         refused(() => requireValidMoveDate(day, '2026-12-01', '2026-11-11', END)),
       ).not.toBeNull();
@@ -411,10 +418,19 @@ describe('requireValidMoveDate', () => {
   });
 });
 
-describe('latestMoveDate', () => {
+describe('defaultMoveDate', () => {
   it('is today, the later first day of the placement, or the end of the year, whichever comes first', () => {
-    expect(latestMoveDate('2026-06-15', '2026-11-11', '2027-03-31')).toBe('2026-11-11');
+    expect(defaultMoveDate('2026-06-15', '2026-11-11', '2027-03-31')).toBe('2026-11-11');
+    expect(defaultMoveDate('2026-12-01', '2026-11-11', '2027-03-31')).toBe('2026-12-01');
+    expect(defaultMoveDate('2026-06-15', '2027-04-05', '2027-03-31')).toBe('2027-03-31');
+  });
+});
+
+describe('latestMoveDate', () => {
+  it('is tomorrow, the later first day of the placement, or the end of the year, whichever comes first', () => {
+    expect(latestMoveDate('2026-06-15', '2026-11-11', '2027-03-31')).toBe('2026-11-12');
     expect(latestMoveDate('2026-12-01', '2026-11-11', '2027-03-31')).toBe('2026-12-01');
+    expect(latestMoveDate('2026-06-15', '2027-03-31', '2027-03-31')).toBe('2027-03-31');
     expect(latestMoveDate('2026-06-15', '2027-04-05', '2027-03-31')).toBe('2027-03-31');
   });
 });
