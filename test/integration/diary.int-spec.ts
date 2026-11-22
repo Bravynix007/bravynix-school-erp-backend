@@ -128,6 +128,22 @@ describe('DIA-01 to DIA-04 the diary (API design 10.14a)', () => {
       { societyId: societyA, institutionIds, roleCode: 3, personId: owner.person },
       work,
     );
+  const moveTo = async (studentId: string, sectionId: string) =>
+    succeeded(
+      await api('patch', `/v1/students/${studentId}/placement`, owner.token, {
+        sectionId,
+        rollNumber: '7',
+      }),
+      200,
+      'move',
+    );
+  const inboxOf = async (token: string) =>
+    (await api('get', '/v1/notifications?tab=1&limit=50', token)).body.data;
+  const insertEntryBy = (staffMemberId: string) =>
+    rows(
+      `insert into diary_entries (society_id, institution_id, academic_year_id, section_id, subject_id, staff_member_id, diary_date, description)
+       values ('${societyA}', '${first}', '${year}', '${sectionA}', '${maths}', '${staffMemberId}', '${TODAY}', 'Exercise 4.2')`,
+    );
   const asParent = <T>(childIds: string[], query: string) =>
     database.transaction(
       { personId: newId(), roleCode: PARENT, childIds },
@@ -368,28 +384,17 @@ describe('DIA-01 to DIA-04 the diary (API design 10.14a)', () => {
       await rows(
         `update student_section_placements set start_date = '2026-11-01' where section_id in ('${sectionA}', '${sectionB}')`,
       );
-      const swap = async (studentId: string, sectionId: string) =>
-        succeeded(
-          await api('patch', `/v1/students/${studentId}/placement`, owner.token, {
-            sectionId,
-            rollNumber: '7',
-          }),
-          200,
-          'move',
-        );
-      await swap(childA, sectionB);
-      await swap(childB, sectionA);
+      await moveTo(childA, sectionB);
+      await moveTo(childB, sectionA);
       await added({ diaryDate: '2026-11-12' });
       await drain();
-      const told = async (token: string) =>
-        (await api('get', '/v1/notifications?tab=1&limit=50', token)).body.data;
-      expect(await told(parentB)).toEqual([
+      expect(await inboxOf(parentB)).toEqual([
         expect.objectContaining({
           body: 'Mathematics: a diary entry for 12 Nov 2026.',
           studentId: childB,
         }),
       ]);
-      expect(await told(parentA)).toEqual([]);
+      expect(await inboxOf(parentA)).toEqual([]);
     });
   });
 
@@ -618,13 +623,8 @@ describe('DIA-01 to DIA-04 the diary (API design 10.14a)', () => {
     });
 
     it('keeps the author to a teacher whose home is the entry’s Institution (23503)', async () => {
-      const insert = (staffMemberId: string) =>
-        rows(
-          `insert into diary_entries (society_id, institution_id, academic_year_id, section_id, subject_id, staff_member_id, diary_date, description)
-           values ('${societyA}', '${first}', '${year}', '${sectionA}', '${maths}', '${staffMemberId}', '${TODAY}', 'Exercise 4.2')`,
-        );
-      await expect(insert(dev.id)).rejects.toMatchObject({ code: '23503' });
-      await expect(insert(anna.id)).resolves.toBeDefined();
+      await expect(insertEntryBy(dev.id)).rejects.toMatchObject({ code: '23503' });
+      await expect(insertEntryBy(anna.id)).resolves.toBeDefined();
     });
 
     it('shows a parent the active entries of their child’s section and nothing else', async () => {
