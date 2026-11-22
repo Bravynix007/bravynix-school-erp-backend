@@ -451,7 +451,11 @@ export class StudentRepository {
       .where('e.status', '=', 1)
       .where((eb) => eb.or([eb('e.left_date', 'is', null), eb('e.left_date', '>=', date)]))
       .where('s.status', '=', 1)
-      .$if(placedBefore !== undefined, (query) => query.where('p.created_at', '<=', placedBefore!))
+      // The cut-off comes from a JavaScript Date, which keeps milliseconds only; the stored time keeps microseconds, so a
+      // placement made in the same millisecond as the session (as the seed does) must not fall after it.
+      .$if(placedBefore !== undefined, (query) =>
+        query.where(sql`date_trunc('milliseconds', p.created_at)`, '<=', placedBefore!),
+      )
       .orderBy(sql`length(p.roll_number)`)
       .orderBy('p.roll_number')
       .orderBy('e.id')
