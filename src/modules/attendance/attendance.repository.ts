@@ -31,6 +31,17 @@ export class AttendanceRepository {
   }
 
   /**
+   * Holds the section's register until the transaction ends. A submit (ATT-02) and a move out of the section (STU-08)
+   * both take it before they read, so the one that comes second sees what the first wrote: the submit then counts the
+   * roster without the student, or the move sees the register taken (QA B6 D1, two requests at once).
+   */
+  async lockRegister(tx: Tx, sectionId: string): Promise<void> {
+    await sql`select pg_advisory_xact_lock(hashtextextended(${`attendance-register:${sectionId}`}, 0))`.execute(
+      tx,
+    );
+  }
+
+  /**
    * The latest day on or after `from` on which the section's attendance was taken (an active session) after `placedAt`,
    * the time a student was placed in the section: the student was on that session's roster (DDD 13.2). The stored time
    * keeps microseconds and `placedAt` milliseconds, so the stored time is cut to milliseconds as the roster does.
