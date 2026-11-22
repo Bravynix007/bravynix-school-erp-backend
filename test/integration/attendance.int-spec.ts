@@ -978,6 +978,27 @@ describe('ATT-01 to ATT-04 mark attendance (API design 10.10, 10.11)', () => {
       expect(inbox.body.data).toHaveLength(1);
     });
 
+    it('tells a guardian once when a child submitted Absent is corrected Absent again later in the day (QA B7 D1)', async () => {
+      const session = await submitted();
+      expect(await keys()).toEqual([`absent:${session.id}:${enrolments.bea}`]);
+      t.clock.set(`${TODAY}T01:05:00.000Z`);
+      succeeded(
+        await correct(session.id, { version: 1, changes: [change('bea', 1)] }),
+        200,
+        'present',
+      );
+      t.clock.set(`${TODAY}T01:10:00.000Z`);
+      succeeded(
+        await correct(session.id, { version: 2, changes: [change('bea', 2)] }),
+        200,
+        'absent again',
+      );
+      await drain();
+      await drain();
+      const inbox = await api('get', '/v1/notifications?tab=1&limit=50', parentToken);
+      expect(inbox.body.data).toHaveLength(1);
+    });
+
     it('is 409 VERSION_CONFLICT for an old version, naming the current one, and 400 without one', async () => {
       const session = await submitted();
       succeeded(

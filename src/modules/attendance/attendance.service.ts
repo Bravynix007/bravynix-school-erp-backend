@@ -360,7 +360,9 @@ export class AttendanceService {
         outcome.changes
           .filter((change) => change.after === AttendanceStatus.Absent)
           .map((change) => change.studentEnrolmentId),
-        correction.at,
+        // Dated by the submission, as the first alert is: the inbox keys a notice by its source key and time, so a
+        // child marked Absent again is told once (API design 10.12).
+        updated.submitted_at,
       );
       return sessionResource(updated, names, people);
     });
