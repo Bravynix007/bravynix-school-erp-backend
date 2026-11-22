@@ -9,12 +9,14 @@ import { UuidParamPipe } from '../../common/http/uuid-param.pipe.js';
 import { VersionedStatedReasonDto } from '../../common/validation/reason.dto.js';
 import { IDEMPOTENCY_HEADER } from '../../platform/idempotency/index.js';
 import {
+  AttendanceSectionsQueryDto,
   CorrectAttendanceDto,
   ListSessionsQueryDto,
   RosterQueryDto,
   SubmitAttendanceDto,
 } from './attendance.dto.js';
 import type {
+  AttendanceClassResource,
   AttendanceSessionDetailResource,
   AttendanceSessionResource,
   RosterResource,
@@ -29,6 +31,20 @@ const MARKERS = [RoleCode.SocietyOwner, RoleCode.InstitutionAdmin, RoleCode.Teac
 @Controller('attendance')
 export class AttendanceController {
   constructor(private readonly attendance: AttendanceService) {}
+
+  @Policy({
+    roles: MARKERS,
+    scope: 'institution',
+    operationId: 'ATT-09',
+    rule: 'The open classes of an Institution with their open sections, in the order of the lists: what the marking screen picks from. Every section, not only those a teacher leads or teaches (D2); 404 for an Institution out of reach',
+  })
+  @Get('sections')
+  sections(
+    @CurrentPrincipal() principal: Principal,
+    @Query() query: AttendanceSectionsQueryDto,
+  ): Promise<ApiResult<AttendanceClassResource[]>> {
+    return this.attendance.sectionsOf(principal, query);
+  }
 
   @Policy({
     roles: MARKERS,

@@ -63,6 +63,12 @@ interface Session {
   marks?: { studentEnrolmentId: string; firstName: string; attendanceStatus: number }[];
 }
 
+interface ClassOffer {
+  classId: string;
+  className: string;
+  sections: { id: string; displayName: string }[];
+}
+
 const fieldsOf = (res: { body: { errors?: { field: string; code: string }[] } }) =>
   Object.fromEntries((res.body.errors ?? []).map((e) => [e.field, e.code]));
 
@@ -280,6 +286,15 @@ describe('ATT-01 to ATT-04 mark attendance (API design 10.10, 10.11)', () => {
     await kit.cleanup(ownerDb);
     await fixtures.cleanup();
   });
+
+  const offered = async (institutionId: string, token: string) => {
+    const res = await api('get', `/v1/attendance/sections?institutionId=${institutionId}`, token);
+    return {
+      status: res.status,
+      meta: res.body.meta,
+      data: res.body.data as unknown as ClassOffer[],
+    };
+  };
 
   describe('ATT-01 the roster', () => {
     it('lists the section by roll number, everyone Present, and lets the Owner, the Admin and a teacher at home mark', async () => {
@@ -641,6 +656,63 @@ describe('ATT-01 to ATT-04 mark attendance (API design 10.10, 10.11)', () => {
           studentId: studentIds.bea,
         }),
       ]);
+    });
+  });
+
+  describe('ATT-09 the sections to mark', () => {
+    it('offers every open section by class, in the order of the lists, to any teacher of the Institution', async () => {
+      const ninth = await kit.klass(owner.token, first, otherPredefinedClass);
+      // B is added before A: the order is the predefined sections', not the order of adding.
+      const ninthB = await kit.section(
+        owner.token,
+        ninth,
+        predefinedSections.find((s) => s.code === 'B')!.id,
+      );
+      const ninthA = await kit.section(
+        owner.token,
+        ninth,
+        predefinedSections.find((s) => s.code === 'A')!.id,
+      );
+      for (const token of [owner.token, firstAdmin.token, annaToken, eveToken]) {
+        const result = await offered(first, token);
+        expect(result.status).toBe(200);
+        expect(result.meta).toBeNull();
+        expect(result.data.map((c) => [c.classId, c.sections.map((x) => x.id)])).toEqual([
+          [ninth, [ninthA, ninthB]],
+          [classId, [sectionA, sectionB]],
+        ]);
+        expect(result.data[1]!.sections.map((x) => x.displayName)).toEqual(['A', 'B']);
+        expect(result.data[1]!.className).toBeTruthy();
+      }
+    });
+
+    it('leaves out a section or a class that has been deactivated', async () => {
+      const ninth = await kit.klass(owner.token, first, otherPredefinedClass);
+      const [ninthA, ninthB] = [
+        await kit.section(owner.token, ninth, predefinedSections.find((s) => s.code === 'A')!.id),
+        await kit.section(owner.token, ninth, predefinedSections.find((s) => s.code === 'B')!.id),
+      ];
+      succeeded(await api('delete', `/v1/sections/${ninthB}`, owner.token), 200, 'section');
+      expect((await offered(first, annaToken)).data[0]!.sections.map((x) => x.id)).toEqual([
+        ninthA,
+      ]);
+      succeeded(await api('delete', `/v1/sections/${ninthA}`, owner.token), 200, 'section');
+      succeeded(await api('delete', `/v1/classes/${ninth}`, owner.token), 200, 'class');
+      expect((await offered(first, owner.token)).data.map((c) => c.classId)).toEqual([classId]);
+      // A class closed while its sections are still open (the API refuses that order) offers none of them.
+      await rows(`update classes set status = 0 where id = '${classId}'`);
+      expect((await offered(first, owner.token)).data).toEqual([]);
+    });
+
+    it('is 404 for an Institution out of reach, 403 for a parent and 400 for a missing or bad Institution', async () => {
+      for (const token of [secondAdmin.token, otherOwner.token, devToken]) {
+        expect((await offered(first, token)).status).toBe(404);
+      }
+      expect((await offered(first, parentToken)).status).toBe(403);
+      for (const query of ['', '?institutionId=nope']) {
+        const res = await api('get', `/v1/attendance/sections${query}`, owner.token);
+        expect([res.status, fieldsOf(res)]).toEqual([400, { institutionId: 'INVALID_FORMAT' }]);
+      }
     });
   });
 

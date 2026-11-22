@@ -16,6 +16,30 @@ interface SectionRef {
   className: string;
 }
 
+/** ATT-09: a class that has sections to mark, with them. */
+export interface AttendanceClassResource {
+  classId: string;
+  className: string;
+  sections: { id: string; displayName: string }[];
+}
+
+/** The open sections of an Institution, grouped by class, the classes and the sections in the order given. */
+export function classesWithSections(
+  sections: readonly { id: string; displayName: string; classId: string; className: string }[],
+): AttendanceClassResource[] {
+  const byClass = new Map<string, AttendanceClassResource>();
+  for (const section of sections) {
+    const group = byClass.get(section.classId) ?? {
+      classId: section.classId,
+      className: section.className,
+      sections: [],
+    };
+    group.sections.push({ id: section.id, displayName: section.displayName });
+    byClass.set(section.classId, group);
+  }
+  return [...byClass.values()];
+}
+
 /** One session of a section and day, with the counts (API design 10.11). */
 export interface AttendanceSessionResource {
   id: string;

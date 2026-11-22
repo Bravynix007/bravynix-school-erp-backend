@@ -1,5 +1,6 @@
 import { body, problems } from '../../../test/support/dto-validation.js';
 import {
+  AttendanceSectionsQueryDto,
   CorrectAttendanceDto,
   ListSessionsQueryDto,
   RosterQueryDto,
@@ -13,6 +14,18 @@ const submission = {
   rosterCount: 32,
   exceptions: [{ studentEnrolmentId: uuid, attendanceStatus: 2 }],
 };
+
+describe('AttendanceSectionsQueryDto', () => {
+  it('takes an Institution and nothing less', async () => {
+    expect(await problems(body(AttendanceSectionsQueryDto, { institutionId: uuid }))).toEqual([]);
+    expect(await problems(body(AttendanceSectionsQueryDto, {}))).toEqual([
+      { field: 'institutionId', code: 'INVALID_FORMAT' },
+    ]);
+    expect(await problems(body(AttendanceSectionsQueryDto, { institutionId: 'nope' }))).toEqual([
+      { field: 'institutionId', code: 'INVALID_FORMAT' },
+    ]);
+  });
+});
 
 describe('RosterQueryDto', () => {
   it('takes a section and a real date', async () => {
