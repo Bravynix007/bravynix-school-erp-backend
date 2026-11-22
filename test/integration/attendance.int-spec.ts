@@ -29,6 +29,7 @@ const BEFORE_ATTENDANCE = '2026_11_17_0050_timetable_entries';
 /** The IST day of the clock the test sets: 06:30 IST on this date, a moment before any real run of the suite. */
 const TODAY = '2026-11-17';
 const YESTERDAY = '2026-11-16';
+const TOMORROW = '2026-11-18';
 
 interface RosterStudent {
   studentId: string;
@@ -72,6 +73,11 @@ const guardianOf = (email: string) => ({
   email,
   isPrimary: true,
   isEmergencyContact: true,
+});
+/** A register for the three children of section A, with these enrolments Absent. */
+const everyone = (absent: string[]) => ({
+  rosterCount: 3,
+  exceptions: absent.map((studentEnrolmentId) => ({ studentEnrolmentId, attendanceStatus: 2 })),
 });
 const parentEmail = () => `${Math.random().toString(36).slice(2)}@parent.test`;
 
@@ -168,6 +174,9 @@ describe('ATT-01 to ATT-04 mark attendance (API design 10.10, 10.11)', () => {
       { ...tenant, societyId: societyA, institutionIds, personId: owner.person },
       async (tx) => (await sql<T>`${sql.raw(query)}`.execute(tx)).rows,
     );
+
+  const move = (studentId: string, fields: object) =>
+    api('patch', `/v1/students/${studentId}/placement`, owner.token, fields);
 
   beforeAll(async () => {
     await runMigrations(migrationUrl, 'latest');
@@ -754,6 +763,86 @@ describe('ATT-01 to ATT-04 mark attendance (API design 10.10, 10.11)', () => {
         exceptions: [{ studentEnrolmentId: enrolments.asha, attendanceStatus: 2 }],
       });
       expect([res.status, res.body.code]).toEqual([422, 'STUDENT_NOT_IN_SECTION']);
+    });
+  });
+
+  describe('a student moved out of a section whose register was taken (STU-08, QA D1)', () => {
+    it('keeps one mark on the day for a student moved the day after the register, and the old roster still lists them', async () => {
+      const made = await submitted(everyone([enrolments.asha!]));
+      const res = await move(studentIds.asha!, {
+        sectionId: sectionB,
+        rollNumber: '4',
+        effectiveDate: TOMORROW,
+      });
+      expect(res.status).toBe(200);
+      const old = (await roster(sectionA, TODAY)).data;
+      expect(old.students.map((s) => [s.firstName, s.attendanceStatus])).toEqual([
+        ['Asha', 2],
+        ['Bea', 1],
+        ['Cy', 1],
+      ]);
+      expect((await roster(sectionB, TODAY)).data.students.map((s) => s.firstName)).not.toContain(
+        'Asha',
+      );
+      expect((await roster(sectionB, TOMORROW)).data.students.map((s) => s.firstName)).toContain(
+        'Asha',
+      );
+      expect((await roster(sectionA, TOMORROW)).data.students.map((s) => s.firstName)).toEqual([
+        'Bea',
+        'Cy',
+      ]);
+      const session = await api('get', `/v1/attendance/sessions/${made.id}`, owner.token);
+      expect((session.body.data as unknown as Session).marks).toMatchObject([
+        { firstName: 'Asha', attendanceStatus: 2 },
+      ]);
+    });
+
+    it('refuses a move to another section dated on a day whose register was taken, naming the latest day (409)', async () => {
+      await rows(`update student_section_placements set start_date = '2026-06-02'`);
+      await submitted(everyone([]));
+      await submitted({ ...everyone([]), attendanceDate: YESTERDAY });
+      for (const fields of [{}, { effectiveDate: TODAY }, { effectiveDate: YESTERDAY }]) {
+        const res = await move(studentIds.asha!, {
+          sectionId: sectionB,
+          rollNumber: '4',
+          ...fields,
+        });
+        expect([res.status, res.body.code]).toEqual([409, 'ATTENDANCE_TAKEN']);
+        expect((res.body as unknown as { data: object }).data).toEqual({ attendanceDate: TODAY });
+      }
+      const rolls = await rows<{ section_id: string; end_date: string | null }>(
+        `select section_id, end_date from student_section_placements where student_enrolment_id = '${enrolments.asha}'`,
+      );
+      expect(rolls).toEqual([{ section_id: sectionA, end_date: null }]);
+    });
+
+    it('lets a move through when the only register taken was on an earlier day', async () => {
+      await submitted({ rosterCount: 0, exceptions: [], attendanceDate: YESTERDAY });
+      expect(
+        (
+          await move(studentIds.asha!, {
+            sectionId: sectionB,
+            rollNumber: '4',
+            effectiveDate: TODAY,
+          })
+        ).status,
+      ).toBe(200);
+    });
+
+    it('does not count a register that was taken before the student was placed', async () => {
+      await submitted({ rosterCount: 3, exceptions: [] });
+      const late = await kit.student(
+        owner.token,
+        first,
+        { academicYearId: year, classId, sectionId: sectionA },
+        { firstName: 'Eli' },
+      );
+      expect((await move(late.id, { sectionId: sectionB, rollNumber: '5' })).status).toBe(200);
+    });
+
+    it('lets a change of roll number alone through after the register, as it leaves the roster as it is', async () => {
+      await submitted(everyone([]));
+      expect((await move(studentIds.asha!, { rollNumber: '9' })).status).toBe(200);
     });
   });
 

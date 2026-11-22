@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { Insertable, Selectable } from 'kysely';
+import { sql, type Insertable, type Selectable } from 'kysely';
 import type { Tx } from '../../platform/database/index.js';
 import type { AttendanceExceptionsTable, AttendanceSessionsTable } from './attendance.tables.js';
 
@@ -27,6 +27,28 @@ export class AttendanceRepository {
       .where('attendance_date', '=', date)
       .where('status', '=', 1)
       .executeTakeFirst();
+  }
+
+  /**
+   * The latest day on or after `from` on which the section's attendance was taken (an active session) after `placedAt`,
+   * the time a student was placed in the section: the student was on that session's roster (DDD 13.2). The stored time
+   * keeps microseconds and `placedAt` milliseconds, so the stored time is cut to milliseconds as the roster does.
+   */
+  async latestTakenDay(
+    tx: Tx,
+    sectionId: string,
+    from: string,
+    placedAt: Date,
+  ): Promise<string | undefined> {
+    const row = await tx
+      .selectFrom('attendance_sessions')
+      .select((eb) => eb.fn.max('attendance_date').as('day'))
+      .where('section_id', '=', sectionId)
+      .where('status', '=', 1)
+      .where('attendance_date', '>=', from)
+      .where(sql`date_trunc('milliseconds', submitted_at)`, '>=', placedAt)
+      .executeTakeFirst();
+    return row?.day ?? undefined;
   }
 
   find(tx: Tx, id: string): Promise<SessionRow | undefined> {
