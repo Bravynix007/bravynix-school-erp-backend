@@ -3,6 +3,7 @@ import { IdempotencyModule } from '../../platform/idempotency/index.js';
 import { NotificationsModule } from '../../platform/notifications/index.js';
 import { AcademicSetupModule } from '../academic-setup/index.js';
 import { EventsModule } from '../events/index.js';
+import { AttendanceRegisters } from './attendance-registers.js';
 import { AttendanceController } from './attendance.controller.js';
 import { AttendanceRepository } from './attendance.repository.js';
 import { AttendanceService } from './attendance.service.js';
@@ -11,6 +12,7 @@ import { AttendanceService } from './attendance.service.js';
 @Module({
   imports: [AcademicSetupModule, EventsModule, IdempotencyModule, NotificationsModule],
   controllers: [AttendanceController],
-  providers: [AttendanceRepository, AttendanceService],
+  providers: [AttendanceRepository, AttendanceService, AttendanceRegisters],
+  exports: [AttendanceRegisters],
 })
 export class AttendanceModule {}
