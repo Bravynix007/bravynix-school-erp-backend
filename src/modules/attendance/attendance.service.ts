@@ -448,6 +448,8 @@ export class AttendanceService {
     ) {
       throw new AppException(HttpStatus.UNPROCESSABLE_ENTITY, ErrorCode.DATE_IS_HOLIDAY);
     }
+    // A move out of the section (STU-08) waits for this register, or this waits for the move (QA B6 D1).
+    await this.repository.lockRegister(tx, body.sectionId);
     const existing = await this.repository.findActive(tx, body.sectionId, body.attendanceDate);
     if (existing) {
       throw new AppException(HttpStatus.CONFLICT, ErrorCode.ATTENDANCE_ALREADY_SUBMITTED, {

@@ -112,6 +112,7 @@ function build() {
     transaction: vi.fn<DatabaseService['transaction']>((_tenant, work) => work(tx)),
   };
   const repository = {
+    lockRegister: vi.fn<AttendanceRepository['lockRegister']>().mockResolvedValue(),
     findActive: vi.fn<AttendanceRepository['findActive']>().mockResolvedValue(undefined),
     find: vi.fn<AttendanceRepository['find']>().mockResolvedValue(session()),
     list: vi.fn<AttendanceRepository['list']>().mockResolvedValue([session()]),
