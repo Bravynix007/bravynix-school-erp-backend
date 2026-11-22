@@ -615,6 +615,16 @@ describe('DIA-01 to DIA-04 the diary (API design 10.14a)', () => {
       ).toEqual([inB.id]);
     });
 
+    it('shows a parent nothing of a section the child’s placement in it is over', async () => {
+      await added();
+      expect(await asParent([childA], 'select id from diary_entries')).toHaveLength(1);
+      await rows(
+        `update student_section_placements set end_date = start_date
+         where student_enrolment_id in (select id from student_enrolments where student_id = '${childA}')`,
+      );
+      expect(await asParent([childA], 'select id from diary_entries')).toEqual([]);
+    });
+
     it('shows a parent nothing of a child whose enrolment is no longer active', async () => {
       await added();
       expect(await asParent([childA], 'select id from diary_entries')).toHaveLength(1);
