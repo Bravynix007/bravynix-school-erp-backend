@@ -37,7 +37,7 @@ interface Calendar {
   days: Day[];
 }
 interface DayDetail extends Day {
-  section: { id: string; name: string; className: string } | null;
+  section: { id: string; name: string | null; className: string | null } | null;
   markedBy: { id: string; displayName: string } | null;
   markedAt: string | null;
   lastCorrectedAt: string | null;
@@ -445,6 +445,35 @@ describe('ATT-07 and ATT-08 a student’s attendance (API design 10.13)', () => 
     });
   });
 
+  describe('a holiday limited to classes', () => {
+    it('is told on a parent’s calendar as on the Owner’s, for the child’s class only (QA B8 D1)', async () => {
+      const c10 = (await kit.masters(admin, 'predefined-classes')).find(
+        (c) => c.code === 'C10',
+      )!.id;
+      const c9 = (await kit.masters(admin, 'predefined-classes')).find((c) => c.code === 'C09')!.id;
+      await holiday('2026-11-11', '2026-11-11', {
+        holidayType: 2,
+        holidayPredefinedClassIds: [c10],
+      });
+      await holiday('2026-11-12', '2026-11-12', {
+        title: 'Ninth only',
+        holidayType: 2,
+        holidayPredefinedClassIds: [c9],
+      });
+      for (const token of [owner.token, beaParent]) {
+        const bea = await calendarOf('bea', '2026-11', token);
+        expect(bea.days.find((d) => d.date === '2026-11-11')).toMatchObject({
+          dayStatus: 'holiday',
+          holidayTitle: 'Founders Day',
+        });
+        expect(bea.days.find((d) => d.date === '2026-11-12')).toMatchObject({
+          dayStatus: 'not_marked',
+          holidayTitle: null,
+        });
+      }
+    });
+  });
+
   describe('ATT-08 the day', () => {
     it('names the section, who marked it and when, and the correction', async () => {
       const sessions = await markMonth();
@@ -465,6 +494,10 @@ describe('ATT-07 and ATT-08 a student’s attendance (API design 10.13)', () => 
         lastCorrectedAt: null,
       });
       expect(absent.markedBy?.displayName).toBeTruthy();
+      // A parent cannot read the class, so the day keeps the section's id and leaves its names empty.
+      expect(await dayOf('bea', '2026-11-03', beaParent)).toMatchObject({
+        section: { id: sectionA, name: null, className: null },
+      });
       expect(await dayOf('bea', '2026-11-04')).toMatchObject({
         dayStatus: 'leave',
         lastCorrectedAt: `${TODAY}T01:05:00.000Z`,

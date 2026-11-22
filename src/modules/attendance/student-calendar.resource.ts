@@ -19,7 +19,7 @@ export interface StudentCalendarResource {
 
 /** ATT-08: one day of a student, and who marked it. */
 export interface StudentDayResource extends CalendarDayResource {
-  section: { id: string; name: string; className: string } | null;
+  section: { id: string; name: string | null; className: string | null } | null;
   markedBy: { id: string; displayName: string } | null;
   markedAt: string | null;
   lastCorrectedAt: string | null;
@@ -56,10 +56,13 @@ export function dayResource(
   const submittedBy = day.session?.submittedBy;
   return {
     ...calendarDay(day),
-    section:
-      day.span && section
-        ? { id: day.span.sectionId, name: section.displayName, className: section.className }
-        : null,
+    section: day.span
+      ? {
+          id: day.span.sectionId,
+          name: section?.displayName ?? null,
+          className: section?.className ?? null,
+        }
+      : null,
     markedBy:
       submittedBy === undefined
         ? null
