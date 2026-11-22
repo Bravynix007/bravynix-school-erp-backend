@@ -840,6 +840,47 @@ describe('ATT-01 to ATT-04 mark attendance (API design 10.10, 10.11)', () => {
       expect((await move(late.id, { sectionId: sectionB, rollNumber: '5' })).status).toBe(200);
     });
 
+    it('makes a move out of the section wait for a submit already counting the roster (QA B6 D1 race)', async () => {
+      // Another transaction holds the day's slot, so the submit stops at its insert after it counted Asha.
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => (release = resolve));
+      let inserted!: () => void;
+      const slotTaken = new Promise<void>((resolve) => (inserted = resolve));
+      const blocker = database
+        .transaction(
+          { ...tenant, societyId: societyA, institutionIds: [first], personId: owner.person },
+          async (tx) => {
+            await sql`insert into attendance_sessions (society_id, institution_id, academic_year_id, section_id, attendance_date, roster_count, submitted_by) values (${societyA}, ${first}, ${year}, ${sectionA}, ${TODAY}, 0, ${owner.person})`.execute(
+              tx,
+            );
+            inserted();
+            await held;
+            throw new Error('rolled back on purpose');
+          },
+        )
+        .catch((error: unknown) => {
+          inserted();
+          return error;
+        });
+      await slotTaken;
+      // supertest sends a request only once it is awaited, so start each one now
+      const sending = submit(everyone([])).then((res) => res);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const moving = move(studentIds.asha!, {
+        sectionId: sectionB,
+        rollNumber: '4',
+        effectiveDate: TODAY,
+      }).then((res) => res);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      release();
+      expect(String(await blocker)).toContain('rolled back on purpose');
+      const [sent, moved] = await Promise.all([sending, moving]);
+      expect([sent.status, moved.status, moved.body.code]).toEqual([201, 409, 'ATTENDANCE_TAKEN']);
+      expect((await roster(sectionA, TODAY)).data.students.map((s) => s.firstName)).toContain(
+        'Asha',
+      );
+    });
+
     it('lets a change of roll number alone through after the register, as it leaves the roster as it is', async () => {
       await submitted(everyone([]));
       expect((await move(studentIds.asha!, { rollNumber: '9' })).status).toBe(200);

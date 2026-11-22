@@ -4,11 +4,16 @@ import { AttendanceRegisters } from './attendance-registers.js';
 import { AttendanceRepository } from './attendance.repository.js';
 
 describe('AttendanceRegisters', () => {
-  it('asks the repository for the latest taken day of the section from the day, since the placement', async () => {
+  it('holds the register, then asks the repository for the latest taken day of the section from the day, since the placement', async () => {
+    const order: string[] = [];
+    const lockRegister = vi
+      .fn<AttendanceRepository['lockRegister']>()
+      .mockImplementation(() => Promise.resolve(void order.push('lock')));
     const latestTakenDay = vi
       .fn<AttendanceRepository['latestTakenDay']>()
-      .mockResolvedValue('2026-11-17');
+      .mockImplementation(() => Promise.resolve(void order.push('read')).then(() => '2026-11-17'));
     const registers = new AttendanceRegisters({
+      lockRegister,
       latestTakenDay,
     } as unknown as AttendanceRepository);
     const placedAt = new Date('2026-11-01T05:00:00.000Z');
@@ -17,6 +22,18 @@ describe('AttendanceRegisters', () => {
       '2026-11-17',
     );
     expect(latestTakenDay).toHaveBeenCalledWith(tx, 'section-1', '2026-11-12', placedAt);
+    expect(lockRegister).toHaveBeenCalledWith(tx, 'section-1');
+    expect(order).toEqual(['lock', 'read']);
+  });
+});
+
+describe('AttendanceRepository.lockRegister', () => {
+  it('takes a transaction advisory lock named by the section', async () => {
+    const { tx, queries } = sqlRecorder();
+    await new AttendanceRepository().lockRegister(tx, 'section-1').catch(() => undefined);
+    const [query] = queries;
+    expect(query?.sql).toContain('pg_advisory_xact_lock(hashtextextended($1, 0))');
+    expect(query?.parameters).toEqual(['attendance-register:section-1']);
   });
 });
 
