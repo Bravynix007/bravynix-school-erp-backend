@@ -721,6 +721,23 @@ describe('ATT-01 to ATT-04 mark attendance (API design 10.10, 10.11)', () => {
       expect(await onThen(new Date(Date.now() + 86_400_000))).toEqual(['Asha', 'Bea', 'Cy']);
     });
 
+    it('keeps a child placed in the same millisecond as the session on its roster (QA D2)', async () => {
+      await rows(
+        `update student_section_placements set created_at = date_trunc('milliseconds', created_at) + interval '500 microseconds' where student_enrolment_id = '${enrolments.asha}'`,
+      );
+      const [placed] = await rows<{ created_at: Date }>(
+        `select p.created_at from student_section_placements p where p.student_enrolment_id = '${enrolments.asha}'`,
+      );
+      const stored = placed!.created_at;
+      const roll = t.app.get(SectionRoster);
+      const names = await database.transaction(
+        { societyId: societyA, institutionIds: [first], roleCode: 2, personId: owner.person },
+        async (tx) =>
+          (await roll.on(tx, sectionA, TODAY, new Date(stored.getTime()))).map((s) => s.firstName),
+      );
+      expect(names).toContain('Asha');
+    });
+
     it('takes a child off the old section’s roster for the days after their placement ended', async () => {
       expect((await roster(sectionA, TODAY)).data.students.map((s) => s.firstName)).toContain(
         'Asha',
