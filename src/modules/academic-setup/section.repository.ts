@@ -28,9 +28,7 @@ export class SectionRepository {
   /** The active sections of a class, in the order of the predefined sections; with `ids`, only those of them. */
   active(tx: Tx, classId: string, ids?: readonly string[]): Promise<SectionView[]> {
     const query = this.view(tx).where('s.class_id', '=', classId).where('s.status', '=', 1);
-    return (ids ? query.where('s.id', 'in', ids) : query)
-      .$call(orderSections('p', 's'))
-      .execute();
+    return (ids ? query.where('s.id', 'in', ids) : query).$call(orderSections('p', 's')).execute();
   }
 
   /** The section with its names. */
