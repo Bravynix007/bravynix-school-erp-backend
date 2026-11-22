@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { sql, type Insertable, type Selectable, type Updateable } from 'kysely';
+import type { Insertable, Selectable, Updateable } from 'kysely';
 import type { Tx } from '../../platform/database/index.js';
 import type { SectionsTable } from './academic-setup.tables.js';
+import { orderClasses, orderSections } from './list-order.js';
 
 export type SectionRow = Selectable<SectionsTable>;
 export type NewSection = Insertable<SectionsTable>;
@@ -28,8 +29,7 @@ export class SectionRepository {
   active(tx: Tx, classId: string, ids?: readonly string[]): Promise<SectionView[]> {
     const query = this.view(tx).where('s.class_id', '=', classId).where('s.status', '=', 1);
     return (ids ? query.where('s.id', 'in', ids) : query)
-      .orderBy('p.display_order')
-      .orderBy('s.id')
+      .$call(orderSections('p', 's'))
       .execute();
   }
 
@@ -76,12 +76,8 @@ export class SectionRepository {
       .where('s.institution_id', '=', institutionId)
       .where('s.status', '=', 1)
       .where('c.status', '=', 1)
-      .orderBy('g.display_order')
-      .orderBy('pc.display_order')
-      .orderBy(sql`lower(c.stream_name)`, (order) => order.asc().nullsFirst())
-      .orderBy('c.id')
-      .orderBy('ps.display_order')
-      .orderBy('s.id')
+      .$call(orderClasses('g', 'pc', 'c'))
+      .$call(orderSections('ps', 's'))
       .execute();
     return rows.map((row) => ({
       id: row.id,

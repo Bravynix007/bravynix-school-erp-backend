@@ -12,6 +12,7 @@ import { personaByKey } from '../../src/seeds/two-worlds.js';
 import { apiCaller } from '../support/api.js';
 import { superAdminToken } from '../support/admin-token.js';
 import { readAuditRows } from '../support/audit-rows.js';
+import { removeScratchMasters } from '../support/scratch-masters.js';
 import { FixtureModule } from '../support/fixture.module.js';
 import { readJobs } from '../support/job-rows.js';
 import { clearLoginState } from '../support/login-state.js';
@@ -89,6 +90,7 @@ const parentEmail = () => `${Math.random().toString(36).slice(2)}@parent.test`;
 
 describe('ATT-01 to ATT-04 mark attendance (API design 10.10, 10.11)', () => {
   let ownerDb: Kysely<unknown>;
+  const scratch: { table: string; id: string }[] = [];
   let t: TestApp;
   let database: DatabaseService;
   let fixtures: PlatformFixtures;
@@ -284,6 +286,7 @@ describe('ATT-01 to ATT-04 mark attendance (API design 10.10, 10.11)', () => {
   afterEach(async () => {
     await clearLoginState(ownerDb);
     await kit.cleanup(ownerDb);
+    await removeScratchMasters(ownerDb, scratch.splice(0));
     await fixtures.cleanup();
   });
 
@@ -684,6 +687,47 @@ describe('ATT-01 to ATT-04 mark attendance (API design 10.10, 10.11)', () => {
         expect(result.data[1]!.sections.map((x) => x.displayName)).toEqual(['A', 'B']);
         expect(result.data[1]!.className).toBeTruthy();
       }
+    });
+
+    it('lists classes by category, then predefined class, then stream with none first, as the class list does', async () => {
+      const categories = await kit.masters(admin, 'class-categories');
+      const byCode = (code: string) => categories.find((c) => c.code === code)!.id;
+      const predefinedClasses = await kit.masters(admin, 'predefined-classes');
+      const puc = predefinedClasses.find((c) => c.code === 'PUC1')!.id;
+      // A Nursery class added last to the predefined classes: its category comes before Pre-University, its order
+      // after, so only the category order puts it first.
+      const entry = await api('post', '/v1/platform/masters/predefined-classes', admin, {
+        classCategoryId: byCode('NURSERY'),
+        code: `Z${Date.now().toString(36).toUpperCase()}`,
+        name: `Scratch ${Date.now().toString(36)}`,
+      });
+      succeeded(entry, 201, 'predefined class');
+      scratch.push({ table: 'predefined_classes', id: entry.body.data.id });
+      const both = await api('post', '/v1/institutions', owner.token, {
+        name: 'Two Categories School',
+        code: `I${Date.now().toString(36)}`,
+        address: { line1: '1 Hill Road' },
+        classesOffered: [byCode('NURSERY'), byCode('PRE_UNIVERSITY')],
+      });
+      succeeded(both, 201, 'institution');
+      const institution = both.body.data.id as string;
+      const classWith = async (predefinedClassId: string, streamName?: string) => {
+        const made = await api('post', '/v1/classes', owner.token, {
+          institutionId: institution,
+          predefinedClassId,
+          ...(streamName ? { streamName } : {}),
+        });
+        succeeded(made, 201, 'class');
+        const id = made.body.data.id as string;
+        await kit.section(owner.token, id, predefinedSections.find((x) => x.code === 'A')!.id);
+        return id;
+      };
+      const nursery = await classWith(entry.body.data.id);
+      const streamed = await classWith(puc, 'pcmb');
+      const upper = await classWith(puc, 'BCMB');
+      const plain = await classWith(puc);
+      const result = await offered(institution, owner.token);
+      expect(result.data.map((c) => c.classId)).toEqual([nursery, plain, upper, streamed]);
     });
 
     it('leaves out a section or a class that has been deactivated', async () => {

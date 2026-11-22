@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { sql, type Insertable, type Selectable, type Updateable } from 'kysely';
 import type { Tx } from '../../platform/database/index.js';
 import type { ClassesTable } from './academic-setup.tables.js';
+import { orderClasses } from './list-order.js';
 
 export type ClassRow = Selectable<ClassesTable>;
 export type NewClass = Insertable<ClassesTable>;
@@ -57,10 +58,7 @@ export class ClassRepository {
           )
         : query
     )
-      .orderBy('g.display_order')
-      .orderBy('p.display_order')
-      .orderBy(sql`lower(c.stream_name)`, (order) => order.asc().nullsFirst())
-      .orderBy('c.id')
+      .$call(orderClasses('g', 'p', 'c'))
       .execute();
   }
 
@@ -140,10 +138,7 @@ export class ClassRepository {
   views(tx: Tx, ids: readonly string[]): Promise<ClassView[]> {
     return this.view(tx)
       .where('c.id', 'in', ids)
-      .orderBy('g.display_order')
-      .orderBy('p.display_order')
-      .orderBy(sql`lower(c.stream_name)`, (order) => order.asc().nullsFirst())
-      .orderBy('c.id')
+      .$call(orderClasses('g', 'p', 'c'))
       .execute();
   }
 
