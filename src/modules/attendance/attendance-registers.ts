@@ -13,14 +13,16 @@ export class AttendanceRegisters {
   /**
    * The latest day on or after `from` for which the section's attendance was taken with a student counted, the student
    * having been placed in the section at `placedAt`; `undefined` when there is none. Leaving the section from a day
-   * that is on or before it would take the student off a register already taken.
+   * that is on or before it would take the student off a register already taken. The register is held until the
+   * transaction ends, so a submit of the same section waits for the move.
    */
-  latestTakenDay(
+  async latestTakenDay(
     tx: Tx,
     sectionId: string,
     from: string,
     placedAt: Date,
   ): Promise<string | undefined> {
+    await this.repository.lockRegister(tx, sectionId);
     return this.repository.latestTakenDay(tx, sectionId, from, placedAt);
   }
 }
