@@ -1,6 +1,7 @@
 import type { Notice } from '../../platform/notifications/index.js';
 import type { EventRow } from './event.repository.js';
-import { formatDay, inboxTabOf } from './event.rules.js';
+import { formatDay } from '../../common/time/format-day.js';
+import { inboxTabOf } from './event.rules.js';
 
 /** The screen a notice about an event opens (DDD 9.8). */
 const EVENT_TARGET = 3;

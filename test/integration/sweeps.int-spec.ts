@@ -33,6 +33,8 @@ interface Ticket {
 }
 
 /** The clean-up sweeps of the worker (DDD 16.3, 16.4, API design 16.3). */
+const partitionOfYear = (y: number) => `attendance_exceptions_${y.toString()}`;
+
 describe('worker sweeps', () => {
   let ownerDb: Kysely<unknown>;
   let t: TestApp;
@@ -471,6 +473,17 @@ describe('worker sweeps', () => {
       expect((await sweeps.sweep()).inboxPartitionsMade).toBe(1);
       expect(await exists(ahead)).toBe(true);
       expect((await sweeps.sweep()).inboxPartitionsMade).toBe(0);
+    });
+
+    it('makes the attendance partitions of last year, this year and the next, when they are missing', async () => {
+      const year = new Date().getUTCFullYear();
+      await sql`drop table ${sql.table(partitionOfYear(year - 1))}, ${sql.table(partitionOfYear(year + 1))}`.execute(
+        ownerDb,
+      );
+      expect((await sweeps.sweep()).attendancePartitionsMade).toBe(2);
+      expect(await exists(partitionOfYear(year - 1))).toBe(true);
+      expect(await exists(partitionOfYear(year + 1))).toBe(true);
+      expect((await sweeps.sweep()).attendancePartitionsMade).toBe(0);
     });
 
     it('drops an inbox month that ended more than 180 days ago, with its rows, and keeps the others', async () => {

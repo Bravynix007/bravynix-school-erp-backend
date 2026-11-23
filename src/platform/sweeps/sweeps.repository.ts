@@ -58,6 +58,19 @@ export class SweepsRepository {
     return rows[0]!.made;
   }
 
+  /**
+   * Makes the yearly partitions of the attendance marks: last year (an academic year may have begun in it), this year
+   * and `yearsAhead` more. Says how many were new.
+   */
+  async ensureAttendancePartitions(yearsAhead: number): Promise<number> {
+    const { rows } = await sql<{ made: number }>`
+      select maintenance.ensure_attendance_partitions(
+        (extract(year from current_date) - 1)::integer, (${yearsAhead}::integer + 1)
+      ) as made
+    `.execute(this.database.db);
+    return rows[0]!.made;
+  }
+
   /** Drops the inbox partitions that ended `days` ago; says how many. */
   async dropInboxPartitions(days: number): Promise<number> {
     const { rows } = await sql<{ dropped: number }>`

@@ -39,6 +39,8 @@ export async function removeScratchSocieties(
     await sql`alter table staff_identities no force row level security`.execute(tx);
     await sql`alter table documents no force row level security`.execute(tx);
     await sql`alter table inbox_items no force row level security`.execute(tx);
+    await sql`alter table attendance_sessions no force row level security`.execute(tx);
+    await sql`alter table attendance_exceptions no force row level security`.execute(tx);
     await sql`alter table events no force row level security`.execute(tx);
     await sql`alter table time_slots no force row level security`.execute(tx);
     await sql`alter table timetable_entries no force row level security`.execute(tx);
@@ -63,6 +65,10 @@ export async function removeScratchSocieties(
     );
     await sql`delete from import_runs where society_id in (${sql.join(ids)})`.execute(tx);
     await sql`delete from jobs where society_id in (${sql.join(ids)})`.execute(tx);
+    await sql`
+      delete from attendance_exceptions where institution_id in
+        (select id from institutions where society_id in (${sql.join(ids)}))`.execute(tx);
+    await sql`delete from attendance_sessions where society_id in (${sql.join(ids)})`.execute(tx);
     await sql`delete from inbox_items where society_id in (${sql.join(ids)})`.execute(tx);
     await sql`delete from event_holiday_classes where society_id in (${sql.join(ids)})`.execute(tx);
     await sql`delete from events where society_id in (${sql.join(ids)})`.execute(tx);
@@ -109,6 +115,8 @@ export async function removeScratchSocieties(
     await sql`alter table staff_identities force row level security`.execute(tx);
     await sql`alter table documents force row level security`.execute(tx);
     await sql`alter table inbox_items force row level security`.execute(tx);
+    await sql`alter table attendance_sessions force row level security`.execute(tx);
+    await sql`alter table attendance_exceptions force row level security`.execute(tx);
     await sql`alter table events force row level security`.execute(tx);
     await sql`alter table time_slots force row level security`.execute(tx);
     await sql`alter table timetable_entries force row level security`.execute(tx);

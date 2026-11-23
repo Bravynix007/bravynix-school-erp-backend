@@ -33,6 +33,7 @@ import {
   ClassDirectory,
   SectionDirectory,
 } from '../academic-setup/index.js';
+import { AttendanceRegisters } from '../attendance/index.js';
 import { outcomeOf } from './promotion.rules.js';
 import { StudentClassroomService } from './student-classroom.service.js';
 import { StudentContext } from './student-context.js';
@@ -66,7 +67,7 @@ import {
   type StudentSummary,
 } from './student.resource.js';
 import {
-  latestMoveDate,
+  defaultMoveDate,
   requireValidDates,
   requireValidMoveDate,
   requireValidStudent,
@@ -147,6 +148,7 @@ export class StudentService {
     private readonly classroom: StudentClassroomService,
     private readonly identities: StudentIdentityRepository,
     private readonly identity: StudentIdentityService,
+    private readonly registers: AttendanceRegisters,
   ) {}
 
   /**
@@ -577,8 +579,11 @@ export class StudentService {
           { academicYearId: open.academic_year_id, classId: open.class_id, sectionId },
           context.institutionId,
         );
-        const effective = body.effectiveDate ?? latestMoveDate(open.start_date, today, yearEnd);
+        const effective = body.effectiveDate ?? defaultMoveDate(open.start_date, today, yearEnd);
         requireValidMoveDate(effective, open.start_date, today, yearEnd);
+        if (sectionId !== open.section_id) {
+          await this.requireRegistersKept(tx, open, effective);
+        }
         let placement: { id: string; start_date: string };
         if (effective === open.start_date) {
           await this.students.updatePlacement(tx, open.placement_id, {
@@ -843,6 +848,26 @@ export class StudentService {
         { purpose: FilePurpose.StudentPhoto, institutionId },
         'photoFileId',
       );
+    }
+  }
+
+  /**
+   * A move to another section from `effective` takes the student off the old section's roster from that day on, so it
+   * cannot reach back over a day on which the old section's attendance was taken with the student counted (409
+   * `ATTENDANCE_TAKEN`, naming the latest such day in `details.attendanceDate`). The move is dated after that day, or
+   * the day's attendance is voided first (ATT-06).
+   */
+  private async requireRegistersKept(tx: Tx, open: PlacedRow, effective: string): Promise<void> {
+    const taken = await this.registers.latestTakenDay(
+      tx,
+      open.section_id,
+      effective,
+      await this.students.placedAt(tx, open.placement_id),
+    );
+    if (taken !== undefined) {
+      throw new AppException(HttpStatus.CONFLICT, ErrorCode.ATTENDANCE_TAKEN, {
+        details: { attendanceDate: taken },
+      });
     }
   }
 

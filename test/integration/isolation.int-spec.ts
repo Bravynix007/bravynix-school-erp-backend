@@ -6,6 +6,7 @@ import { createPool } from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
 import { writeAcademicSeed } from '../../src/seeds/academic-seed.js';
 import { writeEventsSeed } from '../../src/seeds/events-seed.js';
+import { writeAttendanceSeed } from '../../src/seeds/attendance-seed.js';
 import { writeTimetableSeed } from '../../src/seeds/timetable-seed.js';
 import { writeNotificationsSeed } from '../../src/seeds/notifications-seed.js';
 import { writeFilesSeed } from '../../src/seeds/files-seed.js';
@@ -147,6 +148,7 @@ describe('tenant isolation', () => {
     await writeNotificationsSeed(ownerDb);
     await writeEventsSeed(ownerDb);
     await writeTimetableSeed(ownerDb);
+    await writeAttendanceSeed(ownerDb);
     await clearLoginState(ownerDb);
     // Role 3 grants need a staff record, which arrives with the People module.
     for (const caller of Object.values(callers)) {
@@ -204,6 +206,8 @@ describe('tenant isolation', () => {
     it('covers the tables built so far', async () => {
       expect((await tenantTables()).map((table) => table.name)).toEqual([
         'academic_years',
+        'attendance_exceptions',
+        'attendance_sessions',
         'audit_logs',
         'class_teacher_assignments',
         'classes',
@@ -262,11 +266,14 @@ describe('tenant isolation', () => {
             ).toBeGreaterThan(0);
           }
           for (const row of rows) {
-            const owner = table.name === 'societies' ? row.id : row.society_id;
-            expect({ table: table.name, society: owner }).toEqual({
-              table: table.name,
-              society: society.id,
-            });
+            // The attendance marks have no Society of their own (DDD 9.7): their Institution says whose they are.
+            if (table.hasSociety || table.name === 'societies') {
+              const owner = table.name === 'societies' ? row.id : row.society_id;
+              expect({ table: table.name, society: owner }).toEqual({
+                table: table.name,
+                society: society.id,
+              });
+            }
             // Extra Institutions are read by Society, so an Admin of one Institution sees another's too.
             const bySociety = table.name === 'staff_institutions';
             if (

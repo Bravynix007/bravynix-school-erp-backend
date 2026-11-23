@@ -13,6 +13,7 @@ const en: Catalogue = {
   CREATED: 'Created',
   ACCEPTED: 'Accepted',
   PROMOTED: 'Promoted',
+  ATTENDANCE_SUBMITTED: 'Attendance submitted',
   MALFORMED_JSON: 'The request body is not valid JSON',
   VALIDATION_FAILED: 'Please correct the highlighted fields',
   IDEMPOTENCY_KEY_REQUIRED: 'An Idempotency-Key header is required for this request',
@@ -105,6 +106,15 @@ const en: Catalogue = {
     'This period is not one of the Institution’s current year, or is a break and takes only a break',
   SECTION_SLOT_TAKEN: 'This section already has an entry in that period',
   TEACHER_DOUBLE_BOOKED: 'This teacher already has an entry in that period',
+  // Attendance (API design 10.10, 10.11)
+  ATTENDANCE_ALREADY_SUBMITTED: 'Attendance for this section and date has already been submitted',
+  ATTENDANCE_TAKEN:
+    'The student’s section already has attendance taken from that date; date the move after it, or void that day’s attendance first',
+  ROSTER_CHANGED: 'The students of this section changed; reload the list and mark again',
+  DATE_IN_FUTURE: 'Attendance cannot be marked for a day that has not come',
+  DATE_OUTSIDE_CURRENT_YEAR: 'This date is outside the current academic year',
+  DATE_IS_HOLIDAY: 'This date is a holiday for this class',
+  STUDENT_NOT_IN_SECTION: 'A student marked is not in this section on this date',
   // Classes and sections (API design 10.4j, 10.4c)
   CLASS_NOT_OFFERED: 'This Institution does not offer the category of this class',
   STREAM_NOT_ALLOWED: 'Only Pre-University classes have a stream',

@@ -165,11 +165,3 @@ export function inboxTabOf(audience: number): 2 | 3 | 4 {
       return 2;
   }
 }
-
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-/** A date as a notice shows it: `22 Dec 2026`. */
-export function formatDay(date: string): string {
-  const [year, month, day] = date.split('-');
-  return `${Number(day).toString()} ${MONTHS[Number(month) - 1]!} ${year!}`;
-}

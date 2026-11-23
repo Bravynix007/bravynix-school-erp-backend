@@ -1,7 +1,13 @@
 import type { ObjectStorage } from '../files/index.js';
 import type { IdempotencyService } from '../idempotency/index.js';
 import type { DueFile, SweepsRepository } from './sweeps.repository.js';
-import { FILE_BATCH, INBOX_KEEP_DAYS, MAX_FILE_BATCHES, PARTITIONS_AHEAD } from './sweeps.rules.js';
+import {
+  ATTENDANCE_YEARS_AHEAD,
+  FILE_BATCH,
+  INBOX_KEEP_DAYS,
+  MAX_FILE_BATCHES,
+  PARTITIONS_AHEAD,
+} from './sweeps.rules.js';
 import { SweepsService } from './sweeps.service.js';
 
 const due = (id: string): DueFile => ({ id, objectKey: `k/${id}`, status: 1 });
@@ -14,6 +20,9 @@ function build(batches: DueFile[][] = []) {
     removeImportRuns: vi.fn<SweepsRepository['removeImportRuns']>().mockResolvedValue(3),
     ensureInboxPartitions: vi.fn<SweepsRepository['ensureInboxPartitions']>().mockResolvedValue(2),
     dropInboxPartitions: vi.fn<SweepsRepository['dropInboxPartitions']>().mockResolvedValue(1),
+    ensureAttendancePartitions: vi
+      .fn<SweepsRepository['ensureAttendancePartitions']>()
+      .mockResolvedValue(1),
   };
   for (const batch of batches) repository.dueFiles.mockResolvedValueOnce(batch);
   repository.dueFiles.mockResolvedValue([]);
@@ -43,6 +52,7 @@ describe('SweepsService.sweep', () => {
       answersRemoved: 4,
       inboxPartitionsMade: 2,
       inboxPartitionsDropped: 1,
+      attendancePartitionsMade: 1,
     });
   });
 
@@ -123,6 +133,7 @@ describe('SweepsService.sweep', () => {
       answersRemoved: 4,
       inboxPartitionsMade: 2,
       inboxPartitionsDropped: 1,
+      attendancePartitionsMade: 1,
     });
   });
 
@@ -138,5 +149,16 @@ describe('SweepsService.sweep', () => {
     repository.ensureInboxPartitions.mockRejectedValue(new Error('database is busy'));
     const report = await service.sweep();
     expect(report).toMatchObject({ inboxPartitionsMade: 0, inboxPartitionsDropped: 1 });
+  });
+
+  it('makes the partitions of the attendance marks ahead, and goes on when it cannot', async () => {
+    const { service, repository } = build();
+    await service.sweep();
+    expect(repository.ensureAttendancePartitions).toHaveBeenCalledWith(ATTENDANCE_YEARS_AHEAD);
+    repository.ensureAttendancePartitions.mockRejectedValue(new Error('database is busy'));
+    expect(await service.sweep()).toMatchObject({
+      attendancePartitionsMade: 0,
+      inboxPartitionsDropped: 1,
+    });
   });
 });

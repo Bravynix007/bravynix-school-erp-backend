@@ -16,6 +16,9 @@ export const INBOX_KEEP_DAYS = 180;
 /** Months after this one whose partitions of the inboxes are made ahead (DDD 14.5). */
 export const PARTITIONS_AHEAD = 3;
 
+/** Calendar years after this one whose partitions of the attendance marks are made ahead (DDD 14.5). */
+export const ATTENDANCE_YEARS_AHEAD = 1;
+
 /** How many files are removed in one look at the list of those that are due. */
 export const FILE_BATCH = 100;
 

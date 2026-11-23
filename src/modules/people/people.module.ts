@@ -1,5 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { ChildContexts } from '../../platform/tenancy/index.js';
+import { AttendanceModule, AttendanceStaff, SectionRoster } from '../attendance/index.js';
 import { EventPeople } from '../events/index.js';
 import { TimetableChildren, TimetableStaff } from '../timetable/index.js';
 import { AcademicSetupModule, SectionStudents, TeachingStaff } from '../academic-setup/index.js';
@@ -32,6 +33,8 @@ import { PeopleChildContexts } from './people-child-contexts.js';
 import { PeopleEventPeople } from './people-event-people.js';
 import { PeopleFileReaders } from './people-file-readers.js';
 import { PeopleTimetableChildren } from './people-timetable-children.js';
+import { PeopleAttendanceStaff } from './people-attendance-staff.js';
+import { PeopleSectionRoster } from './people-section-roster.js';
 import { PeopleTimetableStaff } from './people-timetable-staff.js';
 import { PeopleSectionStudents } from './people-section-students.js';
 import { PeopleTeachingStaff } from './people-teaching-staff.js';
@@ -60,7 +63,14 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
  */
 @Global()
 @Module({
-  imports: [MastersModule, FilesModule, AcademicSetupModule, IdempotencyModule, JobsModule],
+  imports: [
+    MastersModule,
+    FilesModule,
+    AcademicSetupModule,
+    AttendanceModule,
+    IdempotencyModule,
+    JobsModule,
+  ],
   controllers: [
     StaffController,
     StaffIdentityController,
@@ -117,6 +127,10 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
     { provide: TimetableChildren, useExisting: PeopleTimetableChildren },
     PeopleTimetableStaff,
     { provide: TimetableStaff, useExisting: PeopleTimetableStaff },
+    PeopleSectionRoster,
+    { provide: SectionRoster, useExisting: PeopleSectionRoster },
+    PeopleAttendanceStaff,
+    { provide: AttendanceStaff, useExisting: PeopleAttendanceStaff },
   ],
   exports: [
     TeachingStaff,
@@ -126,6 +140,8 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
     ChildContexts,
     TimetableChildren,
     TimetableStaff,
+    SectionRoster,
+    AttendanceStaff,
   ],
 })
 export class PeopleModule {}

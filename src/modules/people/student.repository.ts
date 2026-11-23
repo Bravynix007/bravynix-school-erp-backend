@@ -24,6 +24,15 @@ export type EnrolmentRow = Selectable<StudentEnrolmentsTable>;
 export type NewEnrolment = Insertable<StudentEnrolmentsTable>;
 export type PlacementRow = Selectable<StudentSectionPlacementsTable>;
 export type NewPlacement = Insertable<StudentSectionPlacementsTable>;
+/** A student on the roll of a section on a day (`placedOn`). */
+export interface PlacedStudent {
+  studentEnrolmentId: string;
+  studentId: string;
+  rollNumber: string;
+  firstName: string;
+  lastName: string | null;
+  photoFileId: string | null;
+}
 export type StudentChanges = Updateable<StudentsTable>;
 export type PlacementChanges = Updateable<StudentSectionPlacementsTable>;
 export type EnrolmentChanges = Updateable<StudentEnrolmentsTable>;
@@ -312,6 +321,16 @@ export class StudentRepository {
       .executeTakeFirst();
   }
 
+  /** When the placement was made: a register taken before that did not count the student (DDD 13.2). */
+  async placedAt(tx: Tx, placementId: string): Promise<Date> {
+    const row = await tx
+      .selectFrom('student_section_placements')
+      .select('created_at')
+      .where('id', '=', placementId)
+      .executeTakeFirstOrThrow();
+    return row.created_at;
+  }
+
   /** The students of the source whose placement is open, with every filter of a promotion applied. */
   private inSource(tx: Tx, source: PromotionSource) {
     let query = tx
@@ -411,6 +430,94 @@ export class StudentRepository {
       .groupBy('section_id')
       .execute();
     return new Map(rows.map((row) => [row.section_id, Number(row.total)]));
+  }
+
+  /**
+   * The students placed in the section on the date (DDD 13.2): the placement covers it, the enrolment is active and
+   * had not ended before it, and, with `placedBefore`, whose placement was made by then (the rule of DDD 13.2, written
+   * once, here). By roll number, the shorter (numeric) ones first.
+   */
+  async placedOn(
+    tx: Tx,
+    sectionId: string,
+    date: string,
+    placedBefore?: Date,
+  ): Promise<PlacedStudent[]> {
+    const rows = await tx
+      .selectFrom('student_section_placements as p')
+      .innerJoin('student_enrolments as e', 'e.id', 'p.student_enrolment_id')
+      .innerJoin('students as s', 's.id', 'e.student_id')
+      .select([
+        'e.id as studentEnrolmentId',
+        's.id as studentId',
+        'p.roll_number as rollNumber',
+        's.first_name as firstName',
+        's.last_name as lastName',
+        's.photo_file_id as photoFileId',
+      ])
+      .where('p.section_id', '=', sectionId)
+      .where('p.start_date', '<=', date)
+      .where((eb) => eb.or([eb('p.end_date', 'is', null), eb('p.end_date', '>=', date)]))
+      .where('e.status', '=', 1)
+      .where((eb) => eb.or([eb('e.left_date', 'is', null), eb('e.left_date', '>=', date)]))
+      .where('s.status', '=', 1)
+      // The cut-off comes from a JavaScript Date, which keeps milliseconds only; the stored time keeps microseconds, so a
+      // placement made in the same millisecond as the session (as the seed does) must not fall after it.
+      .$if(placedBefore !== undefined, (query) =>
+        query.where(sql`date_trunc('milliseconds', p.created_at)`, '<=', placedBefore!),
+      )
+      .orderBy(sql`length(p.roll_number)`)
+      .orderBy('p.roll_number')
+      .orderBy('e.id')
+      .execute();
+    return rows;
+  }
+
+  /** The students of these enrolments, by enrolment ID. */
+  async namedByEnrolment(
+    tx: Tx,
+    enrolmentIds: readonly string[],
+  ): Promise<Map<string, { studentId: string; firstName: string; lastName: string | null }>> {
+    if (enrolmentIds.length === 0) return new Map();
+    const rows = await tx
+      .selectFrom('student_enrolments as e')
+      .innerJoin('students as s', 's.id', 'e.student_id')
+      .select([
+        'e.id as enrolmentId',
+        's.id as studentId',
+        's.first_name as firstName',
+        's.last_name as lastName',
+      ])
+      .where('e.id', 'in', enrolmentIds)
+      .execute();
+    return new Map(
+      rows.map((row) => [
+        row.enrolmentId,
+        { studentId: row.studentId, firstName: row.firstName, lastName: row.lastName },
+      ]),
+    );
+  }
+
+  /** The guardians with a login of the students of these enrolments, each once, by enrolment ID. */
+  async guardianUsersByEnrolment(
+    tx: Tx,
+    enrolmentIds: readonly string[],
+  ): Promise<Map<string, string[]>> {
+    if (enrolmentIds.length === 0) return new Map();
+    const rows = await tx
+      .selectFrom('student_enrolments as e')
+      .innerJoin('student_guardians as g', 'g.student_id', 'e.student_id')
+      .select(['e.id as enrolmentId', 'g.user_id as userId'])
+      .distinct()
+      .where('e.id', 'in', enrolmentIds)
+      .where('g.status', '=', 1)
+      .where('g.user_id', 'is not', null)
+      .execute();
+    const guardians = new Map<string, string[]>();
+    for (const row of rows) {
+      guardians.set(row.enrolmentId, [...(guardians.get(row.enrolmentId) ?? []), row.userId!]);
+    }
+    return guardians;
   }
 
   /** Students of the filter, each with the placement shown: the year named, else the latest. */

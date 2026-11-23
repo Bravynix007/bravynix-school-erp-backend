@@ -6,7 +6,6 @@ import {
   checkRange,
   checkScope,
   daysBetween,
-  formatDay,
   inboxTabOf,
   mayEdit,
   parentsAreTold,
@@ -206,12 +205,5 @@ describe('inboxTabOf', () => {
     expect(inboxTabOf(1)).toBe(2);
     expect(inboxTabOf(3)).toBe(3);
     expect(inboxTabOf(2)).toBe(4);
-  });
-});
-
-describe('formatDay', () => {
-  it('writes a date as a notice shows it, with no leading zero on the day', () => {
-    expect(formatDay('2026-12-22')).toBe('22 Dec 2026');
-    expect(formatDay('2027-01-05')).toBe('5 Jan 2027');
   });
 });

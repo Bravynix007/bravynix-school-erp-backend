@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
+  ATTENDANCE_YEARS_AHEAD,
   FILE_BATCH,
   DOCUMENT_FILE_DAYS,
   IMPORT_RUN_DAYS,
@@ -26,6 +27,8 @@ export interface SweepReport {
   inboxPartitionsMade: number;
   /** Inbox partitions dropped for being past their keeping. */
   inboxPartitionsDropped: number;
+  /** Yearly partitions of the attendance marks made ahead of time. */
+  attendancePartitionsMade: number;
 }
 
 /**
@@ -50,6 +53,7 @@ export class SweepsService {
       answersRemoved: 0,
       inboxPartitionsMade: 0,
       inboxPartitionsDropped: 0,
+      attendancePartitionsMade: 0,
     };
     report.filesExpired = await this.part('expire files', () =>
       this.sweeps.expireFiles(DOCUMENT_FILE_DAYS, UNREFERENCED_GRACE_HOURS),
@@ -68,6 +72,9 @@ export class SweepsService {
     );
     report.inboxPartitionsDropped = await this.part('drop old inbox partitions', () =>
       this.sweeps.dropInboxPartitions(INBOX_KEEP_DAYS),
+    );
+    report.attendancePartitionsMade = await this.part('make attendance partitions', () =>
+      this.sweeps.ensureAttendancePartitions(ATTENDANCE_YEARS_AHEAD),
     );
     this.logger.log(report, 'Sweep done');
     return report;
