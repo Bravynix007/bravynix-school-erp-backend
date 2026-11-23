@@ -26,7 +26,13 @@ const PDF = Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(60, 2)]);
 
 interface Ticket {
   fileId: string;
-  upload: { url: string; fields: Record<string, string>; expiresAt: string };
+  upload: {
+    url: string;
+    method: string;
+    fields: Record<string, string>;
+    headers: Record<string, string>;
+    expiresAt: string;
+  };
   maxBytes: number;
 }
 
@@ -120,6 +126,7 @@ describe('FIL-01 to FIL-03 files (API design 15)', () => {
       delete_after: Date | null;
       original_filename: string | null;
       object_key: string;
+      storage_bucket: number;
     }>(ownerDb, id);
     expect(stored).toBeDefined();
     return stored!;
@@ -164,7 +171,7 @@ describe('FIL-01 to FIL-03 files (API design 15)', () => {
     it('stores a photo, makes it Ready with its checksum, and serves it as an attachment of its own type', async () => {
       const given = await ticket();
       expect(given.maxBytes).toBe(5_242_880);
-      expect(given.upload.fields).toEqual({});
+      expect(given.upload).toMatchObject({ method: 'POST', fields: {}, headers: {} });
       expect(await row(given.fileId)).toMatchObject({ file_status: 1, original_filename: null });
 
       expect((await send(given, JPEG, 'image/jpeg')).status).toBe(204);
@@ -338,6 +345,59 @@ describe('FIL-01 to FIL-03 files (API design 15)', () => {
       const pending = await ticket();
       expect((await link(pending.fileId)).status).toBe(404);
       expect((await link(missing)).status).toBe(404);
+    });
+  });
+
+  describe('a public file: the event image (DDD 16.1)', () => {
+    const eventImage = { purpose: 10, fileName: 'poster.jpg' };
+
+    it('sits in the public bucket under public/, is confirmed with its address, and anyone can read it there as an image', async () => {
+      const given = await ticket(eventImage);
+      expect(await row(given.fileId)).toMatchObject({ file_status: 1 });
+      expect((await row(given.fileId)).object_key).toMatch(/^public\/[\w-]+\/[\w-]+\/10\/[\w-]+$/);
+      expect((await send(given, JPEG, 'image/jpeg')).status).toBe(204);
+      const confirmed = await confirm(given.fileId);
+      expect(confirmed.status).toBe(200);
+      const { url } = confirmed.body.data as unknown as { url: string };
+      expect(url).toMatch(/\/v1\/local-storage\/public\//);
+      expect(JSON.stringify(confirmed.body)).not.toContain('object_key');
+      expect((await row(given.fileId)).storage_bucket).toBe(2);
+
+      // No sign-in and no signature: that is what public means.
+      const read = await request(t.app.getHttpServer()).get(new URL(url).pathname).buffer();
+      expect(read.status).toBe(200);
+      expect(read.headers['content-type']).toBe('image/jpeg');
+      expect(read.headers['x-content-type-options']).toBe('nosniff');
+      expect(read.headers['cache-control']).toContain('immutable');
+      expect(Buffer.from(read.body as Buffer).equals(JPEG)).toBe(true);
+    });
+
+    it('answers FIL-03 with the same address and no expiry, to an Admin of the Institution too', async () => {
+      const id = await ready(eventImage, JPEG);
+      const fetched = await link(id, institutionAdmin.token);
+      expect(fetched.status).toBe(200);
+      const data = fetched.body.data as unknown as { url: string; expiresAt: string | null };
+      expect(data.url).toMatch(/\/v1\/local-storage\/public\//);
+      expect(data.expiresAt).toBeNull();
+    });
+
+    it('is not for a PDF, nor for an Admin of another Institution', async () => {
+      expect((await ask({ ...eventImage, contentType: 'application/pdf' })).status).toBe(415);
+      expect((await ask(eventImage, institutionAdmin.token, second)).status).toBe(404);
+    });
+
+    it('is the only thing the public address serves: a private file, a path out of public/ and a made-up key are not found', async () => {
+      const photo = await ready({}, JPEG);
+      const privateKey = (await row(photo)).object_key;
+      const server = t.app.getHttpServer();
+      expect((await request(server).get(`/v1/local-storage/${privateKey}`)).status).not.toBe(200);
+      expect(
+        (await request(server).get(`/v1/local-storage/public/../${privateKey}`)).status,
+      ).not.toBe(200);
+      expect((await request(server).get('/v1/local-storage/public/nothing/here')).status).toBe(404);
+      expect((await request(server).post('/v1/local-storage/public/nothing/here')).status).toBe(
+        405,
+      );
     });
   });
 

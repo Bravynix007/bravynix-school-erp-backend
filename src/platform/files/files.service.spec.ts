@@ -68,16 +68,23 @@ function build(stored: FileRow | null = file(), bytes: Buffer | null = JPEG) {
     );
   const read = vi.fn<ObjectStorage['read']>().mockResolvedValue(bytes);
   const remove = vi.fn<ObjectStorage['remove']>().mockResolvedValue();
-  const createUpload = vi
-    .fn<ObjectStorage['createUpload']>()
-    .mockImplementation((input) =>
-      Promise.resolve({ url: 'http://store/up', fields: {}, expiresAt: input.expiresAt }),
-    );
+  const createUpload = vi.fn<ObjectStorage['createUpload']>().mockImplementation((input) =>
+    Promise.resolve({
+      url: 'http://store/up',
+      method: 'POST',
+      fields: {},
+      headers: {},
+      expiresAt: input.expiresAt,
+    }),
+  );
   const createDownload = vi
     .fn<ObjectStorage['createDownload']>()
     .mockImplementation((input) =>
       Promise.resolve({ url: 'http://store/down', expiresAt: input.expiresAt }),
     );
+  const publicUrl = vi
+    .fn<ObjectStorage['publicUrl']>()
+    .mockImplementation((key) => `https://cdn.test/${key}`);
   const tenant = {
     personId: 'admin-1',
     roleCode: 3,
@@ -97,7 +104,7 @@ function build(stored: FileRow | null = file(), bytes: Buffer | null = JPEG) {
   const service = new FilesService(
     { transaction } as unknown as DatabaseService,
     { find, insert, settlePending } as unknown as FilesRepository,
-    { read, remove, createUpload, createDownload } as unknown as ObjectStorage,
+    { read, remove, createUpload, createDownload, publicUrl } as unknown as ObjectStorage,
     { requireInstitution, forPrincipal } as unknown as ScopeService,
     { record } as unknown as AuditService,
     clock,
@@ -112,6 +119,7 @@ function build(stored: FileRow | null = file(), bytes: Buffer | null = JPEG) {
     remove,
     createUpload,
     createDownload,
+    publicUrl,
     requireInstitution,
     record,
     mayOpen,
@@ -156,6 +164,17 @@ describe('FilesService', () => {
           contentType: 'image/jpeg',
           maxBytes: 5_242_880,
         }),
+      );
+    });
+
+    it('puts an event image in the public bucket, under public/, with the size the client declared', async () => {
+      const t = build();
+      await t.service.requestUpload(admin(), request({ purpose: 10 }) as never);
+      const [, row] = t.insert.mock.calls[0]!;
+      expect(row).toMatchObject({ storage_bucket: 2, purpose: 10 });
+      expect(row.object_key).toMatch(/^public\/society-1\/institution-1\/10\/[\w-]+$/);
+      expect(t.createUpload).toHaveBeenCalledWith(
+        expect.objectContaining({ key: row.object_key, sizeBytes: 1000 }),
       );
     });
 
@@ -244,6 +263,22 @@ describe('FilesService', () => {
         checksum_sha256: createHash('sha256').update(JPEG).digest(),
         delete_after: null,
       });
+    });
+
+    it('gives a public file, an event image, the address anyone can read it at', async () => {
+      const t = build(
+        file({
+          purpose: 10,
+          storage_bucket: 2,
+          object_key: 'public/society-1/institution-1/10/abc',
+        }),
+      );
+      const ready = await t.service.confirm(admin(), 'file-1');
+      expect(ready.url).toBe('https://cdn.test/public/society-1/institution-1/10/abc');
+    });
+
+    it('gives no address for a private file', async () => {
+      expect((await build().service.confirm(admin(), 'file-1')).url).toBeUndefined();
     });
 
     it('keeps an import for seven days', async () => {
@@ -342,6 +377,22 @@ describe('FilesService', () => {
       expect(t.createDownload).toHaveBeenCalledWith(
         expect.objectContaining({ contentType: 'image/jpeg', fileName: 'form.pdf' }),
       );
+    });
+
+    it('gives a public file its public address, which does not expire, and makes no link', async () => {
+      const t = build(
+        file({
+          file_status: 2,
+          purpose: 10,
+          storage_bucket: 2,
+          object_key: 'public/society-1/institution-1/10/abc',
+        }),
+      );
+      expect(await t.service.download(admin(), 'file-1')).toEqual({
+        url: 'https://cdn.test/public/society-1/institution-1/10/abc',
+        expiresAt: null,
+      });
+      expect(t.createDownload).not.toHaveBeenCalled();
     });
 
     it('gives an Owner or Admin another person’s file; row-level security has narrowed them to their Institutions', async () => {

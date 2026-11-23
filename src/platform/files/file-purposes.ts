@@ -12,6 +12,7 @@ export const FilePurpose = {
   StaffPhoto: 4,
   StudentDocument: 5,
   StaffDocument: 6,
+  EventImage: 10,
   ImportCsv: 12,
 } as const;
 export type FilePurpose = (typeof FilePurpose)[keyof typeof FilePurpose];
@@ -25,6 +26,8 @@ export interface PurposeRule {
   auditedDownload: boolean;
   /** The name the uploader gave is kept: documents and imports show it, photos do not (DDD 9.12). */
   keepsName: boolean;
+  /** The file is meant to be seen by anyone: it sits in the public bucket and has an address (DDD 16.1, 16.2). */
+  isPublic: boolean;
   /** Days an import is kept before the sweep removes it; none for the rest. */
   keepDays: number | null;
 }
@@ -38,6 +41,7 @@ export const PURPOSES: Readonly<Record<FilePurpose, PurposeRule>> = {
     uploadRoles: ADMINS,
     auditedDownload: false,
     keepsName: false,
+    isPublic: false,
     keepDays: null,
   },
   [FilePurpose.StaffPhoto]: {
@@ -45,6 +49,7 @@ export const PURPOSES: Readonly<Record<FilePurpose, PurposeRule>> = {
     uploadRoles: ADMINS,
     auditedDownload: false,
     keepsName: false,
+    isPublic: false,
     keepDays: null,
   },
   [FilePurpose.StudentDocument]: {
@@ -52,6 +57,7 @@ export const PURPOSES: Readonly<Record<FilePurpose, PurposeRule>> = {
     uploadRoles: ADMINS,
     auditedDownload: true,
     keepsName: true,
+    isPublic: false,
     keepDays: null,
   },
   [FilePurpose.StaffDocument]: {
@@ -59,6 +65,15 @@ export const PURPOSES: Readonly<Record<FilePurpose, PurposeRule>> = {
     uploadRoles: ADMINS,
     auditedDownload: true,
     keepsName: true,
+    isPublic: false,
+    keepDays: null,
+  },
+  [FilePurpose.EventImage]: {
+    contentTypes: IMAGE_TYPES,
+    uploadRoles: ADMINS,
+    auditedDownload: false,
+    keepsName: false,
+    isPublic: true,
     keepDays: null,
   },
   [FilePurpose.ImportCsv]: {
@@ -66,11 +81,13 @@ export const PURPOSES: Readonly<Record<FilePurpose, PurposeRule>> = {
     uploadRoles: ADMINS,
     auditedDownload: true,
     keepsName: true,
+    isPublic: false,
     keepDays: 7,
   },
 };
 
 export const PURPOSE_CODES = Object.keys(PURPOSES).map(Number) as FilePurpose[];
 
-/** Every purpose the People module uses is private (DDD 16.2); the public ones are logos, events and banners. */
+/** Where a file lives (DDD 16.1): documents and photos of people are private; logos, event images and banners are public. */
 export const PRIVATE_BUCKET = 1;
+export const PUBLIC_BUCKET = 2;

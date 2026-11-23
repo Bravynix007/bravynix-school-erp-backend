@@ -11,11 +11,22 @@ import { DatabaseService } from '../database/index.js';
 import { ScopeService } from '../tenancy/index.js';
 import { FileReaders } from './file-readers.js';
 import { matchesDeclaredType } from './file-signature.js';
-import { MAX_FILE_BYTES, PRIVATE_BUCKET, PURPOSES, type FilePurpose } from './file-purposes.js';
+import {
+  MAX_FILE_BYTES,
+  PRIVATE_BUCKET,
+  PUBLIC_BUCKET,
+  PURPOSES,
+  type FilePurpose,
+} from './file-purposes.js';
 import type { RequestUploadDto } from './files.dto.js';
-import { FilesRepository, isDue } from './files.repository.js';
+import { FilesRepository, isDue, type FileRow } from './files.repository.js';
 import { fileResource, type FileResource } from './files.resource.js';
-import { ObjectStorage, type DownloadTicket, type UploadTicket } from './object-storage.js';
+import {
+  ObjectStorage,
+  PUBLIC_KEY_PREFIX,
+  type DownloadTicket,
+  type UploadTicket,
+} from './object-storage.js';
 
 /** How long an upload ticket and a download link last (API design 15.1, 15.3). */
 const TICKET_SECONDS = 300;
@@ -72,14 +83,15 @@ export class FilesService {
       throw new AppException(HttpStatus.UNSUPPORTED_MEDIA_TYPE, ErrorCode.FILE_TYPE_NOT_ALLOWED);
     }
     const now = this.clock.now();
-    const key = `${context.societyId}/${context.institutionId}/${body.purpose}/${newId()}`;
+    // A public file sits under `public/`, which is how the store tells it from the private ones.
+    const key = `${rule.isPublic ? PUBLIC_KEY_PREFIX : ''}${context.societyId}/${context.institutionId}/${body.purpose}/${newId()}`;
     const file = await this.database.transaction(context.tenant, (tx) =>
       this.files.insert(tx, {
         id: newId(),
         created_by: principal.personId,
         society_id: context.societyId,
         institution_id: context.institutionId,
-        storage_bucket: PRIVATE_BUCKET,
+        storage_bucket: rule.isPublic ? PUBLIC_BUCKET : PRIVATE_BUCKET,
         object_key: key,
         purpose: body.purpose,
         content_type: body.contentType,
@@ -91,6 +103,7 @@ export class FilesService {
     const upload = await this.storage.createUpload({
       key,
       contentType: body.contentType,
+      sizeBytes: body.sizeBytes,
       maxBytes: MAX_FILE_BYTES,
       expiresAt: new Date(now.getTime() + TICKET_SECONDS * 1000),
     });
@@ -139,7 +152,7 @@ export class FilesService {
       }),
     );
     if (!ready) throw alreadyConfirmed();
-    return fileResource(ready);
+    return fileResource(ready, this.publicUrlOf(ready));
   }
 
   /**
@@ -178,12 +191,21 @@ export class FilesService {
       }
       return found;
     });
+    // A public file has an address anyone can read, and no link that expires.
+    const publicUrl = this.publicUrlOf(file);
+    if (publicUrl) return { url: publicUrl, expiresAt: null };
     return this.storage.createDownload({
       key: file.object_key,
       contentType: file.content_type,
       fileName: file.original_filename,
       expiresAt: new Date(this.clock.now().getTime() + TICKET_SECONDS * 1000),
     });
+  }
+
+  private publicUrlOf(file: FileRow): string | undefined {
+    return PURPOSES[file.purpose as FilePurpose]?.isPublic
+      ? this.storage.publicUrl(file.object_key)
+      : undefined;
   }
 }
 

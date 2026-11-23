@@ -10,8 +10,8 @@ import {
 const ADMINS = [RoleCode.SocietyOwner, RoleCode.InstitutionAdmin];
 
 describe('the purposes of a file (API design 15.2, DDD 16.2)', () => {
-  it('registers exactly the purposes the People module uses', () => {
-    expect(PURPOSE_CODES.toSorted((a, b) => a - b)).toEqual([3, 4, 5, 6, 12]);
+  it('registers exactly the purposes the modules built so far use', () => {
+    expect(PURPOSE_CODES.toSorted((a, b) => a - b)).toEqual([3, 4, 5, 6, 10, 12]);
   });
 
   it.each([
@@ -33,6 +33,7 @@ describe('the purposes of a file (API design 15.2, DDD 16.2)', () => {
       true,
       null,
     ],
+    ['event image', FilePurpose.EventImage, [...IMAGE_TYPES], false, false, null],
     ['import CSV', FilePurpose.ImportCsv, ['text/csv'], true, true, 7],
   ])(
     '%s: types, who uploads, whether its link is audited, whether its name is kept, how long it is kept',
@@ -42,10 +43,16 @@ describe('the purposes of a file (API design 15.2, DDD 16.2)', () => {
         uploadRoles: ADMINS,
         auditedDownload: audited,
         keepsName,
+        isPublic: purpose === FilePurpose.EventImage,
         keepDays: days,
       });
     },
   );
+
+  it('keeps only the event image public of the purposes registered (DDD 16.1)', () => {
+    const publicPurposes = PURPOSE_CODES.filter((code) => PURPOSES[code].isPublic);
+    expect(publicPurposes).toEqual([FilePurpose.EventImage]);
+  });
 
   it('is limited to 5 MB', () => {
     expect(MAX_FILE_BYTES).toBe(5 * 1024 * 1024);

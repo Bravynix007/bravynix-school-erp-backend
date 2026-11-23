@@ -7,14 +7,17 @@ export interface FileResource {
   contentType: string;
   sizeBytes: number;
   fileStatus: number;
+  /** Only for a public file (an event image): the address anyone can read it at. */
+  url?: string;
 }
 
-export function fileResource(row: FileRow): FileResource {
+export function fileResource(row: FileRow, url?: string): FileResource {
   return {
     id: row.id,
     purpose: row.purpose,
     contentType: row.content_type,
     sizeBytes: row.size_bytes,
     fileStatus: row.file_status,
+    ...(url === undefined ? {} : { url }),
   };
 }

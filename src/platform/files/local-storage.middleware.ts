@@ -1,5 +1,7 @@
 import Busboy from 'busboy';
 import type { NextFunction, Request, Response } from 'express';
+import { sniffImageType } from './file-signature.js';
+import { PUBLIC_KEY_PREFIX } from './object-storage.js';
 import {
   LOCAL_STORAGE_PATH,
   type LocalGrant,
@@ -7,6 +9,10 @@ import {
 } from './local-object-storage.js';
 
 const ADDRESS = new RegExp(`^/v1${LOCAL_STORAGE_PATH}/([^/?#]+)$`);
+/** Keys are made of IDs and numbers, so a dot, and with it a `..` that climbs out of `public/`, never matches. */
+const PUBLIC_ADDRESS = new RegExp(
+  `^/v1${LOCAL_STORAGE_PATH}/(${PUBLIC_KEY_PREFIX.slice(0, -1)}(?:/[\\w-]+)+)$`,
+);
 
 /** An `Content-Disposition` filename that cannot break out of its quotes. */
 function attachment(name: string | null): string {
@@ -76,6 +82,29 @@ function receive(
   request.pipe(busboy);
 }
 
+/** A public object, read with no signature, as the image it is; nothing else is ever public. */
+function servePublic(
+  storage: LocalObjectStorage,
+  key: string,
+  request: Request,
+  response: Response,
+): void {
+  if (request.method !== 'GET') return refuse(response, 405, 'METHOD_NOT_ALLOWED');
+  sendOrFail(response, async () => {
+    const bytes = await storage.read(key);
+    const type = bytes && sniffImageType(bytes);
+    if (!bytes || !type) return refuse(response, 404, 'NOT_FOUND');
+    response
+      .status(200)
+      .set({
+        'Content-Type': type,
+        'X-Content-Type-Options': 'nosniff',
+        'Cache-Control': 'public, max-age=31536000, immutable',
+      })
+      .end(bytes);
+  });
+}
+
 /**
  * The address the local driver hands out, standing in for S3 (API design 15.1): `POST` takes one multipart
  * file the way a presigned POST does, `GET` serves one object as an attachment. It runs as plain middleware,
@@ -84,6 +113,8 @@ function receive(
  */
 export function localStorageMiddleware(storage: LocalObjectStorage) {
   return (request: Request, response: Response, next: NextFunction): void => {
+    const publicKey = PUBLIC_ADDRESS.exec(request.path)?.[1];
+    if (publicKey) return servePublic(storage, publicKey, request, response);
     const token = ADDRESS.exec(request.path)?.[1];
     if (!token) return next();
     const grant = storage.verify(token);

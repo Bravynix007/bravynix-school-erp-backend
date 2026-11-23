@@ -122,10 +122,22 @@ export const envSchema = z
 
     /**
      * Where files are kept (API design 15). `local` is the server's own disk, for development, tests and the demo;
-     * staging and production refuse it. `r2` (Cloudflare R2, decision of 8 Nov 2026) names the production store;
-     * its driver arrives with the deployment slice, and the Files module refuses to start with it until then.
+     * staging and production refuse it. `r2` (Cloudflare R2, decision of 8 Nov 2026) is the production store and
+     * needs the R2 settings below.
      */
     STORAGE_DRIVER: z.enum(['local', 'r2']).default('local'),
+    /**
+     * R2 (STORAGE_DRIVER=r2): the account's S3 address, an access key made for the bucket, and the bucket. Public
+     * images go to R2_PUBLIC_BUCKET (the same bucket unless one is named, under keys that begin `public/`) and are read
+     * at R2_PUBLIC_BASE_URL: the r2.dev address in development, a custom domain that serves only `/public/` in
+     * production. The access key comes from Secrets Manager and is never committed.
+     */
+    R2_ENDPOINT: z.url().optional(),
+    R2_ACCESS_KEY_ID: z.string().min(1).optional(),
+    R2_SECRET_ACCESS_KEY: z.string().min(1).optional(),
+    R2_BUCKET: z.string().min(1).optional(),
+    R2_PUBLIC_BUCKET: z.string().min(1).optional(),
+    R2_PUBLIC_BASE_URL: z.url().optional(),
     /**
      * Where the local file store keeps uploads (development, tests and the demo; API design 15). The real store
      * (R2) arrives with the deployment slice.
@@ -165,6 +177,23 @@ export const envSchema = z
         path: ['FIREBASE_SERVICE_ACCOUNT_JSON'],
         message: 'or FIREBASE_SERVICE_ACCOUNT_FILE is required when PUSH_DRIVER=firebase',
       });
+    }
+    if (env.STORAGE_DRIVER === 'r2') {
+      for (const name of [
+        'R2_ENDPOINT',
+        'R2_ACCESS_KEY_ID',
+        'R2_SECRET_ACCESS_KEY',
+        'R2_BUCKET',
+        'R2_PUBLIC_BASE_URL',
+      ] as const) {
+        if (!env[name]) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [name],
+            message: 'is required when STORAGE_DRIVER=r2',
+          });
+        }
+      }
     }
     if (deployed && env.PUSH_DRIVER !== 'firebase') {
       ctx.addIssue({

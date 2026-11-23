@@ -7,12 +7,13 @@ import { FilesRepository } from './files.repository.js';
 import { FilesService } from './files.service.js';
 import { LocalObjectStorage, LOCAL_STORAGE_PATH } from './local-object-storage.js';
 import { localStorageMiddleware } from './local-storage.middleware.js';
-import { createLocalStorage } from './object-storage.factory.js';
+import { createObjectStorage } from './object-storage.factory.js';
 import { ObjectStorage } from './object-storage.js';
 
 /**
- * Files (SDD 10.7, API design 15). Storage is the local disk for now; the signed addresses it hands out are served
- * by `localStorageMiddleware`, which stands in for S3 until the deployment slice adds the real driver.
+ * Files (SDD 10.7, API design 15). Storage is the local disk in development, tests and the demo, and R2 when
+ * `STORAGE_DRIVER=r2`. The addresses the local disk hands out are served by `localStorageMiddleware`, which stands
+ * in for R2 and is mounted only for it.
  */
 @Module({
   providers: [
@@ -20,21 +21,21 @@ import { ObjectStorage } from './object-storage.js';
     FilesService,
     FileDirectory,
     {
-      provide: LocalObjectStorage,
+      provide: ObjectStorage,
       inject: [AppConfig, Clock],
-      useFactory: ({ env }: AppConfig, clock: Clock) => createLocalStorage(env, clock),
+      useFactory: ({ env }: AppConfig, clock: Clock) => createObjectStorage(env, clock),
     },
-    { provide: ObjectStorage, useExisting: LocalObjectStorage },
   ],
   controllers: [FilesController],
   exports: [FilesService, FileDirectory, ObjectStorage],
 })
 export class FilesModule implements NestModule {
-  constructor(private readonly storage: LocalObjectStorage) {}
+  constructor(private readonly storage: ObjectStorage) {}
 
   configure(consumer: MiddlewareConsumer): void {
+    if (!(this.storage instanceof LocalObjectStorage)) return;
     consumer
       .apply(localStorageMiddleware(this.storage))
-      .forRoutes({ path: `${LOCAL_STORAGE_PATH.slice(1)}/:token`, method: RequestMethod.ALL });
+      .forRoutes({ path: `${LOCAL_STORAGE_PATH.slice(1)}/*address`, method: RequestMethod.ALL });
   }
 }
