@@ -4,14 +4,17 @@ import { RoleCode } from '../../common/auth/roles.js';
 import { ApiResult } from '../../common/http/api-result.js';
 import { AppException } from '../../common/http/app-exception.js';
 import { ErrorCode, FieldErrorCode, ResultCode } from '../../common/http/error-codes.js';
+import { requireVersion } from '../../common/http/require-version.js';
 import { fieldError } from '../../common/validation/field-error.js';
 import { Clock } from '../../common/time/clock.js';
 import { formatDay } from '../../common/time/format-day.js';
+import { VersionedStatedReasonDto } from '../../common/validation/reason.dto.js';
 import { AuditService } from '../../platform/audit/index.js';
 import {
   DatabaseService,
   insertStamp,
   isDuplicateOn,
+  updateStamp,
   type Tx,
 } from '../../platform/database/index.js';
 import { IdempotencyService } from '../../platform/idempotency/index.js';
@@ -22,6 +25,7 @@ import { AcademicYearDirectory, SectionDirectory } from '../academic-setup/index
 import { HolidayCalendar } from '../events/index.js';
 import { AttendanceStaff } from './attendance-staff.js';
 import type {
+  CorrectAttendanceDto,
   ListSessionsQueryDto,
   RosterQueryDto,
   SubmitAttendanceDto,
@@ -37,6 +41,7 @@ import {
 } from './attendance.resource.js';
 import {
   AttendanceStatus,
+  applyCorrection,
   countMarks,
   dateRefusal,
   requireEachStudentOnce,
@@ -231,6 +236,194 @@ export class AttendanceService {
     });
   }
 
+  /**
+   * ATT-05: changes the marks of a submitted session. 409 `VERSION_CONFLICT` first, then `SESSION_VOIDED`; 403
+   * `NOT_ASSIGNED` for a teacher away from their home Institution and 403 `FORBIDDEN` for a teacher correcting a past
+   * year, which only an Owner or an Admin may; 422 `STUDENT_NOT_IN_SECTION`. A request that changes nothing writes
+   * nothing. One transaction: the marks, the counts, the audit of the correction, and an alert for each student who
+   * is now Absent and was not.
+   */
+  async correct(
+    principal: Principal,
+    sessionId: string,
+    body: CorrectAttendanceDto,
+  ): Promise<AttendanceSessionResource> {
+    requireEachStudentOnce(body.changes, 'changes');
+    const context = await this.contextOfSession(principal, sessionId);
+    return this.database.transaction(context.tenant, async (tx) => {
+      const session = await this.lockedSession(tx, sessionId);
+      requireVersion(session, body.version);
+      this.requireActive(session);
+      if (!(await this.mayMark(tx, principal, context.institutionId))) {
+        throw AppException.forbidden(ErrorCode.NOT_ASSIGNED);
+      }
+      if (principal.roleCode === RoleCode.TeacherStaff) {
+        const current = await this.years.requireCurrentId(tx, context.institutionId);
+        if (current !== session.academic_year_id) throw AppException.forbidden();
+      }
+      const placed = new Set(
+        (
+          await this.roster.on(
+            tx,
+            session.section_id,
+            session.attendance_date,
+            session.submitted_at,
+          )
+        ).map((student) => student.studentEnrolmentId),
+      );
+      const strangers = body.changes.flatMap((change, index) =>
+        placed.has(change.studentEnrolmentId)
+          ? []
+          : [
+              fieldError(
+                `changes[${index.toString()}].studentEnrolmentId`,
+                ErrorCode.STUDENT_NOT_IN_SECTION,
+              ),
+            ],
+      );
+      if (strangers.length > 0) {
+        throw new AppException(HttpStatus.UNPROCESSABLE_ENTITY, ErrorCode.STUDENT_NOT_IN_SECTION, {
+          errors: strangers,
+        });
+      }
+      const stored = await this.repository.exceptionsOf(tx, session.id, session.attendance_date);
+      const outcome = applyCorrection(
+        new Map(stored.map((row) => [row.student_enrolment_id, row.attendance_status])),
+        body.changes,
+      );
+      const names = await this.sections.names(tx, [session.section_id]);
+      const people = await this.people.describe([session.submitted_by]);
+      if (outcome.changes.length === 0) return sessionResource(session, names, people);
+
+      const correction = { at: this.clock.now(), by: principal.personId };
+      const date = session.attendance_date;
+      const added = outcome.changes.filter((change) => change.before === AttendanceStatus.Present);
+      const removed = outcome.changes.filter((change) => change.after === AttendanceStatus.Present);
+      const changed = outcome.changes.filter(
+        (change) => !added.includes(change) && !removed.includes(change),
+      );
+      await this.repository.insertExceptions(
+        tx,
+        added.map((change) => ({
+          attendance_session_id: session.id,
+          student_enrolment_id: change.studentEnrolmentId,
+          attendance_date: date,
+          institution_id: session.institution_id,
+          attendance_status: change.after,
+          corrected_at: correction.at,
+          corrected_by: correction.by,
+        })),
+      );
+      for (const change of changed) {
+        await this.repository.setStatus(
+          tx,
+          session.id,
+          date,
+          change.studentEnrolmentId,
+          change.after,
+          correction,
+        );
+      }
+      await this.repository.removeExceptions(
+        tx,
+        session.id,
+        date,
+        removed.map((change) => change.studentEnrolmentId),
+      );
+      const counts = countMarks(outcome.marks);
+      const updated = await this.repository.update(tx, session.id, {
+        absent_count: counts.absent,
+        late_count: counts.late,
+        half_day_count: counts.halfDay,
+        leave_count: counts.leave,
+        last_corrected_at: correction.at,
+        last_corrected_by: correction.by,
+        ...updateStamp(principal.personId),
+      });
+      await this.audit.record(tx, {
+        action: 'attendance.corrected',
+        societyId: updated.society_id,
+        institutionId: updated.institution_id,
+        entityType: 'attendance_session',
+        entityId: updated.id,
+        before: {
+          marks: Object.fromEntries(outcome.changes.map((c) => [c.studentEnrolmentId, c.before])),
+        },
+        after: {
+          marks: Object.fromEntries(outcome.changes.map((c) => [c.studentEnrolmentId, c.after])),
+        },
+      });
+      await this.alertParents(
+        tx,
+        updated,
+        principal,
+        outcome.changes
+          .filter((change) => change.after === AttendanceStatus.Absent)
+          .map((change) => change.studentEnrolmentId),
+        // Dated by the submission, as the first alert is: the inbox keys a notice by its source key and time, so a
+        // child marked Absent again is told once (API design 10.12).
+        updated.submitted_at,
+      );
+      return sessionResource(updated, names, people);
+    });
+  }
+
+  /**
+   * ATT-06: voids a session submitted by mistake, which frees the day for a new submission. Owners and Admins only
+   * (the route). 409 `VERSION_CONFLICT` first, then `SESSION_VOIDED` for one already void. Its marks stay, ignored with
+   * it; the reason is kept in the audit entry. Nothing is told to the parents.
+   */
+  async voidSession(
+    principal: Principal,
+    sessionId: string,
+    body: VersionedStatedReasonDto,
+  ): Promise<{ id: string; status: 0 }> {
+    const context = await this.contextOfSession(principal, sessionId);
+    await this.database.transaction(context.tenant, async (tx) => {
+      const session = await this.lockedSession(tx, sessionId);
+      requireVersion(session, body.version);
+      this.requireActive(session);
+      const updated = await this.repository.update(tx, session.id, {
+        status: 0,
+        ...updateStamp(principal.personId),
+      });
+      await this.audit.record(tx, {
+        action: 'attendance.voided',
+        societyId: updated.society_id,
+        institutionId: updated.institution_id,
+        entityType: 'attendance_session',
+        entityId: updated.id,
+        reason: body.reason,
+        before: { status: session.status },
+        after: { status: updated.status },
+      });
+    });
+    return { id: sessionId, status: 0 };
+  }
+
+  /** The Institution a session is in, when the caller reaches it; 404 for a session out of reach, voided or not. */
+  private async contextOfSession(
+    principal: Principal,
+    sessionId: string,
+  ): Promise<InstitutionContext> {
+    const { tenant } = await this.scope.forPrincipal(principal);
+    const found = await this.database.transaction(tenant, (tx) =>
+      this.repository.findAny(tx, sessionId),
+    );
+    if (!found) throw AppException.notFound();
+    return this.scope.requireInstitution(principal, found.institution_id);
+  }
+
+  private async lockedSession(tx: Tx, sessionId: string): Promise<SessionRow> {
+    const session = await this.repository.lockAny(tx, sessionId);
+    if (!session) throw AppException.notFound();
+    return session;
+  }
+
+  private requireActive(session: SessionRow): void {
+    if (session.status !== 1) throw AppException.conflict(ErrorCode.SESSION_VOIDED);
+  }
+
   /** The writes of a submission, in the idempotency transaction. */
   private async write(
     tx: Tx,
@@ -334,6 +527,7 @@ export class AttendanceService {
       body.exceptions
         .filter((mark) => mark.attendanceStatus === AttendanceStatus.Absent)
         .map((mark) => mark.studentEnrolmentId),
+      session.submitted_at,
     );
     return session;
   }
@@ -347,6 +541,7 @@ export class AttendanceService {
     session: SessionRow,
     principal: Principal,
     absentEnrolmentIds: readonly string[],
+    occurredAt: Date,
   ): Promise<void> {
     if (absentEnrolmentIds.length === 0) return;
     const [students, guardians] = await Promise.all([
@@ -361,7 +556,7 @@ export class AttendanceService {
         societyId: session.society_id,
         institutionId: session.institution_id,
         sourceKey: `absent:${session.id}:${enrolmentId}`,
-        occurredAt: session.submitted_at,
+        occurredAt,
         category: ATTENDANCE_CATEGORY,
         tab: ONLY_FOR_YOU,
         title: 'Marked absent',

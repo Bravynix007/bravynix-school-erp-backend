@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
+  ArrayMinSize,
   IsArray,
   IsIn,
   IsInt,
@@ -12,9 +13,10 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
+import { VersionDto } from '../../common/validation/version.dto.js';
 import { IsCalendarDate } from '../../common/validation/calendar-date.js';
 import { LowerCaseUuid } from '../../common/validation/lower-case-uuid.js';
-import { EXCEPTION_STATUSES } from './attendance.rules.js';
+import { ALL_STATUSES, EXCEPTION_STATUSES } from './attendance.rules.js';
 
 /** The most students one section can have to mark: the roster the screen loads (API design 10.10). */
 const MAX_ROSTER = 1000;
@@ -96,4 +98,34 @@ export class SubmitAttendanceDto {
   @ValidateNested({ each: true })
   @Type(() => AttendanceExceptionDto)
   exceptions!: AttendanceExceptionDto[];
+}
+
+/** The most marks one correction changes (API design 10.12). */
+const MAX_CHANGES = 200;
+
+/** One student's mark after a correction; 1 Present is allowed here and removes the exception. */
+export class MarkChangeDto {
+  @ApiProperty({ format: 'uuid' })
+  @LowerCaseUuid()
+  @IsUUID()
+  studentEnrolmentId!: string;
+
+  @ApiProperty({
+    enum: ALL_STATUSES,
+    description: '1 Present, 2 Absent, 3 Late, 4 Half day, 5 Leave',
+  })
+  @IsIn(ALL_STATUSES)
+  attendanceStatus!: number;
+}
+
+/** ATT-05 body (API design 10.12). */
+export class CorrectAttendanceDto extends VersionDto {
+  @ApiProperty({ type: [MarkChangeDto], minItems: 1, maxItems: MAX_CHANGES })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(MAX_CHANGES)
+  @IsObject({ each: true })
+  @ValidateNested({ each: true })
+  @Type(() => MarkChangeDto)
+  changes!: MarkChangeDto[];
 }

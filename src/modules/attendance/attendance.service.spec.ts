@@ -116,6 +116,13 @@ function build() {
     insert: vi.fn<AttendanceRepository['insert']>().mockResolvedValue(session()),
     insertExceptions: vi.fn<AttendanceRepository['insertExceptions']>().mockResolvedValue(),
     exceptionsOf: vi.fn<AttendanceRepository['exceptionsOf']>().mockResolvedValue([]),
+    findAny: vi.fn<AttendanceRepository['findAny']>().mockResolvedValue(session()),
+    lockAny: vi.fn<AttendanceRepository['lockAny']>().mockResolvedValue(session()),
+    update: vi
+      .fn<AttendanceRepository['update']>()
+      .mockImplementation((_tx, _id, changes) => Promise.resolve(session(changes as never))),
+    setStatus: vi.fn<AttendanceRepository['setStatus']>().mockResolvedValue(),
+    removeExceptions: vi.fn<AttendanceRepository['removeExceptions']>().mockResolvedValue(),
   };
   const scope = {
     forPrincipal: vi.fn<ScopeService['forPrincipal']>().mockResolvedValue({ tenant } as never),
@@ -611,5 +618,274 @@ describe('AttendanceService.get', () => {
     const { service, repository } = build();
     repository.find.mockResolvedValue(undefined);
     expect(await refusal(service.get(admin, 'session-1'))).toMatchObject({ status: 404 });
+  });
+});
+
+const mark = (enrolmentId: string, status: number) => ({
+  attendance_session_id: 'session-1',
+  student_enrolment_id: enrolmentId,
+  attendance_date: '2026-11-17',
+  institution_id: 'inst-1',
+  attendance_status: status,
+  corrected_at: null,
+  corrected_by: null,
+});
+
+const change = (enrolment: string, attendanceStatus: number) => ({
+  studentEnrolmentId: `enrolment-${enrolment}`,
+  attendanceStatus,
+});
+
+describe('AttendanceService.correct', () => {
+  const stored = [mark('enrolment-2', 2), mark('enrolment-3', 3)];
+
+  function withMarks() {
+    const t = build();
+    t.repository.exceptionsOf.mockResolvedValue(stored);
+    return t;
+  }
+
+  it('adds, changes and removes marks, then the counts, the audit and the alert follow', async () => {
+    const t = withMarks();
+    const result = await t.service.correct(admin, 'session-1', {
+      version: 1,
+      changes: [change('1', 2), change('2', 5), change('3', 1)],
+    });
+    expect(t.repository.lockAny).toHaveBeenCalledWith(expect.anything(), 'session-1');
+    expect(t.repository.insertExceptions).toHaveBeenCalledWith(expect.anything(), [
+      expect.objectContaining({
+        student_enrolment_id: 'enrolment-1',
+        attendance_status: 2,
+        corrected_by: 'person-1',
+      }),
+    ]);
+    expect(t.repository.setStatus).toHaveBeenCalledWith(
+      expect.anything(),
+      'session-1',
+      '2026-11-17',
+      'enrolment-2',
+      5,
+      { at: new Date('2026-11-17T06:00:00.000Z'), by: 'person-1' },
+    );
+    expect(t.repository.removeExceptions).toHaveBeenCalledWith(
+      expect.anything(),
+      'session-1',
+      '2026-11-17',
+      ['enrolment-3'],
+    );
+    expect(t.repository.update).toHaveBeenCalledWith(
+      expect.anything(),
+      'session-1',
+      expect.objectContaining({
+        absent_count: 1,
+        late_count: 0,
+        half_day_count: 0,
+        leave_count: 1,
+        last_corrected_by: 'person-1',
+        updated_by: 'person-1',
+      }),
+    );
+    expect(t.audit.record).toHaveBeenCalledTimes(1);
+    expect(t.audit.record).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: 'attendance.corrected',
+        entityId: 'session-1',
+        before: { marks: { 'enrolment-1': 1, 'enrolment-2': 2, 'enrolment-3': 3 } },
+        after: { marks: { 'enrolment-1': 2, 'enrolment-2': 5, 'enrolment-3': 1 } },
+      }),
+    );
+    expect(result).toMatchObject({ id: 'session-1', absentCount: 1, leaveCount: 1 });
+  });
+
+  it('alerts the guardians of a student who becomes Absent, and of no one who stops being Absent', async () => {
+    const t = withMarks();
+    t.roster.studentsOf.mockResolvedValue(
+      new Map([['enrolment-1', { studentId: 'student-1', firstName: 'First1', lastName: null }]]),
+    );
+    t.roster.guardiansOf.mockResolvedValue(new Map([['enrolment-1', ['guardian-1']]]));
+    await t.service.correct(admin, 'session-1', {
+      version: 1,
+      changes: [change('1', 2), change('2', 1)],
+    });
+    expect(t.roster.studentsOf).toHaveBeenCalledWith(expect.anything(), ['enrolment-1']);
+    expect(t.notifications.notify).toHaveBeenCalledTimes(1);
+    expect(t.notifications.notify).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        sourceKey: 'absent:session-1:enrolment-1',
+        // dated by the submission, as the first alert is, so the inbox tells a child Absent again once (QA B7 D1)
+        occurredAt: new Date('2026-11-17T04:00:00.000Z'),
+        receivers: [{ userId: 'guardian-1', studentId: 'student-1' }],
+      }),
+      'person-1',
+    );
+
+    const away = withMarks();
+    await away.service.correct(admin, 'session-1', { version: 1, changes: [change('2', 1)] });
+    expect(away.notifications.notify).not.toHaveBeenCalled();
+  });
+
+  it('writes nothing for a request that changes nothing', async () => {
+    const t = withMarks();
+    const result = await t.service.correct(admin, 'session-1', {
+      version: 1,
+      changes: [change('2', 2), change('1', 1)],
+    });
+    expect(t.repository.update).not.toHaveBeenCalled();
+    expect(t.repository.insertExceptions).not.toHaveBeenCalled();
+    expect(t.audit.record).not.toHaveBeenCalled();
+    expect(result.version).toBe(1);
+  });
+
+  it('says the version first (409), then that the session is void (409)', async () => {
+    const t = withMarks();
+    t.repository.lockAny.mockResolvedValue(session({ version: 3, status: 0 }));
+    expect(
+      await refusal(
+        t.service.correct(admin, 'session-1', { version: 2, changes: [change('1', 2)] }),
+      ),
+    ).toMatchObject({ status: 409, code: 'VERSION_CONFLICT', details: { currentVersion: 3 } });
+    expect(
+      await refusal(
+        t.service.correct(admin, 'session-1', { version: 3, changes: [change('1', 2)] }),
+      ),
+    ).toMatchObject({ status: 409, code: 'SESSION_VOIDED' });
+    expect(t.repository.update).not.toHaveBeenCalled();
+  });
+
+  it('refuses a student named twice before it reads anything', async () => {
+    const t = withMarks();
+    expect(
+      await refusal(
+        t.service.correct(admin, 'session-1', {
+          version: 1,
+          changes: [change('1', 2), change('1', 3)],
+        }),
+      ),
+    ).toMatchObject({ status: 400, fields: ['changes[1].studentEnrolmentId'] });
+    expect(t.scope.forPrincipal).not.toHaveBeenCalled();
+  });
+
+  it('refuses a student who is not in the section, naming each, writing nothing', async () => {
+    const t = withMarks();
+    expect(
+      await refusal(
+        t.service.correct(admin, 'session-1', {
+          version: 1,
+          changes: [change('1', 2), change('9', 2), change('8', 3)],
+        }),
+      ),
+    ).toMatchObject({
+      status: 422,
+      code: 'STUDENT_NOT_IN_SECTION',
+      fields: ['changes[1].studentEnrolmentId', 'changes[2].studentEnrolmentId'],
+    });
+    expect(t.repository.update).not.toHaveBeenCalled();
+  });
+
+  it('refuses a teacher away from their home Institution, 403 NOT_ASSIGNED', async () => {
+    const t = withMarks();
+    t.staff.ownRecord.mockResolvedValue({ staffMemberId: 'staff-9', homeInstitutionId: 'inst-2' });
+    expect(
+      await refusal(
+        t.service.correct(teacher, 'session-1', { version: 1, changes: [change('1', 2)] }),
+      ),
+    ).toMatchObject({ status: 403, code: 'NOT_ASSIGNED' });
+  });
+
+  it('lets a teacher correct this year only, and an admin any year', async () => {
+    const past = session({ academic_year_id: 'year-0' });
+    const t = withMarks();
+    t.repository.lockAny.mockResolvedValue(past);
+    expect(
+      await refusal(
+        t.service.correct(teacher, 'session-1', { version: 1, changes: [change('1', 2)] }),
+      ),
+    ).toMatchObject({ status: 403, code: 'FORBIDDEN' });
+    expect(t.years.requireCurrentId).toHaveBeenCalledWith(expect.anything(), 'inst-1');
+    await t.service.correct(admin, 'session-1', { version: 1, changes: [change('1', 2)] });
+    expect(t.repository.update).toHaveBeenCalledTimes(1);
+    const current = withMarks();
+    await current.service.correct(teacher, 'session-1', { version: 1, changes: [change('1', 2)] });
+    expect(current.repository.update).toHaveBeenCalledTimes(1);
+  });
+
+  it('is 404 for a session that is not there or out of the caller’s reach', async () => {
+    const t = withMarks();
+    t.repository.findAny.mockResolvedValue(undefined);
+    expect(
+      await refusal(
+        t.service.correct(admin, 'session-1', { version: 1, changes: [change('1', 2)] }),
+      ),
+    ).toMatchObject({ status: 404 });
+    const out = withMarks();
+    out.scope.requireInstitution.mockRejectedValue(AppException.notFound());
+    expect(
+      await refusal(
+        out.service.correct(admin, 'session-1', { version: 1, changes: [change('1', 2)] }),
+      ),
+    ).toMatchObject({ status: 404 });
+    const gone = withMarks();
+    gone.repository.lockAny.mockResolvedValue(undefined);
+    expect(
+      await refusal(
+        gone.service.correct(admin, 'session-1', { version: 1, changes: [change('1', 2)] }),
+      ),
+    ).toMatchObject({ status: 404 });
+  });
+});
+
+describe('AttendanceService.voidSession', () => {
+  const reason = 'Marked the wrong section';
+
+  it('voids the session, audits the reason, and says so', async () => {
+    const t = build();
+    expect(await t.service.voidSession(admin, 'session-1', { version: 1, reason })).toEqual({
+      id: 'session-1',
+      status: 0,
+    });
+    expect(t.repository.update).toHaveBeenCalledWith(
+      expect.anything(),
+      'session-1',
+      expect.objectContaining({ status: 0, updated_by: 'person-1' }),
+    );
+    expect(t.audit.record).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: 'attendance.voided',
+        entityId: 'session-1',
+        institutionId: 'inst-1',
+        reason,
+        before: { status: 1 },
+        after: { status: 0 },
+      }),
+    );
+    expect(t.notifications.notify).not.toHaveBeenCalled();
+  });
+
+  it('says the version first (409), then that it is void already (409)', async () => {
+    const t = build();
+    t.repository.lockAny.mockResolvedValue(session({ version: 2, status: 0 }));
+    expect(
+      await refusal(t.service.voidSession(admin, 'session-1', { version: 1, reason })),
+    ).toMatchObject({ status: 409, code: 'VERSION_CONFLICT', details: { currentVersion: 2 } });
+    expect(
+      await refusal(t.service.voidSession(admin, 'session-1', { version: 2, reason })),
+    ).toMatchObject({ status: 409, code: 'SESSION_VOIDED' });
+    expect(t.repository.update).not.toHaveBeenCalled();
+  });
+
+  it('is 404 for a session that is not there or out of reach', async () => {
+    const t = build();
+    t.repository.findAny.mockResolvedValue(undefined);
+    expect(
+      await refusal(t.service.voidSession(admin, 'session-1', { version: 1, reason })),
+    ).toMatchObject({ status: 404 });
+    const out = build();
+    out.scope.requireInstitution.mockRejectedValue(AppException.notFound());
+    expect(
+      await refusal(out.service.voidSession(admin, 'session-1', { version: 1, reason })),
+    ).toMatchObject({ status: 404 });
   });
 });

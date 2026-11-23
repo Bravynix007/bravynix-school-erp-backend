@@ -766,6 +766,426 @@ describe('ATT-01 to ATT-04 mark attendance (API design 10.10, 10.11)', () => {
     });
   });
 
+  // Helpers of the correction and void tests.
+  const correct = (id: string, body: object, token = owner.token) =>
+    api('patch', `/v1/attendance/sessions/${id}/marks`, token, body);
+  const change = (name: string, attendanceStatus: number) => ({
+    studentEnrolmentId: enrolments[name]!,
+    attendanceStatus,
+  });
+  const marks = (id: string) =>
+    rows<{
+      student_enrolment_id: string;
+      attendance_status: number;
+      corrected_by: string | null;
+      corrected_at: Date | null;
+    }>(
+      `select student_enrolment_id, attendance_status, corrected_by, corrected_at from attendance_exceptions where attendance_session_id = '${id}' order by attendance_status`,
+    );
+  const keys = async () =>
+    (await readJobs(ownerDb, societyA, 'notify')).map(
+      (job) => (job.payload as { sourceKey: string }).sourceKey,
+    );
+  const voided = (id: string, body: object, token = owner.token) =>
+    api('post', `/v1/attendance/sessions/${id}/void`, token, body);
+
+  describe('ATT-05 correct marks', () => {
+    it('changes, adds and removes marks in one request, and the counts, the version and the audit follow', async () => {
+      const session = await submitted();
+      const res = await correct(
+        session.id,
+        { version: 1, changes: [change('bea', 1), change('cy', 3), change('asha', 2)] },
+        annaToken,
+      );
+      expect(res.status).toBe(200);
+      expect(res.body.data).toMatchObject({
+        id: session.id,
+        version: 2,
+        presentCount: 1,
+        absentCount: 1,
+        lateCount: 1,
+        halfDayCount: 0,
+        leaveCount: 0,
+      });
+      expect(await marks(session.id)).toMatchObject([
+        { student_enrolment_id: enrolments.asha, attendance_status: 2 },
+        { student_enrolment_id: enrolments.cy, attendance_status: 3 },
+      ]);
+      expect((await marks(session.id)).every((mark) => mark.corrected_by !== null)).toBe(true);
+      const stored = await rows<{
+        last_corrected_by: string | null;
+        last_corrected_at: Date | null;
+      }>(
+        `select last_corrected_by, last_corrected_at from attendance_sessions where id = '${session.id}'`,
+      );
+      expect(stored[0]!.last_corrected_by).not.toBeNull();
+      expect(stored[0]!.last_corrected_at).not.toBeNull();
+      const entries = await readAuditRows<{
+        old_values: { marks: Record<string, number> };
+        new_values: { marks: Record<string, number> };
+      }>(ownerDb, sql`entity_id = ${session.id} and action = 'attendance.corrected'`);
+      expect(entries).toHaveLength(1);
+      expect(entries[0]!.old_values.marks).toEqual({
+        [enrolments.bea!]: 2,
+        [enrolments.cy!]: 1,
+        [enrolments.asha!]: 1,
+      });
+      expect(entries[0]!.new_values.marks).toEqual({
+        [enrolments.bea!]: 1,
+        [enrolments.cy!]: 3,
+        [enrolments.asha!]: 2,
+      });
+      const read = await api('get', `/v1/attendance/sessions/${session.id}`, owner.token);
+      expect(read.body.data).toMatchObject({ version: 2, absentCount: 1 });
+      const loaded = await roster(sectionA, TODAY);
+      expect(loaded.data.students.map((s) => [s.firstName, s.attendanceStatus])).toEqual([
+        ['Asha', 2],
+        ['Bea', 1],
+        ['Cy', 3],
+      ]);
+    });
+
+    it('lets an Admin and the Owner correct as well, and changes between two marks keep the other counts', async () => {
+      const session = await submitted({
+        exceptions: [
+          { studentEnrolmentId: enrolments.asha, attendanceStatus: 4 },
+          { studentEnrolmentId: enrolments.bea, attendanceStatus: 5 },
+        ],
+      });
+      const first1 = await correct(
+        session.id,
+        { version: 1, changes: [change('asha', 5)] },
+        firstAdmin.token,
+      );
+      expect(first1.body.data).toMatchObject({
+        version: 2,
+        halfDayCount: 0,
+        leaveCount: 2,
+        presentCount: 1,
+      });
+      const second1 = await correct(session.id, { version: 2, changes: [change('bea', 2)] });
+      expect(second1.body.data).toMatchObject({ version: 3, absentCount: 1, leaveCount: 1 });
+    });
+
+    it('writes nothing for a request that changes nothing', async () => {
+      const session = await submitted();
+      const res = await correct(session.id, {
+        version: 1,
+        changes: [change('bea', 2), change('asha', 1)],
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.data).toMatchObject({ version: 1, absentCount: 1 });
+      expect(
+        await readAuditRows(
+          ownerDb,
+          sql`entity_id = ${session.id} and action = 'attendance.corrected'`,
+        ),
+      ).toEqual([]);
+    });
+
+    it('stamps a changed mark with who corrected it and when, and a removed one is gone', async () => {
+      const session = await submitted();
+      const before = (await marks(session.id))[0]!;
+      expect(before).toMatchObject({
+        attendance_status: 2,
+        corrected_by: null,
+        corrected_at: null,
+      });
+      succeeded(
+        await correct(session.id, { version: 1, changes: [change('bea', 3)] }, annaToken),
+        200,
+        'absent to late',
+      );
+      const after = await marks(session.id);
+      expect(after).toHaveLength(1);
+      expect(after[0]).toMatchObject({
+        student_enrolment_id: enrolments.bea,
+        attendance_status: 3,
+      });
+      expect(after[0]!.corrected_by).toBe(anna.person.id);
+      expect(after[0]!.corrected_at).not.toBeNull();
+    });
+
+    it('alerts no one for a student who becomes Late, Half day or Leave, only for one who becomes Absent', async () => {
+      const session = await submitted({ exceptions: [] });
+      succeeded(
+        await correct(session.id, {
+          version: 1,
+          changes: [change('asha', 3), change('bea', 4), change('cy', 5)],
+        }),
+        200,
+        'not absent',
+      );
+      expect(await keys()).toEqual([]);
+    });
+
+    it('leaves the marks of a session that was voided alone when the day is submitted again and corrected', async () => {
+      const original = await submitted();
+      succeeded(
+        await voided(original.id, { version: 1, reason: 'Marked the wrong day' }, firstAdmin.token),
+        200,
+        'void',
+      );
+      const again = await submitted();
+      succeeded(
+        await correct(again.id, { version: 1, changes: [change('bea', 3)] }),
+        200,
+        'changed',
+      );
+      expect(await marks(original.id)).toMatchObject([
+        { student_enrolment_id: enrolments.bea, attendance_status: 2 },
+      ]);
+      expect(await marks(again.id)).toMatchObject([
+        { student_enrolment_id: enrolments.bea, attendance_status: 3 },
+      ]);
+      succeeded(
+        await correct(again.id, { version: 2, changes: [change('bea', 1)] }),
+        200,
+        'removed',
+      );
+      expect(await marks(original.id)).toMatchObject([
+        { student_enrolment_id: enrolments.bea, attendance_status: 2 },
+      ]);
+      expect(await marks(again.id)).toEqual([]);
+    });
+
+    it('alerts a guardian when the child becomes Absent, once, and never when a child stops being Absent', async () => {
+      const session = await submitted({
+        exceptions: [{ studentEnrolmentId: enrolments.bea, attendanceStatus: 3 }],
+      });
+      expect(await keys()).toEqual([]);
+      succeeded(
+        await correct(session.id, { version: 1, changes: [change('bea', 2)] }),
+        200,
+        'absent',
+      );
+      expect(await keys()).toEqual([`absent:${session.id}:${enrolments.bea}`]);
+      succeeded(
+        await correct(session.id, { version: 2, changes: [change('bea', 1)] }),
+        200,
+        'present',
+      );
+      succeeded(
+        await correct(session.id, { version: 3, changes: [change('bea', 2)] }),
+        200,
+        'again',
+      );
+      // Each time a child becomes Absent a notice is queued, and the one key tells the inbox once.
+      expect(await keys()).toEqual(Array(2).fill(`absent:${session.id}:${enrolments.bea}`));
+      await drain();
+      await drain();
+      const inbox = await api('get', '/v1/notifications?tab=1&limit=50', parentToken);
+      expect(inbox.body.data).toHaveLength(1);
+    });
+
+    it('tells a guardian once when a child submitted Absent is corrected Absent again later in the day (QA B7 D1)', async () => {
+      const session = await submitted();
+      expect(await keys()).toEqual([`absent:${session.id}:${enrolments.bea}`]);
+      t.clock.set(`${TODAY}T01:05:00.000Z`);
+      succeeded(
+        await correct(session.id, { version: 1, changes: [change('bea', 1)] }),
+        200,
+        'present',
+      );
+      t.clock.set(`${TODAY}T01:10:00.000Z`);
+      succeeded(
+        await correct(session.id, { version: 2, changes: [change('bea', 2)] }),
+        200,
+        'absent again',
+      );
+      await drain();
+      await drain();
+      const inbox = await api('get', '/v1/notifications?tab=1&limit=50', parentToken);
+      expect(inbox.body.data).toHaveLength(1);
+    });
+
+    it('is 409 VERSION_CONFLICT for an old version, naming the current one, and 400 without one', async () => {
+      const session = await submitted();
+      succeeded(
+        await correct(session.id, { version: 1, changes: [change('cy', 3)] }),
+        200,
+        'first',
+      );
+      const old = await correct(session.id, { version: 1, changes: [change('cy', 4)] });
+      expect([old.status, old.body.code]).toEqual([409, 'VERSION_CONFLICT']);
+      expect(old.body.data).toEqual({ currentVersion: 2 });
+      const none = await correct(session.id, { changes: [change('cy', 4)] });
+      expect(none.status).toBe(400);
+      expect(fieldsOf(none)).toMatchObject({ version: expect.any(String) as string });
+    });
+
+    it('lets only one of two corrections sent with one version in', async () => {
+      const session = await submitted();
+      const [a, b] = await Promise.all([
+        correct(session.id, { version: 1, changes: [change('asha', 3)] }),
+        correct(session.id, { version: 1, changes: [change('cy', 3)] }, firstAdmin.token),
+      ]);
+      expect([a.status, b.status].toSorted()).toEqual([200, 409]);
+      expect((await rows('select 1 from attendance_exceptions')).length).toBe(2);
+    });
+
+    it('checks the body, naming each field that is wrong', async () => {
+      const session = await submitted();
+      const bad = await correct(session.id, {
+        version: 1,
+        changes: [
+          { studentEnrolmentId: enrolments.asha, attendanceStatus: 6 },
+          { studentEnrolmentId: 'x', attendanceStatus: 2 },
+        ],
+        extra: 1,
+      });
+      expect(bad.status).toBe(400);
+      expect(fieldsOf(bad)).toMatchObject({
+        'changes[0].attendanceStatus': 'INVALID_CODE',
+        'changes[1].studentEnrolmentId': 'INVALID_FORMAT',
+        extra: 'FIELD_NOT_ALLOWED',
+      });
+      expect((await correct(session.id, { version: 1, changes: [] })).status).toBe(400);
+      const twice = await correct(session.id, {
+        version: 1,
+        changes: [change('asha', 2), change('asha', 3)],
+      });
+      expect(twice.status).toBe(400);
+      expect(fieldsOf(twice)).toEqual({ 'changes[1].studentEnrolmentId': 'INVALID_VALUE' });
+    });
+
+    it('refuses a student who is not in the section, writing nothing (422)', async () => {
+      const session = await submitted();
+      const res = await correct(session.id, {
+        version: 1,
+        changes: [change('cy', 3), { studentEnrolmentId: enrolmentOfB, attendanceStatus: 2 }],
+      });
+      expect([res.status, res.body.code]).toEqual([422, 'STUDENT_NOT_IN_SECTION']);
+      expect(fieldsOf(res)).toEqual({ 'changes[1].studentEnrolmentId': 'STUDENT_NOT_IN_SECTION' });
+      expect(await marks(session.id)).toHaveLength(1);
+    });
+
+    it('is open to a teacher at home only: 403 NOT_ASSIGNED away from home, 404 out of reach, 403 for a parent', async () => {
+      const session = await submitted();
+      const body = { version: 1, changes: [change('cy', 3)] };
+      const away = await correct(session.id, body, eveToken);
+      expect([away.status, away.body.code]).toEqual([403, 'NOT_ASSIGNED']);
+      expect((await correct(session.id, body, devToken)).status).toBe(404);
+      expect((await correct(session.id, body, secondAdmin.token)).status).toBe(404);
+      expect((await correct(session.id, body, otherOwner.token)).status).toBe(404);
+      expect((await correct(session.id, body, parentToken)).status).toBe(403);
+      expect((await correct(newId(), body)).status).toBe(404);
+      expect(await marks(session.id)).toHaveLength(1);
+    });
+
+    it('lets a teacher correct this year only, while an Owner and an Admin may correct a past year', async () => {
+      const session = await submitted();
+      const past = await kit.year(owner.token, first, {
+        name: '2025-2026',
+        startDate: '2025-06-01',
+        endDate: '2026-03-31',
+      });
+      // Forced row-level security binds the owner too: lift it for the length of one transaction.
+      await ownerDb.transaction().execute(async (tx) => {
+        await sql`alter table attendance_sessions no force row level security`.execute(tx);
+        await sql`update attendance_sessions set academic_year_id = ${past} where id = ${session.id}`.execute(
+          tx,
+        );
+        await sql`alter table attendance_sessions force row level security`.execute(tx);
+      });
+      const body = { version: 2, changes: [change('cy', 3)] };
+      const refused = await correct(session.id, body, annaToken);
+      expect([refused.status, refused.body.code]).toEqual([403, 'FORBIDDEN']);
+      expect((await correct(session.id, body, firstAdmin.token)).status).toBe(200);
+      expect(
+        (await correct(session.id, { ...body, version: 3, changes: [change('cy', 1)] })).status,
+      ).toBe(200);
+    });
+  });
+
+  describe('ATT-06 void a session', () => {
+    const reason = 'Marked the wrong section by mistake';
+
+    it('voids the session, keeps its marks, frees the day for a new submission and audits the reason', async () => {
+      const session = await submitted();
+      const res = await voided(session.id, { version: 1, reason }, firstAdmin.token);
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual({ id: session.id, status: 0 });
+      expect((await api('get', `/v1/attendance/sessions/${session.id}`, owner.token)).status).toBe(
+        404,
+      );
+      expect(
+        (
+          await api(
+            'get',
+            `/v1/attendance/sessions?date=${TODAY}&sectionId=${sectionA}`,
+            owner.token,
+          )
+        ).body.data,
+      ).toEqual([]);
+      const loaded = (await roster(sectionA, TODAY)).data;
+      expect(loaded).toMatchObject({ existingSession: null, canMark: true });
+      expect(await rows('select 1 from attendance_exceptions')).toHaveLength(1);
+      const entries = await readAuditRows<{
+        action: string;
+        institution_id: string | null;
+        reason: string | null;
+        old_values: { status: number } | null;
+        new_values: { status: number } | null;
+      }>(ownerDb, sql`entity_id = ${session.id} and action = 'attendance.voided'`);
+      expect(entries).toMatchObject([
+        { institution_id: first, reason, old_values: { status: 1 }, new_values: { status: 0 } },
+      ]);
+      const again = await submitted({ exceptions: [] });
+      expect(again.id).not.toBe(session.id);
+      expect(
+        await rows(
+          `select 1 from attendance_sessions where section_id = '${sectionA}' and status = 1`,
+        ),
+      ).toHaveLength(1);
+    });
+
+    it('is closed to a teacher and a parent (403), and 404 outside the caller’s reach', async () => {
+      const session = await submitted();
+      const body = { version: 1, reason };
+      expect((await voided(session.id, body, annaToken)).status).toBe(403);
+      expect((await voided(session.id, body, parentToken)).status).toBe(403);
+      expect((await voided(session.id, body, secondAdmin.token)).status).toBe(404);
+      expect((await voided(session.id, body, otherOwner.token)).status).toBe(404);
+      expect((await voided(newId(), body)).status).toBe(404);
+      expect(await rows('select 1 from attendance_sessions where status = 0')).toEqual([]);
+    });
+
+    it('needs a version and a reason of 5 to 500 characters', async () => {
+      const session = await submitted();
+      const short = await voided(session.id, { version: 1, reason: 'oops' });
+      expect(short.status).toBe(400);
+      expect(fieldsOf(short)).toMatchObject({ reason: expect.any(String) as string });
+      expect((await voided(session.id, { reason })).status).toBe(400);
+      expect((await voided(session.id, { version: 1, reason: 'x'.repeat(501) })).status).toBe(400);
+      expect((await voided(session.id, { version: 1, reason, extra: true })).status).toBe(400);
+    });
+
+    it('is 409 VERSION_CONFLICT after a correction the admin has not seen, and 409 SESSION_VOIDED the second time', async () => {
+      const session = await submitted();
+      succeeded(
+        await api('patch', `/v1/attendance/sessions/${session.id}/marks`, owner.token, {
+          version: 1,
+          changes: [{ studentEnrolmentId: enrolments.cy, attendanceStatus: 3 }],
+        }),
+        200,
+        'correction',
+      );
+      const stale = await voided(session.id, { version: 1, reason });
+      expect([stale.status, stale.body.code]).toEqual([409, 'VERSION_CONFLICT']);
+      succeeded(await voided(session.id, { version: 2, reason }), 200, 'void');
+      const twice = await voided(session.id, { version: 3, reason });
+      expect([twice.status, twice.body.code]).toEqual([409, 'SESSION_VOIDED']);
+      const correction = await api(
+        'patch',
+        `/v1/attendance/sessions/${session.id}/marks`,
+        owner.token,
+        { version: 3, changes: [{ studentEnrolmentId: enrolments.cy, attendanceStatus: 1 }] },
+      );
+      expect([correction.status, correction.body.code]).toEqual([409, 'SESSION_VOIDED']);
+    });
+  });
+
   describe('a student moved out of a section whose register was taken (STU-08, QA D1)', () => {
     it('keeps one mark on the day for a student moved the day after the register, and the old roster still lists them', async () => {
       const made = await submitted(everyone([enrolments.asha!]));
@@ -840,6 +1260,20 @@ describe('ATT-01 to ATT-04 mark attendance (API design 10.10, 10.11)', () => {
       expect((await move(late.id, { sectionId: sectionB, rollNumber: '5' })).status).toBe(200);
     });
 
+    it('lets the move through once that day’s register is voided, as a voided register counts no one (ATT-06)', async () => {
+      const made = await submitted(everyone([]));
+      const refused = await move(studentIds.asha!, { sectionId: sectionB, rollNumber: '4' });
+      expect(refused.status).toBe(409);
+      succeeded(
+        await voided(made.id, { version: 1, reason: 'Marked the wrong day' }, firstAdmin.token),
+        200,
+        'void',
+      );
+      expect((await move(studentIds.asha!, { sectionId: sectionB, rollNumber: '4' })).status).toBe(
+        200,
+      );
+    });
+
     it('makes a move out of the section wait for a submit already counting the roster (QA B6 D1 race)', async () => {
       // Another transaction holds the day's slot, so the submit stops at its insert after it counted Asha.
       let release!: () => void;
@@ -888,7 +1322,7 @@ describe('ATT-01 to ATT-04 mark attendance (API design 10.10, 10.11)', () => {
   });
 
   describe('the tables', () => {
-    it('keeps the counts, the mode and the key of an exception right, and cannot be deleted by the app role', async () => {
+    it('keeps the counts, the mode and the key of an exception right, and a session cannot be deleted by the app role', async () => {
       const made = await submitted();
       const bad = (set: string) =>
         rows(`update attendance_sessions set ${set} where id = '${made.id}'`);
@@ -916,9 +1350,8 @@ describe('ATT-01 to ATT-04 mark attendance (API design 10.10, 10.11)', () => {
           `insert into attendance_exceptions (attendance_session_id, student_enrolment_id, attendance_date, institution_id, attendance_status) values ('${made.id}', '${enrolments.asha}', '${YESTERDAY}', '${first}', 3)`,
         ),
       ).rejects.toMatchObject({ code: '23503' });
-      await expect(rows(`delete from attendance_exceptions`)).rejects.toMatchObject({
-        code: '42501',
-      });
+      expect(await rows('delete from attendance_exceptions returning 1', [second])).toEqual([]);
+      expect(await rows('select 1 from attendance_exceptions')).toHaveLength(1);
     });
 
     it('shows an Institution’s sessions and marks to its own scope only', async () => {
@@ -932,6 +1365,35 @@ describe('ATT-01 to ATT-04 mark attendance (API design 10.10, 10.11)', () => {
           [first],
         ),
       ).rejects.toThrow();
+    });
+
+    it('keeps marks from being changed by another Institution or by a parent, or moved out of their own Institution (policy)', async () => {
+      const made = await submitted();
+      const sessionMarks = () =>
+        rows<{ attendance_status: number; institution_id: string }>(
+          `select attendance_status, institution_id from attendance_exceptions where attendance_session_id = '${made.id}'`,
+        );
+      await rows(
+        `update attendance_exceptions set attendance_status = 3 where attendance_session_id = '${made.id}'`,
+        [second],
+      );
+      expect(await sessionMarks()).toEqual([{ attendance_status: 2, institution_id: first }]);
+      // However a parent comes to read their child's mark, the table gives them no right to change it.
+      const byParent = await database.transaction(
+        { personId: owner.person, roleCode: 5, childIds: [studentIds.bea!] },
+        async (tx) =>
+          (await sql`update attendance_exceptions set attendance_status = 3`.execute(tx))
+            .numAffectedRows,
+      );
+      expect(byParent).toBe(0n);
+      expect(await sessionMarks()).toEqual([{ attendance_status: 2, institution_id: first }]);
+      await expect(
+        rows(
+          `update attendance_exceptions set institution_id = '${second}' where attendance_session_id = '${made.id}'`,
+          [first],
+        ),
+      ).rejects.toMatchObject({ code: '42501' });
+      expect(await sessionMarks()).toEqual([{ attendance_status: 2, institution_id: first }]);
     });
 
     it('refuses a mark for another Institution’s session, whatever Institution it names (policy, 42501)', async () => {

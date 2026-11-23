@@ -139,14 +139,6 @@ export class MarkDuePaidDto extends VersionDto {
   paymentReference?: string | null;
 }
 
-/** PLT-30 body. */
-export class CancelDueDto extends VersionDto {
-  @ApiProperty({ minLength: 5, maxLength: 500 })
-  @IsString()
-  @Length(5, 500)
-  reason!: string;
-}
-
 /** PLT-24 query: the period to prefill a due for. Query values are strings. */
 export class DueQuoteQueryDto {
   @ApiProperty({ example: '2026-04-01' })

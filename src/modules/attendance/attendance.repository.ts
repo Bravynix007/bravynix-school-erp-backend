@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { sql, type Insertable, type Selectable } from 'kysely';
+import { sql, type Insertable, type Selectable, type Updateable } from 'kysely';
 import type { Tx } from '../../platform/database/index.js';
 import type { AttendanceExceptionsTable, AttendanceSessionsTable } from './attendance.tables.js';
 
@@ -7,6 +7,7 @@ export type SessionRow = Selectable<AttendanceSessionsTable>;
 export type NewSession = Insertable<AttendanceSessionsTable>;
 export type ExceptionRow = Selectable<AttendanceExceptionsTable>;
 export type NewException = Insertable<AttendanceExceptionsTable>;
+export type SessionChanges = Updateable<AttendanceSessionsTable>;
 
 /** What ATT-03 asks for: a section's session, or every section of an Institution's, on one date. */
 export interface SessionFilter {
@@ -89,6 +90,30 @@ export class AttendanceRepository {
       .execute();
   }
 
+  /** The session whatever its status, so a voided one can be told from one that is not there. */
+  findAny(tx: Tx, id: string): Promise<SessionRow | undefined> {
+    return tx.selectFrom('attendance_sessions').selectAll().where('id', '=', id).executeTakeFirst();
+  }
+
+  /** The session whatever its status, held until the transaction ends so two corrections take turns. */
+  lockAny(tx: Tx, id: string): Promise<SessionRow | undefined> {
+    return tx
+      .selectFrom('attendance_sessions')
+      .selectAll()
+      .where('id', '=', id)
+      .forUpdate()
+      .executeTakeFirst();
+  }
+
+  update(tx: Tx, id: string, changes: SessionChanges): Promise<SessionRow> {
+    return tx
+      .updateTable('attendance_sessions')
+      .set(changes)
+      .where('id', '=', id)
+      .returningAll()
+      .executeTakeFirstOrThrow();
+  }
+
   insert(tx: Tx, values: NewSession): Promise<SessionRow> {
     return tx
       .insertInto('attendance_sessions')
@@ -102,6 +127,40 @@ export class AttendanceRepository {
     await tx
       .insertInto('attendance_exceptions')
       .values([...rows])
+      .execute();
+  }
+
+  /** Changes the mark of one student in a session. */
+  async setStatus(
+    tx: Tx,
+    sessionId: string,
+    date: string,
+    enrolmentId: string,
+    status: number,
+    correction: { at: Date; by: string },
+  ): Promise<void> {
+    await tx
+      .updateTable('attendance_exceptions')
+      .set({ attendance_status: status, corrected_at: correction.at, corrected_by: correction.by })
+      .where('attendance_session_id', '=', sessionId)
+      .where('attendance_date', '=', date)
+      .where('student_enrolment_id', '=', enrolmentId)
+      .execute();
+  }
+
+  /** Takes students back to Present: their exceptions go. */
+  async removeExceptions(
+    tx: Tx,
+    sessionId: string,
+    date: string,
+    enrolmentIds: readonly string[],
+  ): Promise<void> {
+    if (enrolmentIds.length === 0) return;
+    await tx
+      .deleteFrom('attendance_exceptions')
+      .where('attendance_session_id', '=', sessionId)
+      .where('attendance_date', '=', date)
+      .where('student_enrolment_id', 'in', [...enrolmentIds])
       .execute();
   }
 
