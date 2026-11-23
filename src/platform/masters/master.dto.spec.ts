@@ -57,7 +57,7 @@ describe('the bodies of PLT-31', () => {
     [CreateCountryDto, { name: 'x'.repeat(101), iso2: 'IN' }, 'name', 'TOO_LONG'],
     [CreateStateDto, { countryId: 'nope', name: 'Goa' }, 'countryId', 'INVALID_FORMAT'],
     [CreateStateDto, { name: 'Goa' }, 'countryId', 'REQUIRED'],
-    [CreateCityDto, { stateId: uuid, name: '' }, 'name', 'TOO_SHORT'],
+    [CreateCityDto, { stateId: uuid, name: '' }, 'name', 'REQUIRED'],
     [CreateClassCategoryDto, { code: 'pre school', name: 'x' }, 'code', 'INVALID_FORMAT'],
     [CreateClassCategoryDto, { code: '1ST', name: 'x' }, 'code', 'INVALID_FORMAT'],
     [

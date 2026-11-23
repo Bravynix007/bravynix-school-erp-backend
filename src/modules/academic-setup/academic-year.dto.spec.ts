@@ -21,7 +21,7 @@ describe('CreateAcademicYearDto', () => {
   it.each([
     [{ ...valid, institutionId: undefined }, 'institutionId', 'REQUIRED'],
     [{ ...valid, institutionId: 'nope' }, 'institutionId', 'INVALID_FORMAT'],
-    [{ ...valid, name: '' }, 'name', 'TOO_SHORT'],
+    [{ ...valid, name: '' }, 'name', 'REQUIRED'],
     [{ ...valid, name: 'x'.repeat(21) }, 'name', 'TOO_LONG'],
     [{ ...valid, name: 2026 }, 'name', 'INVALID_TYPE'],
     [{ ...valid, startDate: '2026-02-30' }, 'startDate', 'INVALID_FORMAT'],

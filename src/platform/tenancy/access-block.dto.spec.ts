@@ -27,7 +27,7 @@ describe('CreateAccessBlockDto', () => {
       'INVALID_FORMAT',
     ],
     [{ section: 'owners', societyId: society }, 'reason', 'REQUIRED'],
-    [{ section: 'owners', societyId: society, reason: '' }, 'reason', 'TOO_SHORT'],
+    [{ section: 'owners', societyId: society, reason: '' }, 'reason', 'REQUIRED'],
     [{ section: 'owners', societyId: society, reason: 'r'.repeat(501) }, 'reason', 'TOO_LONG'],
     [
       { section: 'owners', societyId: society, reason: 'r', expires: 'x' },

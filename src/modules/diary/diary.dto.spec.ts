@@ -42,7 +42,7 @@ describe('CreateDiaryEntryDto', () => {
 
   it('refuses a description that is empty, blank or too long', async () => {
     expect(await problems(body(CreateDiaryEntryDto, { ...entry, description: '' }))).toEqual([
-      { field: 'description', code: 'TOO_SHORT' },
+      { field: 'description', code: 'REQUIRED' },
     ]);
     expect(
       await problems(body(CreateDiaryEntryDto, { ...entry, description: 'x'.repeat(2001) })),
@@ -97,7 +97,7 @@ describe('UpdateDiaryEntryDto', () => {
     ).toEqual([
       { field: 'subjectId', code: 'INVALID_FORMAT' },
       { field: 'diaryDate', code: 'INVALID_FORMAT' },
-      { field: 'description', code: 'TOO_SHORT' },
+      { field: 'description', code: 'REQUIRED' },
     ]);
     expect(await problems(body(UpdateDiaryEntryDto, { version: 1, description: '   ' }))).toEqual([
       { field: 'description', code: 'INVALID_FORMAT' },

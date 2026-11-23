@@ -94,17 +94,43 @@ function valueOf(owner: Owner, property: string): unknown {
   return owner ? (owner as Record<string, unknown>)[property] : undefined;
 }
 
+/** The rules a required text field fails when it is empty (the pipe has already trimmed it). */
+const EMPTY_TEXT_RULES = new Set(['minLength', 'isLength', 'isNotEmpty', 'matches']);
+
+/**
+ * Whether the field can be cleared with `null`: it carries `@IsOptional()`, whose condition skips a `null`. A field
+ * that only waits for a value (`@WhenPresent()`) or has no condition cannot be cleared, so an empty text there is a
+ * missing one.
+ */
+function isClearable(owner: object, property: string): boolean {
+  const withNull = { [property]: null };
+  return getMetadataStorage()
+    .getTargetValidationMetadatas(owner.constructor, '', true, false)
+    .some(
+      (meta) =>
+        meta.propertyName === property &&
+        meta.type === 'conditionalValidation' &&
+        (meta.constraints?.[0] as ((object: object, value: unknown) => boolean) | undefined)?.(
+          withNull,
+          null,
+        ) === false,
+    );
+}
+
 /**
  * Whether the field was left out of the request, so it is `REQUIRED` whatever rule it failed (API design 8: a missing
  * value comes before a wrong one). A field that may be left out is `@IsOptional()`, which skips every rule when it is
- * missing, so a rule that fails on a missing value belongs to a required field. An unknown field is still
- * `FIELD_NOT_ALLOWED`. Without the object the validated value cannot be seen, and the rule's own code stands.
+ * missing, so a rule that fails on a missing value belongs to a required field. A required text that is empty after
+ * trimming counts as left out too (API design 7.4); one that `null` clears keeps its length code when sent as `""`.
+ * An unknown field is still `FIELD_NOT_ALLOWED`. Without the object the validated value cannot be seen, and the rule's
+ * own code stands.
  */
 function isMissing(owner: Owner, property: string, constraint: string): boolean {
+  if (owner === undefined || constraint === 'whitelistValidation') return false;
+  const value = valueOf(owner, property);
   return (
-    owner !== undefined &&
-    constraint !== 'whitelistValidation' &&
-    valueOf(owner, property) === undefined
+    value === undefined ||
+    (value === '' && EMPTY_TEXT_RULES.has(constraint) && !isClearable(owner, property))
   );
 }
 

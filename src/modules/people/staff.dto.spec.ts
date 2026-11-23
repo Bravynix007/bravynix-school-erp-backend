@@ -68,7 +68,7 @@ describe('CreateStaffDto', () => {
 
   it.each([
     [{ email: 'not-an-email' }, 'email', 'INVALID_FORMAT'],
-    [{ firstName: '' }, 'firstName', 'TOO_SHORT'],
+    [{ firstName: '' }, 'firstName', 'REQUIRED'],
     [{ firstName: 'x'.repeat(101) }, 'firstName', 'TOO_LONG'],
     [{ gender: 4 }, 'gender', 'INVALID_CODE'],
     [{ gender: '2' }, 'gender', 'INVALID_TYPE'],
@@ -79,7 +79,7 @@ describe('CreateStaffDto', () => {
     [{ employeeCode: '' }, 'employeeCode', 'TOO_SHORT'],
     [{ photoFileId: 'x' }, 'photoFileId', 'INVALID_FORMAT'],
     [{ address: { pincode: 'x'.repeat(11) } }, 'address.pincode', 'TOO_LONG'],
-    [{ educations: [{ degree: '' }] }, 'educations[0].degree', 'TOO_SHORT'],
+    [{ educations: [{ degree: '' }] }, 'educations[0].degree', 'REQUIRED'],
     [
       { educations: [{ degree: 'B', yearOfPassing: 1800 }] },
       'educations[0].yearOfPassing',

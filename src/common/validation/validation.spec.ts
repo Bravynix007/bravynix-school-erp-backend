@@ -13,7 +13,9 @@ import {
   validate,
 } from 'class-validator';
 import { AppException } from '../http/app-exception.js';
+import { NotBlank } from './not-blank.js';
 import { TrimStringsPipe, createValidationPipe, toFieldErrors } from './validation.js';
+import { WhenPresent } from './when-present.js';
 
 class LimitsDto {
   @IsString()
@@ -184,6 +186,55 @@ describe('a missing field', () => {
     expect(error.options.errors?.map(({ field, code }) => ({ field, code }))).toEqual([
       { field: 'status', code: 'FIELD_NOT_ALLOWED' },
       { field: 'surname', code: 'REQUIRED' },
+    ]);
+  });
+});
+
+class TitlesDto {
+  @IsString()
+  @Length(1, 50)
+  @NotBlank()
+  title!: unknown;
+
+  @WhenPresent()
+  @IsString()
+  @Length(1, 50)
+  rename?: unknown;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 50)
+  note?: unknown;
+}
+
+async function titlesErrors(body: unknown) {
+  try {
+    const meta = { type: 'body', metatype: TitlesDto } as const;
+    const trimmed = new TrimStringsPipe().transform(body, meta);
+    await createValidationPipe().transform(trimmed, meta);
+  } catch (error) {
+    return (error as AppException).options.errors?.map(({ field, code }) => ({ field, code }));
+  }
+  throw new Error('expected a validation error');
+}
+
+describe('a text left empty', () => {
+  it('is REQUIRED when the field cannot be cleared, spaces only included (API design 7.4)', async () => {
+    expect(await titlesErrors({ title: '   ', rename: '' })).toEqual([
+      { field: 'title', code: 'REQUIRED' },
+      { field: 'rename', code: 'REQUIRED' },
+    ]);
+  });
+
+  it('keeps TOO_SHORT for a field that null clears, because only null clears it', async () => {
+    expect(await titlesErrors({ title: 'x', note: '' })).toEqual([
+      { field: 'note', code: 'TOO_SHORT' },
+    ]);
+  });
+
+  it('keeps the length code for a text that is there but too long', async () => {
+    expect(await titlesErrors({ title: 'x'.repeat(51) })).toEqual([
+      { field: 'title', code: 'TOO_LONG' },
     ]);
   });
 });

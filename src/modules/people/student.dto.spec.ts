@@ -78,7 +78,7 @@ describe('CreateStudentDto', () => {
   });
 
   it.each([
-    [{ firstName: '' }, 'firstName', 'TOO_SHORT'],
+    [{ firstName: '' }, 'firstName', 'REQUIRED'],
     [{ firstName: '   ' }, 'firstName', 'INVALID_FORMAT'],
     [{ firstName: 'x'.repeat(101) }, 'firstName', 'TOO_LONG'],
     [{ gender: 4 }, 'gender', 'INVALID_CODE'],
@@ -94,7 +94,7 @@ describe('CreateStudentDto', () => {
     [{ photoFileId: 'x' }, 'photoFileId', 'INVALID_FORMAT'],
     [{ address: { pincode: 'x'.repeat(11) } }, 'address.pincode', 'TOO_LONG'],
     [{ mobile: { countryCode: '91', number: '123' } }, 'mobile.number', 'INVALID_FORMAT'],
-    [{ enrolment: { ...valid.enrolment, rollNumber: '' } }, 'enrolment.rollNumber', 'TOO_SHORT'],
+    [{ enrolment: { ...valid.enrolment, rollNumber: '' } }, 'enrolment.rollNumber', 'REQUIRED'],
     [
       { enrolment: { ...valid.enrolment, rollNumber: ' ' } },
       'enrolment.rollNumber',
@@ -242,7 +242,7 @@ describe('MoveStudentDto', () => {
     [{ sectionId: null }, 'sectionId', 'INVALID_FORMAT'],
     [{ sectionId: 'x' }, 'sectionId', 'INVALID_FORMAT'],
     [{ rollNumber: null }, 'rollNumber', 'INVALID_TYPE'],
-    [{ rollNumber: '' }, 'rollNumber', 'TOO_SHORT'],
+    [{ rollNumber: '' }, 'rollNumber', 'REQUIRED'],
     [{ rollNumber: '   ' }, 'rollNumber', 'INVALID_FORMAT'],
     [{ rollNumber: 'x'.repeat(21) }, 'rollNumber', 'TOO_LONG'],
     [{ effectiveDate: null }, 'effectiveDate', 'INVALID_TYPE'],
@@ -270,7 +270,7 @@ describe('CorrectStudentClassDto', () => {
     [{ classId: id }, 'sectionId', 'REQUIRED'],
     [{ classId: 'x', sectionId: id }, 'classId', 'INVALID_FORMAT'],
     [{ classId: id, sectionId: null }, 'sectionId', 'INVALID_FORMAT'],
-    [{ classId: id, sectionId: id, rollNumber: '' }, 'rollNumber', 'TOO_SHORT'],
+    [{ classId: id, sectionId: id, rollNumber: '' }, 'rollNumber', 'REQUIRED'],
     [{ classId: id, sectionId: id, rollNumber: '  ' }, 'rollNumber', 'INVALID_FORMAT'],
     [{ classId: id, sectionId: id, rollNumber: 'x'.repeat(21) }, 'rollNumber', 'TOO_LONG'],
     [

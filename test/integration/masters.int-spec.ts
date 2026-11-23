@@ -492,7 +492,7 @@ describe('MST-01 and PLT-31 to PLT-33 platform masters (API design 10.4g, DDD 9.
       const fields = Object.fromEntries((res.body.errors ?? []).map((e) => [e.field, e.code]));
       expect(fields).toEqual({
         code: 'INVALID_FORMAT',
-        name: 'TOO_SHORT',
+        name: 'REQUIRED',
         createdBy: 'FIELD_NOT_ALLOWED',
         displayOrder: 'INVALID_TYPE',
       });

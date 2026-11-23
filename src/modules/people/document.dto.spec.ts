@@ -12,7 +12,7 @@ describe('CreateDocumentDto', () => {
 
   it.each([
     ['no title', { fileId: id }, [{ field: 'title', code: 'REQUIRED' }]],
-    ['an empty title', { title: '', fileId: id }, [{ field: 'title', code: 'TOO_SHORT' }]],
+    ['an empty title', { title: '', fileId: id }, [{ field: 'title', code: 'REQUIRED' }]],
     [
       'a title over 150',
       { title: 'x'.repeat(151), fileId: id },

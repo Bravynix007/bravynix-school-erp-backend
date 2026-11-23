@@ -44,7 +44,7 @@ describe('CreateEventDto', () => {
     [{ ...valid, title: 'x'.repeat(151) }, 'title', 'TOO_LONG'],
     [{ ...valid, startDate: '22/12/2026' }, 'startDate', 'INVALID_FORMAT'],
     [{ ...valid, endDate: '2026-02-30' }, 'endDate', 'INVALID_FORMAT'],
-    [{ ...valid, durationLabel: '' }, 'durationLabel', 'TOO_SHORT'],
+    [{ ...valid, durationLabel: '' }, 'durationLabel', 'REQUIRED'],
     [{ ...valid, durationLabel: 'x'.repeat(51) }, 'durationLabel', 'TOO_LONG'],
     [{ ...valid, description: 'x'.repeat(2001) }, 'description', 'TOO_LONG'],
     [{ ...valid, venue: 'x'.repeat(201) }, 'venue', 'TOO_LONG'],

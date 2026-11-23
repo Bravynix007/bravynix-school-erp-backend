@@ -115,7 +115,7 @@ describe('UpdateClassDto', () => {
 
   it.each([
     [{ version: 1, displayName: null }, 'displayName', 'INVALID_TYPE'],
-    [{ version: 1, displayName: '' }, 'displayName', 'TOO_SHORT'],
+    [{ version: 1, displayName: '' }, 'displayName', 'REQUIRED'],
     [{ version: 1, code: '' }, 'code', 'TOO_SHORT'],
     [{ version: 1, streamName: 'PCMC' }, 'streamName', 'FIELD_NOT_ALLOWED'],
     [{ version: 1, predefinedClassId }, 'predefinedClassId', 'FIELD_NOT_ALLOWED'],
