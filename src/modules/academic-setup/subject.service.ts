@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { RoleCode } from '../../common/auth/roles.js';
 import { ApiResult } from '../../common/http/api-result.js';
-import { authorIdsOf } from '../../common/http/author-stamps.js';
 import { AppException } from '../../common/http/app-exception.js';
 import { newId } from '../../common/ids/ids.js';
 import { changedColumns } from '../../common/http/changed-columns.js';
@@ -17,10 +16,10 @@ import {
   type TenantContext,
   type Tx,
 } from '../../platform/database/index.js';
-import { PersonDirectory } from '../../platform/identity/index.js';
 import type { CreateSubjectDto, UpdateSubjectDto } from './subject.dto.js';
 import { SubjectRepository, type SubjectChanges, type SubjectRow } from './subject.repository.js';
-import { subjectResource, type SubjectResource } from './subject.resource.js';
+import { SubjectDirectory } from './subject-directory.js';
+import type { SubjectResource } from './subject.resource.js';
 import { TeachingStaff } from './teaching-staff.js';
 
 /** What the audit log keeps of a subject. */
@@ -45,7 +44,7 @@ export class SubjectService {
   constructor(
     private readonly database: DatabaseService,
     private readonly subjects: SubjectRepository,
-    private readonly people: PersonDirectory,
+    private readonly shown: SubjectDirectory,
     private readonly teaching: TeachingStaff,
     private readonly audit: AuditService,
   ) {}
@@ -58,11 +57,7 @@ export class SubjectService {
       const own = await this.teaching.ownSubjectIds(tx, principal.personId);
       return own.size === 0 ? [] : this.subjects.active(tx, societyId, [...own]);
     });
-    const people = await this.people.describe(authorIdsOf(rows));
-    return ApiResult.list(
-      rows.map((row) => subjectResource(row, people)),
-      null,
-    );
+    return ApiResult.list(await this.shown.resources(rows), null);
   }
 
   /** SUB-02: 409 `DUPLICATE` on `name` or `code` when an active subject of the Society has it. */
@@ -147,7 +142,7 @@ export class SubjectService {
   }
 
   private async resource(row: SubjectRow): Promise<SubjectResource> {
-    return subjectResource(row, await this.people.describe(authorIdsOf([row])));
+    return (await this.shown.resources([row]))[0]!;
   }
 
   /** The entry carries the Society and no Institution: a subject belongs to the whole Society (API design 20.3). */

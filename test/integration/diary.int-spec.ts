@@ -433,6 +433,24 @@ describe('DIA-01 to DIA-04 the diary (API design 10.14a)', () => {
       }
     });
 
+    it('drops a subject once the teaching assignment has ended, for the list and for DIA-02 alike', async () => {
+      const assignments = (
+        await api(
+          'get',
+          `/v1/teaching-assignments?institutionId=${first}&sectionId=${sectionA}`,
+          owner.token,
+        )
+      ).body.data as unknown as { id: string }[];
+      expect(assignments).toHaveLength(1);
+      succeeded(
+        await api('delete', `/v1/teaching-assignments/${assignments[0]!.id}`, owner.token),
+        200,
+        'end assignment',
+      );
+      expect(await refusalOf(sectionA, annaToken)).toEqual([403, 'NOT_ASSIGNED']);
+      expect((await add({}, annaToken)).body.code).toBe('NOT_ASSIGNED');
+    });
+
     it('leaves out a closed subject, and is 422 REFERENCE_INACTIVE for a closed section', async () => {
       succeeded(await api('delete', `/v1/subjects/${english}`, owner.token), 200, 'subject');
       expect(await subjectsOf(sectionB, benToken)).toEqual(['Mathematics']);
