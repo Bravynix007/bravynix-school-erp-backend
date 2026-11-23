@@ -64,10 +64,3 @@ export function dayBefore(date: string): string {
     .toISOString()
     .slice(0, 10);
 }
-
-/** The calendar day after `date` (`YYYY-MM-DD`). */
-export function dayAfter(date: string): string {
-  return new Date(Date.parse(`${date}T00:00:00.000Z`) + 24 * 60 * 60_000)
-    .toISOString()
-    .slice(0, 10);
-}

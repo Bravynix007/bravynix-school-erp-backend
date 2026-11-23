@@ -306,3 +306,21 @@ describe('StudentRepository.guardianUserIds', () => {
     expect(none.queries).toEqual([]);
   });
 });
+
+describe('StudentRepository.placementSpans', () => {
+  const repository = new StudentRepository();
+
+  it('reads the placements of the student’s active enrolments that touch the days', async () => {
+    const { tx, queries } = recorder();
+    await repository.placementSpans(tx, 'student-1', '2026-06-01', '2026-11-30');
+    const { sql, parameters } = queries[0]!;
+    expect(sql).toContain(
+      'from "student_section_placements" as "p" inner join "student_enrolments" as "e"',
+    );
+    expect(sql).toContain('"e"."student_id" = $1 and "e"."status" = $2 and "p"."start_date" <= $3');
+    expect(sql).toContain('"p"."end_date" is null or "p"."end_date" >= $4');
+    expect(sql).toContain('"e"."left_date" is null or "e"."left_date" >= $5');
+    expect(sql).toContain('order by "p"."start_date", "p"."id"');
+    expect(parameters).toEqual(['student-1', 1, '2026-11-30', '2026-06-01', '2026-06-01']);
+  });
+});

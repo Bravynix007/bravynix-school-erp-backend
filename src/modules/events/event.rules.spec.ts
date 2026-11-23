@@ -5,7 +5,6 @@ import {
   checkEventFields,
   checkRange,
   checkScope,
-  daysBetween,
   inboxTabOf,
   mayEdit,
   parentsAreTold,
@@ -41,14 +40,6 @@ const problemsOf = (work: () => void) => {
   }
   return [];
 };
-
-describe('daysBetween', () => {
-  it('counts whole days, across a month end and a leap day', () => {
-    expect(daysBetween('2026-12-22', '2026-12-22')).toBe(0);
-    expect(daysBetween('2026-12-22', '2027-01-02')).toBe(11);
-    expect(daysBetween('2028-02-28', '2028-03-01')).toBe(2);
-  });
-});
 
 describe('checkEventFields', () => {
   it('passes a plain event, a one-day event and a holiday for students, for staff or for both', () => {

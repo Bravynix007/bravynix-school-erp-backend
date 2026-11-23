@@ -473,6 +473,54 @@ export class StudentRepository {
     return rows;
   }
 
+  /**
+   * Where a student sat in the days from `from` to `to`, earliest first: the placements of their active enrolments that
+   * touch the span, each cut short by the day the enrolment ended (the rule of DDD 13.2, as `placedOn` reads it).
+   */
+  async placementSpans(
+    tx: Tx,
+    studentId: string,
+    from: string,
+    to: string,
+  ): Promise<
+    {
+      studentEnrolmentId: string;
+      sectionId: string;
+      classId: string;
+      startDate: string;
+      endDate: string | null;
+      placedAt: Date;
+    }[]
+  > {
+    const rows = await tx
+      .selectFrom('student_section_placements as p')
+      .innerJoin('student_enrolments as e', 'e.id', 'p.student_enrolment_id')
+      .select([
+        'e.id as studentEnrolmentId',
+        'p.section_id as sectionId',
+        'p.class_id as classId',
+        'p.start_date as startDate',
+        'p.end_date as endDate',
+        'e.left_date as leftDate',
+        'p.created_at as placedAt',
+      ])
+      .where('e.student_id', '=', studentId)
+      .where('e.status', '=', 1)
+      .where('p.start_date', '<=', to)
+      .where((eb) => eb.or([eb('p.end_date', 'is', null), eb('p.end_date', '>=', from)]))
+      .where((eb) => eb.or([eb('e.left_date', 'is', null), eb('e.left_date', '>=', from)]))
+      .orderBy('p.start_date')
+      .orderBy('p.id')
+      .execute();
+    return rows.map(({ leftDate, ...span }) => ({
+      ...span,
+      endDate:
+        leftDate !== null && (span.endDate === null || leftDate < span.endDate)
+          ? leftDate
+          : span.endDate,
+    }));
+  }
+
   /** The students of these enrolments, by enrolment ID. */
   async namedByEnrolment(
     tx: Tx,

@@ -37,6 +37,20 @@ export class AcademicYearDirectory {
       : undefined;
   }
 
+  /**
+   * The active year of the Institution that has a day between `from` and `to` (the current one when several do), with
+   * its first and last day; `undefined` when none does.
+   */
+  async overlapping(
+    tx: Tx,
+    institutionId: string,
+    from: string,
+    to: string,
+  ): Promise<{ id: string; startDate: string; endDate: string } | undefined> {
+    const year = await this.years.overlapping(tx, institutionId, from, to);
+    return year && { id: year.id, startDate: year.start_date, endDate: year.end_date };
+  }
+
   /** The current academic year of the Institution, or `null` when none is set. */
   async currentId(tx: Tx, institutionId: string): Promise<string | null> {
     return (await this.years.currentOf(tx, institutionId))?.id ?? null;

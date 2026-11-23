@@ -1,6 +1,6 @@
 import { AppException, type FieldError } from '../../common/http/app-exception.js';
 import { ErrorCode, FieldErrorCode } from '../../common/http/error-codes.js';
-import { dayAfter } from '../../common/time/clock.js';
+import { addDays } from '../../common/time/calendar-days.js';
 import { fieldError } from '../../common/validation/field-error.js';
 import type { AuditValues } from '../../platform/audit/index.js';
 import type { GuardianDto } from './student.dto.js';
@@ -87,7 +87,7 @@ export function defaultMoveDate(currentStart: string, today: string, yearEnd: st
  * day, or the day the current placement begins when that is later, and never after the year ends.
  */
 export function latestMoveDate(currentStart: string, today: string, yearEnd: string): string {
-  const tomorrow = dayAfter(today);
+  const tomorrow = addDays(today, 1);
   const latest = tomorrow > currentStart ? tomorrow : currentStart;
   return latest < yearEnd ? latest : yearEnd;
 }
