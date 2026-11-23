@@ -355,7 +355,7 @@ export class DiaryService {
         tab: ONLY_FOR_YOU,
         title: 'New diary entry',
         body: `${subjectName}: a diary entry for ${formatDay(entry.diary_date)}.`,
-        target: { type: DIARY_TARGET, id: entry.id },
+        target: { type: DIARY_TARGET, id: entry.id, date: entry.diary_date },
         receivers,
       },
       principal.personId,

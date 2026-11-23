@@ -383,6 +383,7 @@ describe('DIA-01 to DIA-04 the diary (API design 10.14a)', () => {
           body: 'Mathematics: a diary entry for 17 Nov 2026.',
           category: 2,
           studentId: childA,
+          target: { type: 2, id: made.id, date: '2026-11-17' },
         }),
       ]);
       const other = await api('get', '/v1/notifications?tab=1&limit=50', parentB);
@@ -487,6 +488,7 @@ describe('DIA-01 to DIA-04 the diary (API design 10.14a)', () => {
         expect.objectContaining({
           body: 'Mathematics: a diary entry for 12 Nov 2026.',
           studentId: childB,
+          target: expect.objectContaining({ date: '2026-11-12' }),
         }),
       ]);
       expect(await inboxOf(parentA)).toEqual([]);

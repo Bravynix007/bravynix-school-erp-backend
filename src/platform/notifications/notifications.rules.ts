@@ -1,4 +1,5 @@
 import { isUuid } from '../../common/ids/ids.js';
+import { isCalendarDate } from '../../common/validation/calendar-date.js';
 import { INBOX_TABS, type InboxTab } from './notifications.dto.js';
 
 /** The kind of job that writes a notice to its receivers' inboxes and sends the push. */
@@ -26,6 +27,8 @@ export interface Receiver {
 export interface NoticeTarget {
   type: number;
   id: string;
+  /** The day it is about (`YYYY-MM-DD`), for a screen that opens on a day: a diary entry's date. */
+  date?: string | null;
 }
 
 /**
@@ -95,6 +98,9 @@ export function checkNotice(notice: Notice): void {
       !isUuid(notice.target.id))
   ) {
     fail('names a screen that does not exist');
+  }
+  if (notice.target?.date != null && !isCalendarDate(notice.target.date)) {
+    fail('names a day that is not a date');
   }
   if (notice.receivers.length > MAX_RECEIVERS) {
     fail(`names more than ${MAX_RECEIVERS.toString()} receivers`);

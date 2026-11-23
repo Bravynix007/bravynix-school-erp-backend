@@ -29,7 +29,7 @@ interface ItemBody {
   tab: number;
   title: string;
   studentId: string | null;
-  target: { type: number; id: string } | null;
+  target: { type: number; id: string; date: string | null } | null;
   isRead: boolean;
 }
 
@@ -54,6 +54,17 @@ describe('the inbox and the push device', () => {
   let me: SignedInPerson;
   let other: SignedInPerson;
 
+  /** A notice that names the day 21 November, with the target whose ID is [target] (none when null). */
+  const insertWithDay = (target: string | null) =>
+    ownerDb.transaction().execute(async (tx) => {
+      await sql`select set_config('app.society_id', ${societyId}, true)`.execute(tx);
+      await sql`
+        insert into inbox_items (id, user_id, society_id, category, title, body, source_key, target_type,
+          target_id, target_date)
+        values (${newId()}, ${me.person}, ${societyId}, 1, 'Absent today', 'Diya is absent', ${`test:${newId()}`},
+          ${target === null ? null : 2}, ${target}, '2026-11-21')`.execute(tx);
+    });
+
   /** An inbox row, written as the worker does: under the Society, whoever receives it. */
   const put = async (
     user: string,
@@ -64,6 +75,7 @@ describe('the inbox and the push device', () => {
       studentId?: string | null;
       read?: boolean;
       target?: boolean;
+      targetDate?: string;
     } = {},
   ) => {
     const id = newId();
@@ -71,10 +83,11 @@ describe('the inbox and the push device', () => {
       await sql`select set_config('app.society_id', ${societyId}, true)`.execute(tx);
       await sql`
         insert into inbox_items (id, created_at, user_id, society_id, student_id, category, inbox_tab, title,
-          body, source_key, target_type, target_id, read_at)
+          body, source_key, target_type, target_id, target_date, read_at)
         values (${id}, ${`2026-11-${String(fields.day ?? 10).padStart(2, '0')}T10:00:00Z`}, ${user}, ${societyId},
           ${fields.studentId ?? null}, 1, ${fields.tab ?? 1}, ${fields.title ?? 'Absent today'}, 'Diya is absent',
           ${`test:${id}`}, ${fields.target ? 1 : null}, ${fields.target ? newId() : null},
+          ${fields.target ? (fields.targetDate ?? null) : null},
           ${fields.read ? sql`now()` : null})
       `.execute(tx);
     });
@@ -153,10 +166,25 @@ describe('the inbox and the push device', () => {
     await fixtures.cleanup();
   });
 
+  describe('the day a notice is about', () => {
+    it('is kept only with a target', async () => {
+      await expect(insertWithDay(null)).rejects.toMatchObject({
+        code: '23514',
+        constraint: 'ck_inbox_items_target_date',
+      });
+      await expect(insertWithDay(newId())).resolves.not.toThrow();
+    });
+  });
+
   describe('NTF-01 list', () => {
     it('lists the caller’s own notices of the first tab, newest first, and never another person’s', async () => {
       const older = await put(me.person, { day: 3, title: 'Older' });
-      const newer = await put(me.person, { day: 9, title: 'Newer', target: true });
+      const newer = await put(me.person, {
+        day: 9,
+        title: 'Newer',
+        target: true,
+        targetDate: '2026-11-21',
+      });
       await put(me.person, { day: 5, tab: 2, title: 'In another tab' });
       await put(other.person, { day: 8, title: 'Not mine' });
       const rows = await items();
@@ -166,7 +194,7 @@ describe('the inbox and the push device', () => {
         tab: 1,
         category: 1,
         isRead: false,
-        target: { type: 1, id: expect.any(String) },
+        target: { type: 1, id: expect.any(String), date: '2026-11-21' },
       });
       expect(rows[1]?.target).toBeNull();
       expect((await items('?tab=2')).map((r) => r.title)).toEqual(['In another tab']);
