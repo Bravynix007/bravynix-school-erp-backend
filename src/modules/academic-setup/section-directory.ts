@@ -76,7 +76,7 @@ export class SectionDirectory {
     );
   }
 
-  /** Every open section of the Institution, with its open class's name. */
+  /** Every open section of the Institution, with its open class's name, in the order of the class and section lists. */
   async openOf(tx: Tx, institutionId: string): Promise<OpenSection[]> {
     const rows = await this.sections.openOf(tx, institutionId);
     return rows.map((row) => ({

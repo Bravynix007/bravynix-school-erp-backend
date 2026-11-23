@@ -152,6 +152,11 @@ function build() {
       .mockResolvedValue(
         new Map([['section-1', { displayName: 'A', classId: 'class-1', className: '10th' }]]),
       ),
+    openOf: vi.fn<SectionDirectory['openOf']>().mockResolvedValue([
+      { sectionId: 'section-1', classId: 'class-1', className: '10th', sectionName: 'A' },
+      { sectionId: 'section-2', classId: 'class-1', className: '10th', sectionName: 'B' },
+      { sectionId: 'section-3', classId: 'class-2', className: '9th', sectionName: 'A' },
+    ]),
   };
   const holidays = {
     forClass: vi.fn<HolidayCalendar['forClass']>().mockResolvedValue(undefined),
@@ -582,6 +587,35 @@ describe('AttendanceService.list', () => {
         }),
       ),
     ).toMatchObject({ status: 400, fields: ['institutionId'] });
+  });
+});
+
+describe('AttendanceService.sectionsOf', () => {
+  it('offers every open section of the Institution by class, to a caller who reaches it', async () => {
+    const { service, scope, sections } = build();
+    const result = await service.sectionsOf(admin, { institutionId: 'inst-1' });
+    expect(scope.requireInstitution).toHaveBeenCalledWith(admin, 'inst-1');
+    expect(sections.openOf).toHaveBeenCalledWith(expect.anything(), 'inst-1');
+    expect(result.data).toEqual([
+      {
+        classId: 'class-1',
+        className: '10th',
+        sections: [
+          { id: 'section-1', displayName: 'A' },
+          { id: 'section-2', displayName: 'B' },
+        ],
+      },
+      { classId: 'class-2', className: '9th', sections: [{ id: 'section-3', displayName: 'A' }] },
+    ]);
+  });
+
+  it('passes on the refusal for an Institution out of reach, and reads nothing', async () => {
+    const { service, scope, sections } = build();
+    scope.requireInstitution.mockRejectedValue(AppException.notFound());
+    expect((await refusal(service.sectionsOf(admin, { institutionId: 'inst-9' }))).status).toBe(
+      404,
+    );
+    expect(sections.openOf).not.toHaveBeenCalled();
   });
 });
 

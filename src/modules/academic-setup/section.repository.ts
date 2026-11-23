@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { Insertable, Selectable, Updateable } from 'kysely';
 import type { Tx } from '../../platform/database/index.js';
 import type { SectionsTable } from './academic-setup.tables.js';
+import { orderClasses, orderSections } from './list-order.js';
 
 export type SectionRow = Selectable<SectionsTable>;
 export type NewSection = Insertable<SectionsTable>;
@@ -27,10 +28,7 @@ export class SectionRepository {
   /** The active sections of a class, in the order of the predefined sections; with `ids`, only those of them. */
   active(tx: Tx, classId: string, ids?: readonly string[]): Promise<SectionView[]> {
     const query = this.view(tx).where('s.class_id', '=', classId).where('s.status', '=', 1);
-    return (ids ? query.where('s.id', 'in', ids) : query)
-      .orderBy('p.display_order')
-      .orderBy('s.id')
-      .execute();
+    return (ids ? query.where('s.id', 'in', ids) : query).$call(orderSections('p', 's')).execute();
   }
 
   /** The section with its names. */
@@ -58,7 +56,10 @@ export class SectionRepository {
     );
   }
 
-  /** The open sections of an Institution, each with the name of its open class. */
+  /**
+   * The open sections of an Institution, each with the name of its open class, in the order of the lists: category,
+   * predefined class, stream, then the predefined sections.
+   */
   async openOf(
     tx: Tx,
     institutionId: string,
@@ -66,10 +67,15 @@ export class SectionRepository {
     const rows = await tx
       .selectFrom('sections as s')
       .innerJoin('classes as c', 'c.id', 's.class_id')
+      .innerJoin('class_categories as g', 'g.id', 'c.class_category_id')
+      .innerJoin('predefined_classes as pc', 'pc.id', 'c.predefined_class_id')
+      .innerJoin('predefined_sections as ps', 'ps.id', 's.predefined_section_id')
       .select(['s.id', 's.display_name', 's.class_id', 'c.display_name as class_name'])
       .where('s.institution_id', '=', institutionId)
       .where('s.status', '=', 1)
       .where('c.status', '=', 1)
+      .$call(orderClasses('g', 'pc', 'c'))
+      .$call(orderSections('ps', 's'))
       .execute();
     return rows.map((row) => ({
       id: row.id,

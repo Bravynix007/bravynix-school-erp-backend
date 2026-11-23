@@ -33,6 +33,14 @@ export class RosterQueryDto {
   date!: string;
 }
 
+/** ATT-09 query: the Institution whose classes and sections to offer for marking. */
+export class AttendanceSectionsQueryDto {
+  @ApiProperty({ format: 'uuid' })
+  @LowerCaseUuid()
+  @IsUUID()
+  institutionId!: string;
+}
+
 /** ATT-03 query: the sessions of a section, or of every section of an Institution, on a day. */
 export class ListSessionsQueryDto {
   @ApiProperty({ format: 'date', example: '2026-10-23' })

@@ -28,6 +28,7 @@ import {
 } from '../academic-setup/index.js';
 import { HolidayCalendar } from '../events/index.js';
 import type {
+  AttendanceSectionsQueryDto,
   CorrectAttendanceDto,
   ListSessionsQueryDto,
   RosterQueryDto,
@@ -35,9 +36,11 @@ import type {
 } from './attendance.dto.js';
 import { AttendanceRepository, type SessionRow } from './attendance.repository.js';
 import {
+  classesWithSections,
   existingSessionOf,
   sessionDetailResource,
   sessionResource,
+  type AttendanceClassResource,
   type AttendanceSessionDetailResource,
   type AttendanceSessionResource,
   type RosterResource,
@@ -187,6 +190,32 @@ export class AttendanceService {
       if (!isDuplicateOn(error, 'uq_attendance_sessions_daily')) throw error;
       throw await this.alreadySubmitted(context, body);
     }
+  }
+
+  /**
+   * ATT-09: the classes and sections of an Institution that can be marked: every open one, not only those the caller
+   * leads or teaches, because any teacher may mark any section of their Institution (D2). 404 for an Institution out
+   * of the caller's reach.
+   */
+  async sectionsOf(
+    principal: Principal,
+    query: AttendanceSectionsQueryDto,
+  ): Promise<ApiResult<AttendanceClassResource[]>> {
+    const context = await this.scope.requireInstitution(principal, query.institutionId);
+    const open = await this.database.transaction(context.tenant, (tx) =>
+      this.sections.openOf(tx, context.institutionId),
+    );
+    return ApiResult.list(
+      classesWithSections(
+        open.map((section) => ({
+          id: section.sectionId,
+          displayName: section.sectionName,
+          classId: section.classId,
+          className: section.className,
+        })),
+      ),
+      null,
+    );
   }
 
   /** ATT-03: the sessions of a section, or of every section of an Institution, on a day. */

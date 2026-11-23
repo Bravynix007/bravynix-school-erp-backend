@@ -12,6 +12,7 @@ import { personaByKey } from '../../src/seeds/two-worlds.js';
 import { apiCaller } from '../support/api.js';
 import { superAdminToken } from '../support/admin-token.js';
 import { readAuditRows } from '../support/audit-rows.js';
+import { removeScratchMasters } from '../support/scratch-masters.js';
 import { FixtureModule } from '../support/fixture.module.js';
 import { readJobs } from '../support/job-rows.js';
 import { clearLoginState } from '../support/login-state.js';
@@ -63,6 +64,12 @@ interface Session {
   marks?: { studentEnrolmentId: string; firstName: string; attendanceStatus: number }[];
 }
 
+interface ClassOffer {
+  classId: string;
+  className: string;
+  sections: { id: string; displayName: string }[];
+}
+
 const fieldsOf = (res: { body: { errors?: { field: string; code: string }[] } }) =>
   Object.fromEntries((res.body.errors ?? []).map((e) => [e.field, e.code]));
 
@@ -83,6 +90,7 @@ const parentEmail = () => `${Math.random().toString(36).slice(2)}@parent.test`;
 
 describe('ATT-01 to ATT-04 mark attendance (API design 10.10, 10.11)', () => {
   let ownerDb: Kysely<unknown>;
+  const scratch: { table: string; id: string }[] = [];
   let t: TestApp;
   let database: DatabaseService;
   let fixtures: PlatformFixtures;
@@ -278,8 +286,18 @@ describe('ATT-01 to ATT-04 mark attendance (API design 10.10, 10.11)', () => {
   afterEach(async () => {
     await clearLoginState(ownerDb);
     await kit.cleanup(ownerDb);
+    await removeScratchMasters(ownerDb, scratch.splice(0));
     await fixtures.cleanup();
   });
+
+  const offered = async (institutionId: string, token: string) => {
+    const res = await api('get', `/v1/attendance/sections?institutionId=${institutionId}`, token);
+    return {
+      status: res.status,
+      meta: res.body.meta,
+      data: res.body.data as unknown as ClassOffer[],
+    };
+  };
 
   describe('ATT-01 the roster', () => {
     it('lists the section by roll number, everyone Present, and lets the Owner, the Admin and a teacher at home mark', async () => {
@@ -641,6 +659,104 @@ describe('ATT-01 to ATT-04 mark attendance (API design 10.10, 10.11)', () => {
           studentId: studentIds.bea,
         }),
       ]);
+    });
+  });
+
+  describe('ATT-09 the sections to mark', () => {
+    it('offers every open section by class, in the order of the lists, to any teacher of the Institution', async () => {
+      const ninth = await kit.klass(owner.token, first, otherPredefinedClass);
+      // B is added before A: the order is the predefined sections', not the order of adding.
+      const ninthB = await kit.section(
+        owner.token,
+        ninth,
+        predefinedSections.find((s) => s.code === 'B')!.id,
+      );
+      const ninthA = await kit.section(
+        owner.token,
+        ninth,
+        predefinedSections.find((s) => s.code === 'A')!.id,
+      );
+      for (const token of [owner.token, firstAdmin.token, annaToken, eveToken]) {
+        const result = await offered(first, token);
+        expect(result.status).toBe(200);
+        expect(result.meta).toBeNull();
+        expect(result.data.map((c) => [c.classId, c.sections.map((x) => x.id)])).toEqual([
+          [ninth, [ninthA, ninthB]],
+          [classId, [sectionA, sectionB]],
+        ]);
+        expect(result.data[1]!.sections.map((x) => x.displayName)).toEqual(['A', 'B']);
+        expect(result.data[1]!.className).toBeTruthy();
+      }
+    });
+
+    it('lists classes by category, then predefined class, then stream with none first, as the class list does', async () => {
+      const categories = await kit.masters(admin, 'class-categories');
+      const byCode = (code: string) => categories.find((c) => c.code === code)!.id;
+      const predefinedClasses = await kit.masters(admin, 'predefined-classes');
+      const puc = predefinedClasses.find((c) => c.code === 'PUC1')!.id;
+      // A Nursery class added last to the predefined classes: its category comes before Pre-University, its order
+      // after, so only the category order puts it first.
+      const entry = await api('post', '/v1/platform/masters/predefined-classes', admin, {
+        classCategoryId: byCode('NURSERY'),
+        code: `Z${Date.now().toString(36).toUpperCase()}`,
+        name: `Scratch ${Date.now().toString(36)}`,
+      });
+      succeeded(entry, 201, 'predefined class');
+      scratch.push({ table: 'predefined_classes', id: entry.body.data.id });
+      const both = await api('post', '/v1/institutions', owner.token, {
+        name: 'Two Categories School',
+        code: `I${Date.now().toString(36)}`,
+        address: { line1: '1 Hill Road' },
+        classesOffered: [byCode('NURSERY'), byCode('PRE_UNIVERSITY')],
+      });
+      succeeded(both, 201, 'institution');
+      const institution = both.body.data.id as string;
+      const classWith = async (predefinedClassId: string, streamName?: string) => {
+        const made = await api('post', '/v1/classes', owner.token, {
+          institutionId: institution,
+          predefinedClassId,
+          ...(streamName ? { streamName } : {}),
+        });
+        succeeded(made, 201, 'class');
+        const id = made.body.data.id as string;
+        await kit.section(owner.token, id, predefinedSections.find((x) => x.code === 'A')!.id);
+        return id;
+      };
+      const nursery = await classWith(entry.body.data.id);
+      const streamed = await classWith(puc, 'pcmb');
+      const upper = await classWith(puc, 'BCMB');
+      const plain = await classWith(puc);
+      const result = await offered(institution, owner.token);
+      expect(result.data.map((c) => c.classId)).toEqual([nursery, plain, upper, streamed]);
+    });
+
+    it('leaves out a section or a class that has been deactivated', async () => {
+      const ninth = await kit.klass(owner.token, first, otherPredefinedClass);
+      const [ninthA, ninthB] = [
+        await kit.section(owner.token, ninth, predefinedSections.find((s) => s.code === 'A')!.id),
+        await kit.section(owner.token, ninth, predefinedSections.find((s) => s.code === 'B')!.id),
+      ];
+      succeeded(await api('delete', `/v1/sections/${ninthB}`, owner.token), 200, 'section');
+      expect((await offered(first, annaToken)).data[0]!.sections.map((x) => x.id)).toEqual([
+        ninthA,
+      ]);
+      succeeded(await api('delete', `/v1/sections/${ninthA}`, owner.token), 200, 'section');
+      succeeded(await api('delete', `/v1/classes/${ninth}`, owner.token), 200, 'class');
+      expect((await offered(first, owner.token)).data.map((c) => c.classId)).toEqual([classId]);
+      // A class closed while its sections are still open (the API refuses that order) offers none of them.
+      await rows(`update classes set status = 0 where id = '${classId}'`);
+      expect((await offered(first, owner.token)).data).toEqual([]);
+    });
+
+    it('is 404 for an Institution out of reach, 403 for a parent and 400 for a missing or bad Institution', async () => {
+      for (const token of [secondAdmin.token, otherOwner.token, devToken]) {
+        expect((await offered(first, token)).status).toBe(404);
+      }
+      expect((await offered(first, parentToken)).status).toBe(403);
+      for (const query of ['', '?institutionId=nope']) {
+        const res = await api('get', `/v1/attendance/sections${query}`, owner.token);
+        expect([res.status, fieldsOf(res)]).toEqual([400, { institutionId: 'INVALID_FORMAT' }]);
+      }
     });
   });
 
