@@ -2,9 +2,13 @@ import { ValidationPipe, type ValidationError } from '@nestjs/common';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
+  IsArray,
+  IsBoolean,
   IsEmail,
   IsInt,
   IsNotEmpty,
+  IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -220,6 +224,18 @@ class TitlesDto {
   @IsInt()
   count!: unknown;
 
+  @IsBoolean()
+  flag!: unknown;
+
+  @IsArray()
+  list!: unknown;
+
+  @IsObject()
+  object!: unknown;
+
+  @IsNumber()
+  amount!: unknown;
+
   @ValidateIf((dto: TitlesDto) => dto.title === 'depends')
   @IsString()
   @Length(1, 50)
@@ -229,7 +245,15 @@ class TitlesDto {
 async function titlesErrors(body: unknown) {
   try {
     const meta = { type: 'body', metatype: TitlesDto } as const;
-    const rest = { parentId: ID, email: 'asha@example.com', count: 1 };
+    const rest = {
+      parentId: ID,
+      email: 'asha@example.com',
+      count: 1,
+      flag: true,
+      list: [],
+      object: {},
+      amount: 1.5,
+    };
     const trimmed = new TrimStringsPipe().transform({ ...rest, ...(body as object) }, meta);
     await createValidationPipe().transform(trimmed, meta);
   } catch (error) {
@@ -251,6 +275,15 @@ describe('a text left empty', () => {
       { field: 'parentId', code: 'REQUIRED' },
       { field: 'email', code: 'REQUIRED' },
       { field: 'count', code: 'INVALID_TYPE' },
+    ]);
+  });
+
+  it('keeps INVALID_TYPE for a boolean, a list, an object or a number sent empty', async () => {
+    expect(await titlesErrors({ title: 'x', flag: '', list: '', object: '', amount: '' })).toEqual([
+      { field: 'flag', code: 'INVALID_TYPE' },
+      { field: 'list', code: 'INVALID_TYPE' },
+      { field: 'object', code: 'INVALID_TYPE' },
+      { field: 'amount', code: 'INVALID_TYPE' },
     ]);
   });
 

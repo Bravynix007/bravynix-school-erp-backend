@@ -80,6 +80,11 @@ describe('SubmitAttendanceDto', () => {
       'INVALID_CODE',
     ],
     [
+      { ...submission, exceptions: [{ studentEnrolmentId: uuid, attendanceStatus: '' }] },
+      'exceptions[0].attendanceStatus',
+      'INVALID_TYPE',
+    ],
+    [
       { ...submission, exceptions: [{ studentEnrolmentId: 'x', attendanceStatus: 2 }] },
       'exceptions[0].studentEnrolmentId',
       'INVALID_FORMAT',
@@ -107,6 +112,19 @@ describe('CorrectAttendanceDto', () => {
           }),
         ),
       ).toEqual([]);
+    }
+  });
+
+  it('answers a status sent empty or as text by its type, not as a missing one', async () => {
+    for (const attendanceStatus of ['', '2']) {
+      expect(
+        await problems(
+          body(CorrectAttendanceDto, {
+            ...correction,
+            changes: [{ studentEnrolmentId: uuid, attendanceStatus }],
+          }),
+        ),
+      ).toEqual([{ field: 'changes[0].attendanceStatus', code: 'INVALID_TYPE' }]);
     }
   });
 

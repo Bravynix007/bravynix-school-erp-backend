@@ -1177,7 +1177,7 @@ describe('PLT-24 to PLT-30 platform dues (PRD 9.3, API design 10.22)', () => {
           [{ paymentMode: undefined }, 'paymentMode', 'REQUIRED'],
           [{ paymentMode: 0 }, 'paymentMode', 'INVALID_CODE'],
           [{ paymentMode: 5 }, 'paymentMode', 'INVALID_CODE'],
-          [{ paymentMode: '2' }, 'paymentMode', 'INVALID_CODE'],
+          [{ paymentMode: '2' }, 'paymentMode', 'INVALID_TYPE'],
           [{ paymentReference: '' }, 'paymentReference', 'TOO_SHORT'],
           [{ paymentReference: 'r'.repeat(101) }, 'paymentReference', 'TOO_LONG'],
           [{ dueStatus: 2 }, 'dueStatus', 'FIELD_NOT_ALLOWED'],
