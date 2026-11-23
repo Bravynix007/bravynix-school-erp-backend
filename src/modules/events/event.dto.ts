@@ -138,6 +138,17 @@ class EventFieldsDto {
   @IsIn(PRESET_IMAGES)
   presetImageCode?: string | null;
 
+  @ApiPropertyOptional({
+    nullable: true,
+    format: 'uuid',
+    description:
+      'The event’s own picture: a Ready Event image (FIL-01, purpose 10) the caller uploaded; not with `presetImageCode`',
+  })
+  @IsOptional()
+  @LowerCaseUuid()
+  @IsUUID()
+  imageFileId?: string | null;
+
   @ApiPropertyOptional({ description: 'A holiday needs `holidayType` and who it is for' })
   @IsOptional()
   @IsBoolean()
@@ -191,7 +202,7 @@ export class CreateEventDto extends EventFieldsDto {
 
 /**
  * EVT-04 body: every field of EVT-02 but the scope, each optional. A field left out stays, `description`, `venue`,
- * `presetImageCode` and `holidayType` are cleared with `null`.
+ * `presetImageCode`, `imageFileId` and `holidayType` are cleared with `null`.
  */
 export class UpdateEventDto extends VersionDto {
   @ApiPropertyOptional({ minLength: 1, maxLength: 150 })
@@ -243,6 +254,16 @@ export class UpdateEventDto extends VersionDto {
   @IsString()
   @IsIn(PRESET_IMAGES)
   presetImageCode?: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    format: 'uuid',
+    description: 'A new picture, as in EVT-02; naming one kind of picture drops the other',
+  })
+  @IsOptional()
+  @LowerCaseUuid()
+  @IsUUID()
+  imageFileId?: string | null;
 
   @ApiPropertyOptional()
   @WhenPresent()

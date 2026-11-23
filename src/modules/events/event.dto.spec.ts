@@ -28,6 +28,7 @@ describe('CreateEventDto', () => {
           venue: 'Hall',
           audience: 3,
           presetImageCode: 'sports',
+          imageFileId: uuid,
           isHoliday: true,
           holidayType: 4,
           holidayForStudents: true,
@@ -56,6 +57,7 @@ describe('CreateEventDto', () => {
     [{ ...valid, scope: undefined }, 'scope', 'REQUIRED'],
     [{ ...valid, institutionId: 'nope' }, 'institutionId', 'INVALID_FORMAT'],
     [{ ...valid, presetImageCode: 'unicorn' }, 'presetImageCode', 'INVALID_CODE'],
+    [{ ...valid, imageFileId: 'nope' }, 'imageFileId', 'INVALID_FORMAT'],
     [{ ...valid, isHoliday: 'yes' }, 'isHoliday', 'INVALID_TYPE'],
     [{ ...valid, holidayType: 5 }, 'holidayType', 'INVALID_CODE'],
     [{ ...valid, holidayType: '1' }, 'holidayType', 'INVALID_TYPE'],
@@ -99,6 +101,7 @@ describe('UpdateEventDto', () => {
           venue: null,
           holidayType: null,
           presetImageCode: null,
+          imageFileId: null,
         }),
       ),
     ).toEqual([]);

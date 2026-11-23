@@ -453,6 +453,43 @@ describe('who an event reaches, and what a parent reads of the calendar', () => 
       ]);
     });
 
+    it('reads the picture of an event as an address, for an Institution’s event and a Society event with a picture of another Institution', async () => {
+      const own = await kit.readyFile(
+        owner.token,
+        first,
+        { purpose: 10, contentType: 'image/jpeg' },
+        true,
+      );
+      const other = await kit.readyFile(
+        owner.token,
+        second,
+        { purpose: 10, contentType: 'image/jpeg' },
+        true,
+      );
+      await create({ title: 'Own poster', imageFileId: own });
+      await create({
+        scope: 1,
+        institutionId: undefined,
+        title: 'Society poster',
+        imageFileId: other,
+      });
+      const res = await read(`${span}&studentId=${students.ten}`, tokens['parent-ten']!);
+      const shown = Object.fromEntries(
+        (
+          res.body.data as unknown as { title: string; image: { id: string; url: string } | null }[]
+        ).map((e) => [e.title, e.image]),
+      );
+      expect(shown['Own poster']).toEqual({
+        id: own,
+        url: expect.stringMatching(/\/public\//) as string,
+      });
+      expect(shown['Society poster']).toEqual({
+        id: other,
+        url: expect.stringMatching(/\/public\//) as string,
+      });
+      expect(shown['Everyone']).toBeNull();
+    });
+
     it('reads each child of one parent in that child’s own Institution', async () => {
       const token = tokens['parent-both']!;
       expect(await titles(students.bothFirst, token)).toEqual([

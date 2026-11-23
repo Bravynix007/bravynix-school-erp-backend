@@ -36,6 +36,8 @@ export interface EventsTable {
   /** 1 Everyone, 2 Students and parents, 3 Staff. */
   audience: Generated<number>;
   preset_image_code: string | null;
+  /** The event's own picture, a Ready public file (purpose 10); never together with `preset_image_code`. */
+  image_file_id: string | null;
   is_holiday: Generated<boolean>;
   /** 1 Public holiday, 2 Vacation, 3 Event holiday, 4 Optional; set exactly when `is_holiday`. */
   holiday_type: number | null;

@@ -20,6 +20,7 @@ const row: EventRow = {
   duration_label: '3 Days',
   audience: 1,
   preset_image_code: null,
+  image_file_id: null,
   is_holiday: false,
   holiday_type: null,
   holiday_for_students: false,

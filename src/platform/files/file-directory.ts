@@ -4,7 +4,7 @@ import { ErrorCode, FieldErrorCode } from '../../common/http/error-codes.js';
 import { Clock } from '../../common/time/clock.js';
 import { fieldError } from '../../common/validation/field-error.js';
 import type { Tx } from '../database/index.js';
-import type { FilePurpose } from './file-purposes.js';
+import { PUBLIC_BUCKET, type FilePurpose } from './file-purposes.js';
 import { FilesRepository, isDue } from './files.repository.js';
 import { ObjectStorage } from './object-storage.js';
 
@@ -54,20 +54,21 @@ export class FileDirectory {
 
   /**
    * A file a person uploaded to start an operation on it (an import): the caller can see it (404 otherwise), and it is a
-   * file of the purpose, in the Institution, that this person uploaded (400 `INVALID_VALUE` on the field). It is also
-   * Ready, else 422 `FILE_NOT_READY`: the upload was not confirmed, or the file was refused or removed.
+   * file of the purpose, in the Institution, that this person uploaded (400 `INVALID_VALUE` on the field). A record of
+   * the whole Society names no Institution (`null`), and takes a file of any Institution the uploader reached. It is
+   * also Ready, else 422 `FILE_NOT_READY`: the upload was not confirmed, or the file was refused or removed.
    */
   async requireUploaded(
     tx: Tx,
     fileId: string,
-    expect: { purpose: FilePurpose; institutionId: string; uploadedBy: string },
+    expect: { purpose: FilePurpose; institutionId: string | null; uploadedBy: string },
     field: string,
   ): Promise<void> {
     const file = await this.files.find(tx, fileId);
     if (!file) throw AppException.notFound();
     if (
       file.purpose !== expect.purpose ||
-      file.institution_id !== expect.institutionId ||
+      (expect.institutionId !== null && file.institution_id !== expect.institutionId) ||
       file.created_by !== expect.uploadedBy
     ) {
       throw AppException.validation([fieldError(field, FieldErrorCode.INVALID_VALUE)]);
@@ -75,6 +76,23 @@ export class FileDirectory {
     if (file.file_status !== READY || isDue(file, this.clock.now())) {
       throw AppException.businessRule(ErrorCode.FILE_NOT_READY);
     }
+  }
+
+  /**
+   * The address of each Ready public file among `ids` (an event image), by ID, for anyone the record is shown to: the
+   * row of a public file is readable across the Society, and its object needs no signature (DDD 16.1). A file that is
+   * gone, or whose time to be deleted has come, has no address.
+   */
+  async publicUrls(tx: Tx, ids: readonly string[]): Promise<Map<string, string>> {
+    const now = this.clock.now();
+    return new Map(
+      (await this.files.findMany(tx, ids))
+        .filter(
+          (row) =>
+            row.storage_bucket === PUBLIC_BUCKET && row.file_status === READY && !isDue(row, now),
+        )
+        .map((row) => [row.id, this.storage.publicUrl(row.object_key)]),
+    );
   }
 
   /** What a Ready file holds (at most 5 MB), for the module that owns it to read; `null` when nothing is stored. */

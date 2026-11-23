@@ -88,6 +88,41 @@ export function checkEventFields(event: EventFields): void {
   if (errors.length > 0) throw AppException.validation(errors);
 }
 
+/** The picture of an event: one the app ships, or one its organiser uploaded (a Ready file of purpose 10), never both. */
+export interface EventPicture {
+  presetImageCode: string | null;
+  imageFileId: string | null;
+}
+
+/**
+ * The picture an event ends with. A field left out stays; naming one kind of picture drops the other, so choosing an
+ * upload over a preset (or back) is one change; naming both is 400 `FIELD_NOT_ALLOWED` on the preset.
+ */
+export function pictureAfter(
+  current: EventPicture,
+  asked: { presetImageCode?: string | null; imageFileId?: string | null },
+): EventPicture {
+  if (asked.presetImageCode != null && asked.imageFileId != null) {
+    throw AppException.validation([
+      fieldError('presetImageCode', FieldErrorCode.FIELD_NOT_ALLOWED),
+    ]);
+  }
+  return {
+    presetImageCode:
+      asked.presetImageCode !== undefined
+        ? asked.presetImageCode
+        : asked.imageFileId != null
+          ? null
+          : current.presetImageCode,
+    imageFileId:
+      asked.imageFileId !== undefined
+        ? asked.imageFileId
+        : asked.presetImageCode != null
+          ? null
+          : current.imageFileId,
+  };
+}
+
 /** A scope and its Institution go together: an Institution exactly when the scope is 2 (400 on `institutionId`). */
 export function checkScope(scope: number, institutionId: string | null | undefined): void {
   if (scope === EventScope.Institution && !institutionId) {

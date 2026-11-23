@@ -54,6 +54,7 @@ import * as m0052 from './2026_11_17_0052_attendance_corrections.js';
 import * as m0053 from './2026_11_17_0053_attendance_parent_read.js';
 import * as m0054 from './2026_11_17_0054_diary_entries.js';
 import * as m0055 from './2026_11_23_0055_inbox_target_date.js';
+import * as m0056 from './2026_11_23_0056_event_image_file.js';
 
 /**
  * Every migration, in order. Listed explicitly (not read from disk) so the
@@ -119,6 +120,7 @@ const migrations: Record<string, Migration> = {
   '2026_11_17_0053_attendance_parent_read': m0053,
   '2026_11_17_0054_diary_entries': m0054,
   '2026_11_23_0055_inbox_target_date': m0055,
+  '2026_11_23_0056_event_image_file': m0056,
 };
 
 export const migrationProvider: MigrationProvider = {
