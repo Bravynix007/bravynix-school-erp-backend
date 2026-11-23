@@ -41,12 +41,37 @@ describe('parseEnv', () => {
     expect(() => parseEnv({ ...base, NODE_ENV: 'staging' })).toThrow(/EMAIL_DRIVER/);
   });
 
+  it('sends no push by default, and needs the service account for the firebase driver', () => {
+    expect(parseEnv({ ...base }).PUSH_DRIVER).toBe('log');
+    expect(() => parseEnv({ ...base, PUSH_DRIVER: 'firebase' })).toThrow(
+      /FIREBASE_SERVICE_ACCOUNT_JSON/,
+    );
+    expect(
+      parseEnv({ ...base, PUSH_DRIVER: 'firebase', FIREBASE_SERVICE_ACCOUNT_FILE: '/k.json' })
+        .PUSH_DRIVER,
+    ).toBe('firebase');
+    expect(
+      parseEnv({ ...base, PUSH_DRIVER: 'firebase', FIREBASE_SERVICE_ACCOUNT_JSON: '{}' })
+        .PUSH_DRIVER,
+    ).toBe('firebase');
+  });
+
+  it('refuses the log push driver when deployed', () => {
+    for (const NODE_ENV of ['staging', 'production']) {
+      expect(() =>
+        parseEnv({ ...base, NODE_ENV, EMAIL_DRIVER: 'smtp', SMTP_URL: 'smtp://x' }),
+      ).toThrow(/PUSH_DRIVER/);
+    }
+  });
+
   it('refuses the OpenAPI UI in production', () => {
     expect(() =>
       parseEnv({
         ...base,
         NODE_ENV: 'production',
         EMAIL_DRIVER: 'smtp',
+        PUSH_DRIVER: 'firebase',
+        FIREBASE_SERVICE_ACCOUNT_FILE: '/run/secrets/firebase.json',
         SMTP_URL: 'smtp://x',
         OPENAPI_UI: 'true',
       }),
@@ -58,6 +83,8 @@ describe('parseEnv', () => {
       ...base,
       NODE_ENV: 'staging',
       EMAIL_DRIVER: 'smtp',
+      PUSH_DRIVER: 'firebase',
+      FIREBASE_SERVICE_ACCOUNT_FILE: '/run/secrets/firebase.json',
       STORAGE_DRIVER: 'r2',
       SMTP_URL: 'smtp://x',
       OTP_HMAC_SECRET: SECRET,
@@ -78,6 +105,8 @@ describe('parseEnv', () => {
       ...base,
       NODE_ENV: 'staging',
       EMAIL_DRIVER: 'smtp',
+      PUSH_DRIVER: 'firebase',
+      FIREBASE_SERVICE_ACCOUNT_FILE: '/run/secrets/firebase.json',
       SMTP_URL: 'smtp://x',
       EMAIL_FROM: 'BravyNix <no-reply@bravynix.in>',
       OTP_HMAC_SECRET: 'x'.repeat(32),
@@ -111,6 +140,8 @@ describe('parseEnv', () => {
         ...base,
         NODE_ENV,
         EMAIL_DRIVER: 'smtp',
+        PUSH_DRIVER: 'firebase',
+        FIREBASE_SERVICE_ACCOUNT_FILE: '/run/secrets/firebase.json',
         STORAGE_DRIVER: 'r2',
         SMTP_URL: 'smtp://x',
         EMAIL_FROM: 'BravyNix <no-reply@bravynix.in>',
@@ -145,6 +176,8 @@ describe('parseEnv', () => {
       ...base,
       NODE_ENV: 'production',
       EMAIL_DRIVER: 'smtp',
+      PUSH_DRIVER: 'firebase',
+      FIREBASE_SERVICE_ACCOUNT_FILE: '/run/secrets/firebase.json',
       STORAGE_DRIVER: 'r2',
       SMTP_URL: 'smtp://x',
       EMAIL_FROM: 'BravyNix <no-reply@bravynix.in>',
@@ -185,6 +218,8 @@ describe('parseEnv', () => {
       ...base,
       NODE_ENV: 'production',
       EMAIL_DRIVER: 'smtp',
+      PUSH_DRIVER: 'firebase',
+      FIREBASE_SERVICE_ACCOUNT_FILE: '/run/secrets/firebase.json',
       STORAGE_DRIVER: 'r2',
       SMTP_URL: 'smtp://x',
       EMAIL_FROM: 'BravyNix <no-reply@bravynix.in>',

@@ -69,6 +69,15 @@ export const envSchema = z
     EMAIL_FROM: z.string().default('BravyNix School ERP <no-reply@localhost>'),
 
     /**
+     * log | firebase. `log` sends nothing (development, tests, demo); `firebase` sends through FCM (SDD 18) and
+     * needs the project's service-account key, as JSON text (Secrets Manager) or as a file (a laptop). Staging and
+     * production require `firebase`.
+     */
+    PUSH_DRIVER: z.enum(['log', 'firebase']).default('log'),
+    FIREBASE_SERVICE_ACCOUNT_JSON: z.string().optional(),
+    FIREBASE_SERVICE_ACCOUNT_FILE: z.string().optional(),
+
+    /**
      * Secret for the keyed hashes of emails and login codes (SDD 13.2), at
      * least 32 characters. Required in staging and production; elsewhere a
      * random one is made at start, so codes do not survive a restart.
@@ -146,6 +155,24 @@ export const envSchema = z
       });
     }
     const deployed = env.NODE_ENV === 'staging' || env.NODE_ENV === 'production';
+    if (
+      env.PUSH_DRIVER === 'firebase' &&
+      !env.FIREBASE_SERVICE_ACCOUNT_JSON &&
+      !env.FIREBASE_SERVICE_ACCOUNT_FILE
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['FIREBASE_SERVICE_ACCOUNT_JSON'],
+        message: 'or FIREBASE_SERVICE_ACCOUNT_FILE is required when PUSH_DRIVER=firebase',
+      });
+    }
+    if (deployed && env.PUSH_DRIVER !== 'firebase') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['PUSH_DRIVER'],
+        message: 'must be firebase in staging and production',
+      });
+    }
     if (deployed && env.EMAIL_DRIVER !== 'smtp') {
       ctx.addIssue({
         code: 'custom',
