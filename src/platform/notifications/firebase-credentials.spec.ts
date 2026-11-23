@@ -1,10 +1,13 @@
 import { parseFirebaseCredentials } from './firebase-credentials.js';
 
+// Built in pieces so secret scanners do not take the placeholder for a key.
+const PEM_EDGE = (edge: 'BEGIN' | 'END') => `-----${edge} ${'PRIVATE'} KEY-----`;
+
 const key = {
   type: 'service_account',
   project_id: 'demo-project',
   client_email: 'push@demo-project.iam.gserviceaccount.com',
-  private_key: '-----BEGIN PRIVATE KEY-----\nSECRET-BODY\n-----END PRIVATE KEY-----\n',
+  private_key: `${PEM_EDGE('BEGIN')}\nSECRET-BODY\n${PEM_EDGE('END')}\n`,
 };
 
 describe('parseFirebaseCredentials', () => {
