@@ -79,6 +79,8 @@ describe('FirebasePushSender', () => {
     expect(outcomes).toEqual(['sent']);
     const call = pushed()[0]!;
     expect((call.init.headers as Record<string, string>).authorization).toBe('Bearer access-1');
+    // A send that gets no answer is given up (SDD 18: outbound calls have timeouts).
+    expect(call.init.signal).toBeInstanceOf(AbortSignal);
     expect(JSON.parse(call.init.body as string)).toEqual({
       message: {
         token: 't1',
@@ -105,12 +107,12 @@ describe('FirebasePushSender', () => {
     clock.advance(3_500_000);
     await sender.send([message('t2')]);
     expect(signIns()).toBe(1);
-    clock.advance(100_000);
+    clock.advance(50_000);
     await sender.send([message('t3')]);
     expect(signIns()).toBe(2);
   });
 
-  it('marks a token FCM says is unregistered, and one named in a field violation, as invalid', async () => {
+  it('marks a token FCM says is unregistered, another project’s, or named in a field violation, as invalid', async () => {
     const { sender } = build([
       () => json(404, { error: { status: 'NOT_FOUND', details: [{ errorCode: 'UNREGISTERED' }] } }),
       () =>
@@ -120,13 +122,24 @@ describe('FirebasePushSender', () => {
             details: [{ fieldViolations: [{ field: 'message.token' }] }],
           },
         }),
-      () => json(404),
+      () =>
+        json(403, {
+          error: { status: 'PERMISSION_DENIED', details: [{ errorCode: 'SENDER_ID_MISMATCH' }] },
+        }),
     ]);
     expect(await sender.send([message('a'), message('b'), message('c')])).toEqual([
       'invalid_token',
       'invalid_token',
       'invalid_token',
     ]);
+  });
+
+  it('keeps every token when a 404 names none of them, as a wrong project would answer', async () => {
+    const { sender } = build([
+      () => json(404),
+      () => json(404, { error: { status: 'NOT_FOUND' } }),
+    ]);
+    expect(await sender.send([message('a'), message('b')])).toEqual(['failed', 'failed']);
   });
 
   it('leaves the token alone when the refusal is about something else', async () => {
@@ -155,13 +168,12 @@ describe('FirebasePushSender', () => {
     expect(pushed()).toHaveLength(3);
     expect(sleeps).toEqual([250, 500]);
 
-    const lost = build([
-      () => Promise.reject(new Error('socket hang up')),
-      () => Promise.reject(new Error('socket hang up')),
-      () => Promise.reject(new Error('socket hang up')),
-    ]);
+    const lost = build(
+      Array.from({ length: 5 }, () => () => Promise.reject(new Error('socket hang up'))),
+    );
     expect(await lost.sender.send([message('a')])).toEqual(['failed']);
-    expect(lost.pushed()).toHaveLength(3);
+    expect(lost.pushed()).toHaveLength(5);
+    expect(lost.sleeps).toEqual([250, 500, 1000, 2000]);
   });
 
   it('logs only counts, never a token or the text of a push', async () => {
@@ -173,6 +185,19 @@ describe('FirebasePushSender', () => {
     expect(logged).not.toContain('secret-device-token');
     expect(logged).not.toContain('Asha');
     warn.mockRestore();
+  });
+
+  it('reads the private key at the start, and refuses one that cannot be used', async () => {
+    const { sender } = build();
+    await expect(sender.checkKey()).resolves.toBeUndefined();
+    const broken = new FirebasePushSender(
+      {
+        ...credentials,
+        private_key: '-----BEGIN PRIVATE KEY-----\nnot a key\n-----END PRIVATE KEY-----',
+      },
+      new FixedClock(),
+    );
+    await expect(broken.checkKey()).rejects.toThrow(/PKCS8|key/i);
   });
 
   it('throws when Google refuses the sign-in, so the worker goes on without the push', async () => {

@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import { Module } from '@nestjs/common';
 import { Clock } from '../../common/time/clock.js';
 import { AppConfig } from '../../config/app-config.js';
@@ -8,9 +7,8 @@ import { Notifications } from './notifications.port.js';
 import { NotificationsRepository } from './notifications.repository.js';
 import { NotificationsService } from './notifications.service.js';
 import { NotifyProcessor } from './notify.processor.js';
-import { FirebasePushSender } from './firebase-push-sender.js';
-import { parseFirebaseCredentials } from './firebase-credentials.js';
-import { LogPushSender, PushSender } from './push-sender.js';
+import { PushSender } from './push-sender.js';
+import { createPushSender } from './push-sender.factory.js';
 
 /**
  * Notifications (SDD 9.3, API design 9.1): a person's inbox, the push token of their phone, and the worker that
@@ -26,13 +24,8 @@ import { LogPushSender, PushSender } from './push-sender.js';
     {
       provide: PushSender,
       inject: [AppConfig, Clock],
-      useFactory: ({ env }: AppConfig, clock: Clock): PushSender => {
-        if (env.PUSH_DRIVER !== 'firebase') return new LogPushSender();
-        const text =
-          env.FIREBASE_SERVICE_ACCOUNT_JSON ??
-          readFileSync(env.FIREBASE_SERVICE_ACCOUNT_FILE!, 'utf8');
-        return new FirebasePushSender(parseFirebaseCredentials(text), clock);
-      },
+      useFactory: ({ env }: AppConfig, clock: Clock): Promise<PushSender> =>
+        createPushSender(env, clock),
     },
   ],
   controllers: [NotificationsController, PushDeviceController],

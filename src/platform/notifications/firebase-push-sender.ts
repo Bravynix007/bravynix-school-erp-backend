@@ -10,9 +10,11 @@ const SCOPE = 'https://www.googleapis.com/auth/firebase.messaging';
 const CONCURRENCY = 20;
 /** A call that gets no answer in this time is given up (SDD 18: outbound calls have timeouts). */
 const TIMEOUT_MS = 10_000;
-/** Tries a push gets when FCM or the network is passing-faulty (429, 5xx, no answer). */
-const ATTEMPTS = 3;
+/** Tries a push gets when FCM or the network is passing-faulty (429, 5xx, no answer): SDD 18, up to 5 with back-off. After that the inbox is the record. */
+const ATTEMPTS = 5;
 const BACKOFF_MS = 250;
+/** What FCM answers for a token that is no phone's: gone, or issued to another Firebase project. */
+const GONE_CODES = new Set(['UNREGISTERED', 'SENDER_ID_MISMATCH']);
 
 /** What the driver needs from outside, so a test can answer for Google. */
 export interface FirebaseTransport {
@@ -54,6 +56,12 @@ export class FirebasePushSender extends PushSender {
     super();
   }
 
+  /** Reads the private key, so a key that cannot be used stops the start and is not found at the first notice. */
+  async checkKey(): Promise<void> {
+    this.key ??= importPKCS8(this.credentials.private_key, 'RS256');
+    await this.key;
+  }
+
   async send(messages: PushMessage[]): Promise<PushOutcome[]> {
     // The sign-in is made once for the whole batch, so a provider that cannot be reached at all throws here.
     const token = await this.accessToken();
@@ -88,7 +96,7 @@ export class FirebasePushSender extends PushSender {
           }
           return 'failed';
         }
-        return isGone(response.status, (await response.json().catch(() => ({}))) as FcmError)
+        return isGone((await response.json().catch(() => ({}))) as FcmError)
           ? 'invalid_token'
           : 'failed';
       } catch {
@@ -147,11 +155,14 @@ function body(message: PushMessage) {
   };
 }
 
-/** Whether FCM says the token itself is no longer any phone's: unregistered, or named in a field violation. */
-function isGone(status: number, error: FcmError): boolean {
+/**
+ * Whether FCM says the token itself is no longer any phone's: unregistered, one of another Firebase project's, or
+ * named in a field violation. A refusal that names no token (a 404 for a wrong project, say) is a fault of ours, and
+ * it must never delete the tokens of a whole batch.
+ */
+function isGone(error: FcmError): boolean {
   const details = error.error?.details ?? [];
-  if (details.some((detail) => detail.errorCode === 'UNREGISTERED')) return true;
-  if (status === 404) return true;
+  if (details.some((detail) => GONE_CODES.has(detail.errorCode ?? ''))) return true;
   return (
     error.error?.status === 'INVALID_ARGUMENT' &&
     details.some((detail) =>
