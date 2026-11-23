@@ -16,7 +16,7 @@ export type PushOutcome = 'sent' | 'invalid_token' | 'failed';
 
 /**
  * The push provider behind one interface (SDD 18): the log driver below in development, tests and demo, and the
- * Firebase driver, switched on by configuration, later. It answers one outcome per message, in order; one that cannot
+ * Firebase driver (`firebase-push-sender.ts`), switched on by `PUSH_DRIVER`. It answers one outcome per message, in order; one that cannot
  * reach the provider at all throws, and the worker goes on without it (the inbox row is already written).
  */
 export abstract class PushSender {
