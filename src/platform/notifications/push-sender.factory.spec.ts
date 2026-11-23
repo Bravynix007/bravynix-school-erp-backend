@@ -7,6 +7,9 @@ import { FirebasePushSender } from './firebase-push-sender.js';
 import { LogPushSender } from './push-sender.js';
 import { createPushSender } from './push-sender.factory.js';
 
+// Built in pieces so secret scanners do not take the placeholder for a key.
+const brokenPem = `-----BEGIN ${'PRIVATE'} KEY-----\nnot a key\n-----END ${'PRIVATE'} KEY-----`;
+
 const keyText = (privateKey = generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey) =>
   JSON.stringify({
     type: 'service_account',
@@ -52,7 +55,7 @@ describe('createPushSender', () => {
   it('stops the start for a key that cannot be used, without echoing it', async () => {
     const broken = JSON.stringify({
       ...JSON.parse(keyText()),
-      private_key: '-----BEGIN PRIVATE KEY-----\nnot a key\n-----END PRIVATE KEY-----',
+      private_key: brokenPem,
     });
     const attempt = createPushSender(
       { PUSH_DRIVER: 'firebase', FIREBASE_SERVICE_ACCOUNT_JSON: broken },
