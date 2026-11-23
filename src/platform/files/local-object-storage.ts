@@ -81,7 +81,9 @@ export class LocalObjectStorage extends ObjectStorage {
     try {
       return await readFile(this.pathOf(key));
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      // A key that names a folder of keys (`public/<society>`), or runs through a file, is no object either.
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT' || code === 'EISDIR' || code === 'ENOTDIR') return null;
       throw error;
     }
   }

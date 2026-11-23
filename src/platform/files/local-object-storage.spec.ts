@@ -108,6 +108,12 @@ describe('LocalObjectStorage', () => {
       expect(await storage.write('s/i/3/once', Buffer.from('again'))).toBe(true);
     });
 
+    it('reading a key that is a folder of keys, or runs through an object, is null', async () => {
+      await storage.write('s/i/3/one', Buffer.from('bytes'));
+      expect(await storage.read('s/i')).toBeNull();
+      expect(await storage.read('s/i/3/one/more')).toBeNull();
+    });
+
     it('is never kept outside the storage directory', async () => {
       await expect(storage.write('../escape', Buffer.from('x'))).rejects.toThrow(/outside/);
       await expect(storage.read('../../etc/passwd')).rejects.toThrow(/outside/);
