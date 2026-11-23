@@ -54,7 +54,6 @@ describe('the inbox and the push device', () => {
   let me: SignedInPerson;
   let other: SignedInPerson;
 
-  /** An inbox row, written as the worker does: under the Society, whoever receives it. */
   /** A notice that names the day 21 November, with the target whose ID is [target] (none when null). */
   const insertWithDay = (target: string | null) =>
     ownerDb.transaction().execute(async (tx) => {
@@ -66,6 +65,7 @@ describe('the inbox and the push device', () => {
           ${target === null ? null : 2}, ${target}, '2026-11-21')`.execute(tx);
     });
 
+  /** An inbox row, written as the worker does: under the Society, whoever receives it. */
   const put = async (
     user: string,
     fields: {
