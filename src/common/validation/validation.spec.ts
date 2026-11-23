@@ -155,6 +155,39 @@ describe('toFieldErrors with real decorators', () => {
   });
 });
 
+describe('a missing field', () => {
+  it('is REQUIRED whatever rule it fails, and a wrong one keeps its own code', async () => {
+    const missing = await errorsFor({ name: undefined, score: undefined, q: undefined });
+    expect(missing.map(({ field, code }) => ({ field, code }))).toEqual([
+      { field: 'name', code: 'REQUIRED' },
+      { field: 'score', code: 'REQUIRED' },
+      { field: 'q', code: 'REQUIRED' },
+    ]);
+    const wrong = await errorsFor({ name: 5, score: 'x', q: 'a' });
+    expect(wrong.map(({ field, code }) => ({ field, code }))).toEqual([
+      { field: 'name', code: 'INVALID_TYPE' },
+      { field: 'score', code: 'INVALID_TYPE' },
+      { field: 'q', code: 'TOO_SHORT' },
+    ]);
+  });
+
+  it('is REQUIRED inside a nested object too, and a null is a wrong value, not a missing one', async () => {
+    const error = await pipeErrors({ surname: null, guardians: [{}] });
+    expect(error.options.errors?.map(({ field, code }) => ({ field, code }))).toEqual([
+      { field: 'surname', code: 'INVALID_TYPE' },
+      { field: 'guardians[0].name', code: 'REQUIRED' },
+    ]);
+  });
+
+  it('leaves an unknown field as FIELD_NOT_ALLOWED beside a missing one', async () => {
+    const error = await pipeErrors({ guardians: [], status: 1 });
+    expect(error.options.errors?.map(({ field, code }) => ({ field, code }))).toEqual([
+      { field: 'status', code: 'FIELD_NOT_ALLOWED' },
+      { field: 'surname', code: 'REQUIRED' },
+    ]);
+  });
+});
+
 describe('the validation pipe', () => {
   afterEach(() => {
     vi.restoreAllMocks();

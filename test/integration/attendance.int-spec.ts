@@ -753,9 +753,12 @@ describe('ATT-01 to ATT-04 mark attendance (API design 10.10, 10.11)', () => {
         expect((await offered(first, token)).status).toBe(404);
       }
       expect((await offered(first, parentToken)).status).toBe(403);
-      for (const query of ['', '?institutionId=nope']) {
+      for (const [query, code] of [
+        ['', 'REQUIRED'],
+        ['?institutionId=nope', 'INVALID_FORMAT'],
+      ]) {
         const res = await api('get', `/v1/attendance/sections${query}`, owner.token);
-        expect([res.status, fieldsOf(res)]).toEqual([400, { institutionId: 'INVALID_FORMAT' }]);
+        expect([res.status, fieldsOf(res)]).toEqual([400, { institutionId: code }]);
       }
     });
   });

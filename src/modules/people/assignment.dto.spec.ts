@@ -24,11 +24,11 @@ describe('SetClassTeacherDto', () => {
   });
 
   it.each([
-    ['no year', { sectionId: id(2) }, [{ field: 'academicYearId', code: 'INVALID_FORMAT' }]],
+    ['no year', { sectionId: id(2) }, [{ field: 'academicYearId', code: 'REQUIRED' }]],
     [
       'no section: null is the way to end it',
       { academicYearId: id(1) },
-      [{ field: 'sectionId', code: 'INVALID_FORMAT' }],
+      [{ field: 'sectionId', code: 'REQUIRED' }],
     ],
     [
       'a word for the section',
@@ -62,7 +62,7 @@ describe('CreateTeachingAssignmentDto', () => {
     async (field) => {
       const { [field]: _left, ...rest } = full as Record<string, string>;
       expect(await problems(body(CreateTeachingAssignmentDto, rest))).toEqual([
-        { field, code: 'INVALID_FORMAT' },
+        { field, code: 'REQUIRED' },
       ]);
     },
   );

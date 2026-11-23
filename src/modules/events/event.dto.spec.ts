@@ -39,7 +39,7 @@ describe('CreateEventDto', () => {
   });
 
   it.each([
-    [{ ...valid, title: undefined }, 'title', 'INVALID_TYPE'],
+    [{ ...valid, title: undefined }, 'title', 'REQUIRED'],
     [{ ...valid, title: '  ' }, 'title', 'INVALID_FORMAT'],
     [{ ...valid, title: 'x'.repeat(151) }, 'title', 'TOO_LONG'],
     [{ ...valid, startDate: '22/12/2026' }, 'startDate', 'INVALID_FORMAT'],
@@ -51,7 +51,7 @@ describe('CreateEventDto', () => {
     [{ ...valid, audience: 4 }, 'audience', 'INVALID_CODE'],
     [{ ...valid, audience: '1' }, 'audience', 'INVALID_TYPE'],
     [{ ...valid, scope: 3 }, 'scope', 'INVALID_CODE'],
-    [{ ...valid, scope: undefined }, 'scope', 'INVALID_TYPE'],
+    [{ ...valid, scope: undefined }, 'scope', 'REQUIRED'],
     [{ ...valid, institutionId: 'nope' }, 'institutionId', 'INVALID_FORMAT'],
     [{ ...valid, presetImageCode: 'unicorn' }, 'presetImageCode', 'INVALID_CODE'],
     [{ ...valid, isHoliday: 'yes' }, 'isHoliday', 'INVALID_TYPE'],
@@ -102,7 +102,7 @@ describe('UpdateEventDto', () => {
     ).toEqual([]);
     expect(await problems(body(UpdateEventDto, { title: 'x' }))).toContainEqual({
       field: 'version',
-      code: 'INVALID_TYPE',
+      code: 'REQUIRED',
     });
     expect(await problems(body(UpdateEventDto, { version: '1' }))).toContainEqual({
       field: 'version',
@@ -144,7 +144,7 @@ describe('ChangeEventScopeDto', () => {
     ).toEqual([]);
     expect(await problems(body(ChangeEventScopeDto, { version: 1 }))).toContainEqual({
       field: 'scope',
-      code: 'INVALID_TYPE',
+      code: 'REQUIRED',
     });
     expect(await problems(body(ChangeEventScopeDto, { version: 1, scope: 0 }))).toContainEqual({
       field: 'scope',

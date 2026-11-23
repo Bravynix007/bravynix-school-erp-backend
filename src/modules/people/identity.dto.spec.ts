@@ -13,7 +13,7 @@ describe('SetIdentityDto', () => {
   });
 
   it.each([
-    ['no number: null is the way to clear it', {}, [{ field: 'aadhaar', code: 'INVALID_TYPE' }]],
+    ['no number: null is the way to clear it', {}, [{ field: 'aadhaar', code: 'REQUIRED' }]],
     [
       'a number as a JSON number',
       { aadhaar: 234567890124 },

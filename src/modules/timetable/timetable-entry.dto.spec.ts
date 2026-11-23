@@ -30,7 +30,7 @@ describe('CreateTimetableEntryDto', () => {
   });
 
   it.each([
-    [{ ...lesson, sectionId: undefined }, 'sectionId', 'INVALID_FORMAT'],
+    [{ ...lesson, sectionId: undefined }, 'sectionId', 'REQUIRED'],
     [{ ...lesson, dayOfWeek: 0 }, 'dayOfWeek', 'OUT_OF_RANGE'],
     [{ ...lesson, dayOfWeek: 7 }, 'dayOfWeek', 'OUT_OF_RANGE'],
     [{ ...lesson, dayOfWeek: '1' }, 'dayOfWeek', 'INVALID_TYPE'],
@@ -61,7 +61,7 @@ describe('UpdateTimetableEntryDto', () => {
     ).toEqual([]);
     expect(await problems(body(UpdateTimetableEntryDto, { dayOfWeek: 2 }))).toContainEqual({
       field: 'version',
-      code: 'INVALID_TYPE',
+      code: 'REQUIRED',
     });
   });
 

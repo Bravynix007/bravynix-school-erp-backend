@@ -11,7 +11,7 @@ describe('CreateSubjectDto', () => {
   });
 
   it.each([
-    [{}, 'name', 'INVALID_TYPE'],
+    [{}, 'name', 'REQUIRED'],
     [{ name: '' }, 'name', 'TOO_SHORT'],
     [{ name: 'x'.repeat(101) }, 'name', 'TOO_LONG'],
     [{ name: 12 }, 'name', 'INVALID_TYPE'],
@@ -34,7 +34,7 @@ describe('UpdateSubjectDto', () => {
     expect(await problems(body(UpdateSubjectDto, { version: 2, code: null }))).toEqual([]);
     expect(await problems(body(UpdateSubjectDto, { name: 'Maths' }))).toContainEqual({
       field: 'version',
-      code: 'INVALID_TYPE',
+      code: 'REQUIRED',
     });
   });
 

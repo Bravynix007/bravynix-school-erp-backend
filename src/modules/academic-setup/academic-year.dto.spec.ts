@@ -19,14 +19,14 @@ describe('CreateAcademicYearDto', () => {
   });
 
   it.each([
-    [{ ...valid, institutionId: undefined }, 'institutionId', 'INVALID_FORMAT'],
+    [{ ...valid, institutionId: undefined }, 'institutionId', 'REQUIRED'],
     [{ ...valid, institutionId: 'nope' }, 'institutionId', 'INVALID_FORMAT'],
     [{ ...valid, name: '' }, 'name', 'TOO_SHORT'],
     [{ ...valid, name: 'x'.repeat(21) }, 'name', 'TOO_LONG'],
     [{ ...valid, name: 2026 }, 'name', 'INVALID_TYPE'],
     [{ ...valid, startDate: '2026-02-30' }, 'startDate', 'INVALID_FORMAT'],
     [{ ...valid, startDate: '1/6/2026' }, 'startDate', 'INVALID_FORMAT'],
-    [{ ...valid, endDate: undefined }, 'endDate', 'INVALID_TYPE'],
+    [{ ...valid, endDate: undefined }, 'endDate', 'REQUIRED'],
     [{ ...valid, isCurrent: true }, 'isCurrent', 'FIELD_NOT_ALLOWED'],
     [{ ...valid, societyId: uuid }, 'societyId', 'FIELD_NOT_ALLOWED'],
   ])('refuses %j', async (value, field, code) => {
@@ -42,7 +42,7 @@ describe('UpdateAcademicYearDto', () => {
     ).toEqual([]);
     expect(await problems(body(UpdateAcademicYearDto, { name: 'x' }))).toContainEqual({
       field: 'version',
-      code: 'INVALID_TYPE',
+      code: 'REQUIRED',
     });
     expect(await problems(body(UpdateAcademicYearDto, { version: '1' }))).toContainEqual({
       field: 'version',
@@ -81,7 +81,7 @@ describe('ListAcademicYearsQueryDto', () => {
     expect(await problems(body(ListAcademicYearsQueryDto, { institutionId: uuid }))).toEqual([]);
     expect(await problems(body(ListAcademicYearsQueryDto, {}))).toContainEqual({
       field: 'institutionId',
-      code: 'INVALID_FORMAT',
+      code: 'REQUIRED',
     });
   });
 });

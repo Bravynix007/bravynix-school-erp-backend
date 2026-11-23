@@ -16,17 +16,17 @@ describe('CreateAccessBlockDto', () => {
   });
 
   it.each([
-    [{ societyId: society, reason: 'r' }, 'section', 'INVALID_CODE'],
+    [{ societyId: society, reason: 'r' }, 'section', 'REQUIRED'],
     [{ section: 'everyone', societyId: society, reason: 'r' }, 'section', 'INVALID_CODE'],
     [{ section: 1, societyId: society, reason: 'r' }, 'section', 'INVALID_CODE'],
-    [{ section: 'owners', reason: 'r' }, 'societyId', 'INVALID_FORMAT'],
+    [{ section: 'owners', reason: 'r' }, 'societyId', 'REQUIRED'],
     [{ section: 'owners', societyId: 'nope', reason: 'r' }, 'societyId', 'INVALID_FORMAT'],
     [
       { section: 'staff', societyId: society, institutionId: 'nope', reason: 'r' },
       'institutionId',
       'INVALID_FORMAT',
     ],
-    [{ section: 'owners', societyId: society }, 'reason', 'INVALID_TYPE'],
+    [{ section: 'owners', societyId: society }, 'reason', 'REQUIRED'],
     [{ section: 'owners', societyId: society, reason: '' }, 'reason', 'TOO_SHORT'],
     [{ section: 'owners', societyId: society, reason: 'r'.repeat(501) }, 'reason', 'TOO_LONG'],
     [

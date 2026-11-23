@@ -35,12 +35,12 @@ describe('RaiseDueDto', () => {
   });
 
   it.each([
-    [{ ...valid, institutionId: undefined }, 'institutionId', 'INVALID_FORMAT'],
+    [{ ...valid, institutionId: undefined }, 'institutionId', 'REQUIRED'],
     [{ ...valid, institutionId: 'x' }, 'institutionId', 'INVALID_FORMAT'],
-    [{ ...valid, periodStartDate: undefined }, 'periodStartDate', 'INVALID_TYPE'],
+    [{ ...valid, periodStartDate: undefined }, 'periodStartDate', 'REQUIRED'],
     [{ ...valid, periodStartDate: '2026-02-30' }, 'periodStartDate', 'INVALID_FORMAT'],
     [{ ...valid, periodEndDate: '2027-3-31' }, 'periodEndDate', 'INVALID_FORMAT'],
-    [{ ...valid, studentCount: undefined }, 'studentCount', 'INVALID_TYPE'],
+    [{ ...valid, studentCount: undefined }, 'studentCount', 'REQUIRED'],
     [{ ...valid, studentCount: '300' }, 'studentCount', 'INVALID_TYPE'],
     [{ ...valid, studentCount: 1.5 }, 'studentCount', 'INVALID_TYPE'],
     [{ ...valid, studentCount: -1 }, 'studentCount', 'OUT_OF_RANGE'],
@@ -80,7 +80,7 @@ describe('UpdateDueDto', () => {
   });
 
   it.each([
-    [{}, 'version', 'INVALID_TYPE'],
+    [{}, 'version', 'REQUIRED'],
     [{ version: '1' }, 'version', 'INVALID_TYPE'],
     [{ version: 1, periodStartDate: null }, 'periodStartDate', 'INVALID_TYPE'],
     [{ version: 1, periodEndDate: '2027-02-30' }, 'periodEndDate', 'INVALID_FORMAT'],
@@ -119,10 +119,10 @@ describe('MarkDuePaidDto', () => {
   });
 
   it.each([
-    [{ ...paid, version: undefined }, 'version', 'INVALID_TYPE'],
-    [{ ...paid, paidDate: undefined }, 'paidDate', 'INVALID_TYPE'],
+    [{ ...paid, version: undefined }, 'version', 'REQUIRED'],
+    [{ ...paid, paidDate: undefined }, 'paidDate', 'REQUIRED'],
     [{ ...paid, paidDate: '2026-13-01' }, 'paidDate', 'INVALID_FORMAT'],
-    [{ ...paid, paymentMode: undefined }, 'paymentMode', 'INVALID_CODE'],
+    [{ ...paid, paymentMode: undefined }, 'paymentMode', 'REQUIRED'],
     [{ ...paid, paymentMode: 0 }, 'paymentMode', 'INVALID_CODE'],
     [{ ...paid, paymentMode: 5 }, 'paymentMode', 'INVALID_CODE'],
     [{ ...paid, paymentMode: '2' }, 'paymentMode', 'INVALID_CODE'],
@@ -145,7 +145,7 @@ describe('DueQuoteQueryDto', () => {
       await problems(body(DueQuoteQueryDto, { periodStartDate: '2026-04-01' })),
     ).toContainEqual({
       field: 'periodEndDate',
-      code: 'INVALID_TYPE',
+      code: 'REQUIRED',
     });
   });
 });

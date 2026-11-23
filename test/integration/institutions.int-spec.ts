@@ -283,7 +283,7 @@ describe('PLT-19 and INS-01 to INS-05 Institutions', () => {
         'an address without a first line',
         { name: 'X', code: 'X', address: { line2: 'b' } },
         'address.line1',
-        'INVALID_TYPE',
+        'REQUIRED',
       ],
       [
         'a null first line',
@@ -319,7 +319,7 @@ describe('PLT-19 and INS-01 to INS-05 Institutions', () => {
         'a longitude without a latitude',
         { name: 'X', code: 'X', address: { line1: 'a' }, location: { longitude: 5 } },
         'location.latitude',
-        'INVALID_TYPE',
+        'REQUIRED',
       ],
       [
         '7 decimals in a coordinate',

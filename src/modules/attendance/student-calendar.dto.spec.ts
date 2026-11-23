@@ -13,7 +13,7 @@ describe('CalendarQueryDto', () => {
       ]);
     }
     expect(await problems(body(CalendarQueryDto, {}))).toEqual([
-      { field: 'month', code: 'INVALID_TYPE' },
+      { field: 'month', code: 'REQUIRED' },
     ]);
   });
 });

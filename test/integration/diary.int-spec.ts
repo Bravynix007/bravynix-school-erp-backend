@@ -319,7 +319,7 @@ describe('DIA-01 to DIA-04 the diary (API design 10.14a)', () => {
       expect(res.status).toBe(400);
       expect(fieldsOf(res)).toEqual({
         sectionId: 'INVALID_FORMAT',
-        subjectId: 'INVALID_FORMAT',
+        subjectId: 'REQUIRED',
         diaryDate: 'INVALID_FORMAT',
         description: 'TOO_SHORT',
       });
@@ -449,7 +449,7 @@ describe('DIA-01 to DIA-04 the diary (API design 10.14a)', () => {
         { studentId: 'FIELD_NOT_ALLOWED', sectionId: 'REQUIRED' },
       ]);
       const noDate = await read(`sectionId=${sectionA}`);
-      expect([noDate.status, fieldsOf(noDate)]).toEqual([400, { date: 'INVALID_TYPE' }]);
+      expect([noDate.status, fieldsOf(noDate)]).toEqual([400, { date: 'REQUIRED' }]);
     });
   });
 
@@ -523,7 +523,7 @@ describe('DIA-01 to DIA-04 the diary (API design 10.14a)', () => {
         { diaryDate: 'INVALID_FORMAT', description: 'TOO_SHORT' },
       ]);
       expect(fieldsOf(await change(made.id, { description: 'x' }))).toEqual({
-        version: 'INVALID_TYPE',
+        version: 'REQUIRED',
       });
     });
 

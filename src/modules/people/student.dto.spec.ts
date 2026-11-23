@@ -115,18 +115,14 @@ describe('CreateStudentDto', () => {
     [{ guardians: many(6, guardian) }, 'guardians', 'TOO_MANY'],
     [{ guardians: [{ ...guardian, firstName: ' ' }] }, 'guardians[0].firstName', 'INVALID_FORMAT'],
     [{ guardians: [{ ...guardian, relation: 7 }] }, 'guardians[0].relation', 'INVALID_CODE'],
-    [{ guardians: [{ ...guardian, phone: undefined }] }, 'guardians[0].phone', 'INVALID_TYPE'],
+    [{ guardians: [{ ...guardian, phone: undefined }] }, 'guardians[0].phone', 'REQUIRED'],
     [{ guardians: [{ ...guardian, email: 'x' }] }, 'guardians[0].email', 'INVALID_FORMAT'],
     [
       { guardians: [{ ...guardian, alternatePhone: '1' }] },
       'guardians[0].alternatePhone',
       'INVALID_FORMAT',
     ],
-    [
-      { guardians: [{ ...guardian, isPrimary: undefined }] },
-      'guardians[0].isPrimary',
-      'INVALID_TYPE',
-    ],
+    [{ guardians: [{ ...guardian, isPrimary: undefined }] }, 'guardians[0].isPrimary', 'REQUIRED'],
     [
       { guardians: [{ ...guardian, isEmergencyContact: 'yes' }] },
       'guardians[0].isEmergencyContact',
@@ -177,7 +173,7 @@ describe('UpdateStudentDto', () => {
     ).toEqual([]);
     expect(await problems(body(UpdateStudentDto, { firstName: 'Diya' }))).toContainEqual({
       field: 'version',
-      code: 'INVALID_TYPE',
+      code: 'REQUIRED',
     });
   });
 
@@ -218,7 +214,7 @@ describe('DeactivateStudentQueryDto', () => {
   });
 
   it.each([
-    [{}, 'INVALID_TYPE'],
+    [{}, 'REQUIRED'],
     [{ reason: '0' }, 'INVALID_CODE'],
     [{ reason: '4' }, 'INVALID_CODE'],
     [{ reason: 'left' }, 'INVALID_TYPE'],
@@ -270,8 +266,8 @@ describe('CorrectStudentClassDto', () => {
   });
 
   it.each([
-    [{ sectionId: id }, 'classId', 'INVALID_FORMAT'],
-    [{ classId: id }, 'sectionId', 'INVALID_FORMAT'],
+    [{ sectionId: id }, 'classId', 'REQUIRED'],
+    [{ classId: id }, 'sectionId', 'REQUIRED'],
     [{ classId: 'x', sectionId: id }, 'classId', 'INVALID_FORMAT'],
     [{ classId: id, sectionId: null }, 'sectionId', 'INVALID_FORMAT'],
     [{ classId: id, sectionId: id, rollNumber: '' }, 'rollNumber', 'TOO_SHORT'],

@@ -20,8 +20,8 @@ describe('CreateSectionDto', () => {
   });
 
   it.each([
-    [{ predefinedSectionId }, 'classId', 'INVALID_FORMAT'],
-    [{ classId }, 'predefinedSectionId', 'INVALID_FORMAT'],
+    [{ predefinedSectionId }, 'classId', 'REQUIRED'],
+    [{ classId }, 'predefinedSectionId', 'REQUIRED'],
     [{ classId, predefinedSectionId, displayName: '' }, 'displayName', 'TOO_SHORT'],
     [{ classId, predefinedSectionId, displayName: 'x'.repeat(31) }, 'displayName', 'TOO_LONG'],
     [{ classId, predefinedSectionId, capacity: 0 }, 'capacity', 'OUT_OF_RANGE'],
@@ -42,7 +42,7 @@ describe('UpdateSectionDto', () => {
     ).toEqual([]);
     expect(await problems(body(UpdateSectionDto, { capacity: 30 }))).toContainEqual({
       field: 'version',
-      code: 'INVALID_TYPE',
+      code: 'REQUIRED',
     });
   });
 

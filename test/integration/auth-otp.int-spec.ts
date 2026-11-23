@@ -449,7 +449,7 @@ describe('AUTH-01 request a login code', () => {
       ['an empty email', { email: '', clientType: 1 }, 'email', 'REQUIRED'],
       ['a bad email', { email: 'not-an-email', clientType: 1 }, 'email', 'INVALID_FORMAT'],
       ['a long email', { email: `${'a'.repeat(250)}@x.test`, clientType: 1 }, 'email', 'TOO_LONG'],
-      ['no client type', { email: 'a@x.test' }, 'clientType', 'INVALID_TYPE'],
+      ['no client type', { email: 'a@x.test' }, 'clientType', 'REQUIRED'],
       ['a text client type', { email: 'a@x.test', clientType: '1' }, 'clientType', 'INVALID_TYPE'],
       [
         'an unknown client type',

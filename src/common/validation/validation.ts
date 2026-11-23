@@ -95,6 +95,20 @@ function valueOf(owner: Owner, property: string): unknown {
 }
 
 /**
+ * Whether the field was left out of the request, so it is `REQUIRED` whatever rule it failed (API design 8: a missing
+ * value comes before a wrong one). A field that may be left out is `@IsOptional()`, which skips every rule when it is
+ * missing, so a rule that fails on a missing value belongs to a required field. An unknown field is still
+ * `FIELD_NOT_ALLOWED`. Without the object the validated value cannot be seen, and the rule's own code stands.
+ */
+function isMissing(owner: Owner, property: string, constraint: string): boolean {
+  return (
+    owner !== undefined &&
+    constraint !== 'whitelistValidation' &&
+    valueOf(owner, property) === undefined
+  );
+}
+
+/**
  * `@Length(min, max)` reports one constraint for both ends. The value's length
  * against `min` says which end failed, item by item for `{ each: true }`; without the value, class-validator's
  * default message does ("longer than" means the value is too short).
@@ -146,11 +160,12 @@ export function toFieldErrors(
       const names = Object.keys(error.constraints);
       const first = PRIORITY.find((p) => names.includes(p)) ?? names[0];
       if (first) {
-        const code =
-          (error.contexts?.[first]?.['code'] as string | undefined) ??
-          lengthCode(error, owner, first) ??
-          CONSTRAINT_TO_CODE[first] ??
-          FieldErrorCode.INVALID_VALUE;
+        const code = isMissing(owner, error.property, first)
+          ? FieldErrorCode.REQUIRED
+          : ((error.contexts?.[first]?.['code'] as string | undefined) ??
+            lengthCode(error, owner, first) ??
+            CONSTRAINT_TO_CODE[first] ??
+            FieldErrorCode.INVALID_VALUE);
         const params = paramsFor(error, owner, first, code);
         result.push({
           field: path,

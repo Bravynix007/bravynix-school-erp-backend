@@ -27,7 +27,7 @@ describe('ListDiaryQueryDto', () => {
       { field: 'date', code: 'INVALID_FORMAT' },
     ]);
     expect(await problems(body(ListDiaryQueryDto, { sectionId: uuid }))).toEqual([
-      { field: 'date', code: 'INVALID_TYPE' },
+      { field: 'date', code: 'REQUIRED' },
     ]);
   });
 });
@@ -61,7 +61,7 @@ describe('CreateDiaryEntryDto', () => {
       { field: 'sectionId', code: 'INVALID_FORMAT' },
       { field: 'subjectId', code: 'INVALID_FORMAT' },
       { field: 'diaryDate', code: 'INVALID_FORMAT' },
-      { field: 'description', code: 'INVALID_TYPE' },
+      { field: 'description', code: 'REQUIRED' },
     ]);
   });
 });
@@ -83,7 +83,7 @@ describe('UpdateDiaryEntryDto', () => {
 
   it('needs the version, and refuses a field named null or in the wrong shape', async () => {
     expect(await problems(body(UpdateDiaryEntryDto, { description: 'x' }))).toEqual([
-      { field: 'version', code: 'INVALID_TYPE' },
+      { field: 'version', code: 'REQUIRED' },
     ]);
     expect(
       await problems(

@@ -85,7 +85,7 @@ describe('CreateStaffDto', () => {
       'educations[0].yearOfPassing',
       'OUT_OF_RANGE',
     ],
-    [{ emergencyContacts: [{ ...contact }] }, 'emergencyContacts[0].isPrimary', 'INVALID_TYPE'],
+    [{ emergencyContacts: [{ ...contact }] }, 'emergencyContacts[0].isPrimary', 'REQUIRED'],
     [{ status: 0 }, 'status', 'FIELD_NOT_ALLOWED'],
     [{ societyId: id }, 'societyId', 'FIELD_NOT_ALLOWED'],
   ])('refuses %j', async (change, field, code) => {
@@ -128,7 +128,7 @@ describe('UpdateStaffDto', () => {
     ).toEqual([]);
     expect(await problems(body(UpdateStaffDto, { firstName: 'Meera' }))).toContainEqual({
       field: 'version',
-      code: 'INVALID_TYPE',
+      code: 'REQUIRED',
     });
   });
 

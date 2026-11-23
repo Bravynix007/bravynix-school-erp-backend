@@ -14,7 +14,7 @@ describe('ListClassesQueryDto', () => {
     expect(await problems(body(ListClassesQueryDto, { institutionId }))).toEqual([]);
     expect(await problems(body(ListClassesQueryDto, {}))).toContainEqual({
       field: 'institutionId',
-      code: 'INVALID_FORMAT',
+      code: 'REQUIRED',
     });
   });
 });
@@ -47,8 +47,8 @@ describe('CreateClassDto', () => {
   });
 
   it.each([
-    [{ institutionId }, 'predefinedClassId', 'INVALID_FORMAT'],
-    [{ predefinedClassId }, 'institutionId', 'INVALID_FORMAT'],
+    [{ institutionId }, 'predefinedClassId', 'REQUIRED'],
+    [{ predefinedClassId }, 'institutionId', 'REQUIRED'],
     [{ institutionId, predefinedClassId: 'x' }, 'predefinedClassId', 'INVALID_FORMAT'],
     [{ institutionId, predefinedClassId, streamName: '' }, 'streamName', 'TOO_SHORT'],
     [{ institutionId, predefinedClassId, streamName: 'x'.repeat(31) }, 'streamName', 'TOO_LONG'],
@@ -94,7 +94,7 @@ describe('CreateClassesDto', () => {
       ),
     ).toEqual(
       expect.arrayContaining([
-        { field: 'classes[1].predefinedClassId', code: 'INVALID_FORMAT' },
+        { field: 'classes[1].predefinedClassId', code: 'REQUIRED' },
         { field: 'classes[1].streamName', code: 'TOO_LONG' },
       ]),
     );
@@ -109,7 +109,7 @@ describe('UpdateClassDto', () => {
     ).toEqual([]);
     expect(await problems(body(UpdateClassDto, { displayName: 'x' }))).toContainEqual({
       field: 'version',
-      code: 'INVALID_TYPE',
+      code: 'REQUIRED',
     });
   });
 
