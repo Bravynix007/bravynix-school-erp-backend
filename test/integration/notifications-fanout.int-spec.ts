@@ -279,6 +279,18 @@ describe('a notice reaches its receivers', () => {
     await expect(queue(notice({ category: 11 }))).rejects.toThrow(/category/);
   });
 
+  it('still takes the form without a day, which the previous release’s worker calls during a deploy', async () => {
+    const target = newId();
+    await database.transaction({ societyId, institutionIds: [institutionId] }, (tx) =>
+      sql`select * from maintenance.deliver_inbox_items(
+        ${societyId}::uuid, ${institutionId}::uuid, ${`test:${newId()}`}, now(), 1::smallint, 1::smallint,
+        'From the old worker', 'b', null, 1::smallint, ${target}::uuid,
+        ${JSON.stringify([{ userId: first.person, studentId: null }])}::jsonb)`.execute(tx),
+    );
+    const item = (await inbox(first)).find((entry) => entry.title === 'From the old worker');
+    expect(item?.target).toEqual({ type: 1, id: target, date: null });
+  });
+
   it('refuses a write for another Society than the job’s', async () => {
     const other = await kit.society(admin);
     await expect(

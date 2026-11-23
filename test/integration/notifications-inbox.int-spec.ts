@@ -55,6 +55,17 @@ describe('the inbox and the push device', () => {
   let other: SignedInPerson;
 
   /** An inbox row, written as the worker does: under the Society, whoever receives it. */
+  /** A notice that names the day 21 November, with the target whose ID is [target] (none when null). */
+  const insertWithDay = (target: string | null) =>
+    ownerDb.transaction().execute(async (tx) => {
+      await sql`select set_config('app.society_id', ${societyId}, true)`.execute(tx);
+      await sql`
+        insert into inbox_items (id, user_id, society_id, category, title, body, source_key, target_type,
+          target_id, target_date)
+        values (${newId()}, ${me.person}, ${societyId}, 1, 'Absent today', 'Diya is absent', ${`test:${newId()}`},
+          ${target === null ? null : 2}, ${target}, '2026-11-21')`.execute(tx);
+    });
+
   const put = async (
     user: string,
     fields: {
@@ -153,6 +164,16 @@ describe('the inbox and the push device', () => {
     await clearLoginState(ownerDb);
     await kit.cleanup(ownerDb);
     await fixtures.cleanup();
+  });
+
+  describe('the day a notice is about', () => {
+    it('is kept only with a target', async () => {
+      await expect(insertWithDay(null)).rejects.toMatchObject({
+        code: '23514',
+        constraint: 'ck_inbox_items_target_date',
+      });
+      await expect(insertWithDay(newId())).resolves.not.toThrow();
+    });
   });
 
   describe('NTF-01 list', () => {

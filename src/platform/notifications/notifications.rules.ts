@@ -1,5 +1,5 @@
 import { isUuid } from '../../common/ids/ids.js';
-import { DATE_ONLY } from '../../common/validation/calendar-date.js';
+import { isCalendarDate } from '../../common/validation/calendar-date.js';
 import { INBOX_TABS, type InboxTab } from './notifications.dto.js';
 
 /** The kind of job that writes a notice to its receivers' inboxes and sends the push. */
@@ -16,11 +16,6 @@ export const MAX_SOURCE_KEY = 100;
 export const MAX_TITLE = 150;
 export const MAX_BODY = 1000;
 const MAX_SENDER = 200;
-
-/** A real calendar day written `YYYY-MM-DD`. */
-function isCalendarDay(value: string): boolean {
-  return DATE_ONLY.test(value) && new Date(`${value}T00:00:00Z`).toISOString().startsWith(value);
-}
 
 /** One person who is to get the notice, and the child it is about when it is about one. */
 export interface Receiver {
@@ -104,7 +99,7 @@ export function checkNotice(notice: Notice): void {
   ) {
     fail('names a screen that does not exist');
   }
-  if (notice.target?.date != null && !isCalendarDay(notice.target.date)) {
+  if (notice.target?.date != null && !isCalendarDate(notice.target.date)) {
     fail('names a day that is not a date');
   }
   if (notice.receivers.length > MAX_RECEIVERS) {
