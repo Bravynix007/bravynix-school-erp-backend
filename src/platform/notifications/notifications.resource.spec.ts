@@ -14,6 +14,7 @@ const base: Omit<InboxRow, 'cursorAt'> = {
   sender_display_name: 'Ms Rao',
   target_type: 3,
   target_id: 'd-1',
+  target_date: null,
   read_at: null,
 };
 
@@ -29,9 +30,17 @@ describe('notificationResource', () => {
       senderDisplayName: 'Ms Rao',
       institutionId: 'ins-1',
       studentId: 'stu-1',
-      target: { type: 3, id: 'd-1' },
+      target: { type: 3, id: 'd-1', date: null },
       isRead: false,
       readAt: null,
+    });
+  });
+
+  it('carries the day the notice is about with its target', () => {
+    expect(notificationResource({ ...base, target_date: '2026-11-21' }).target).toEqual({
+      type: 3,
+      id: 'd-1',
+      date: '2026-11-21',
     });
   });
 

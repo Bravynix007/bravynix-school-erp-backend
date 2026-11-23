@@ -35,6 +35,7 @@ const row = (id: string, fields: Partial<InboxRow> = {}): InboxRow => ({
   sender_display_name: null,
   target_type: null,
   target_id: null,
+  target_date: null,
   read_at: null,
   cursorAt: '2026-11-16T09:00:00.000000Z' as InboxRow['cursorAt'],
   ...fields,

@@ -11,7 +11,7 @@ export interface NotificationResource {
   senderDisplayName: string | null;
   institutionId: string | null;
   studentId: string | null;
-  target: { type: number; id: string } | null;
+  target: { type: number; id: string; date: string | null } | null;
   isRead: boolean;
   readAt: string | null;
 }
@@ -29,7 +29,7 @@ export function notificationResource(row: Omit<InboxRow, 'cursorAt'>): Notificat
     studentId: row.student_id,
     target:
       row.target_type !== null && row.target_id !== null
-        ? { type: row.target_type, id: row.target_id }
+        ? { type: row.target_type, id: row.target_id, date: row.target_date }
         : null,
     isRead: row.read_at !== null,
     readAt: row.read_at?.toISOString() ?? null,

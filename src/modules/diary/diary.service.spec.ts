@@ -122,6 +122,13 @@ function build(current: DiaryEntryRow | undefined = entry()) {
     .fn<StaffDirectory['ownRecord']>()
     .mockResolvedValue({ staffMemberId: 'staff-1', homeInstitutionId: 'inst-1' });
   const mayWrite = vi.fn<DiaryPeople['mayWrite']>().mockResolvedValue(true);
+  const diarySubjectIds = vi.fn<DiaryPeople['diarySubjectIds']>().mockResolvedValue(['subject-1']);
+  const activeSubjects = vi
+    .fn<SubjectDirectory['active']>()
+    .mockResolvedValue([{ id: 'subject-1' }] as never);
+  const subjectResources = vi
+    .fn<SubjectDirectory['resources']>()
+    .mockResolvedValue([{ id: 'subject-1', name: 'Maths' }] as never);
   const teacherNames = vi
     .fn<StaffDirectory['names']>()
     .mockResolvedValue(new Map([['staff-1', 'Asha Rao']]));
@@ -145,10 +152,15 @@ function build(current: DiaryEntryRow | undefined = entry()) {
       requireActive: requireSection,
       names: sectionNames,
     } as unknown as SectionDirectory,
-    { requireActive: requireSubject, names: subjectNames } as unknown as SubjectDirectory,
+    {
+      requireActive: requireSubject,
+      names: subjectNames,
+      active: activeSubjects,
+      resources: subjectResources,
+    } as unknown as SubjectDirectory,
     { ownSectionIds } as unknown as TeachingStaff,
     { ownRecord, names: teacherNames, namesForParent: parentNames } as unknown as StaffDirectory,
-    { mayWrite, currentSectionId, receiversOf } as unknown as DiaryPeople,
+    { mayWrite, diarySubjectIds, currentSectionId, receiversOf } as unknown as DiaryPeople,
     { of: childContextOf } as unknown as ChildContexts,
     {
       describe: vi.fn<PersonDirectory['describe']>().mockResolvedValue(new Map()),
@@ -171,6 +183,9 @@ function build(current: DiaryEntryRow | undefined = entry()) {
     ownSectionIds,
     ownRecord,
     mayWrite,
+    diarySubjectIds,
+    activeSubjects,
+    subjectResources,
     teacherNames,
     parentNames,
     sectionNames,
@@ -272,7 +287,7 @@ describe('DiaryService.create', () => {
         category: 2,
         title: 'New diary entry',
         body: 'Maths: a diary entry for 17 Nov 2026.',
-        target: { type: 2, id: 'entry-new' },
+        target: { type: 2, id: 'entry-new', date: '2026-11-17' },
         receivers: [{ userId: 'user-1', studentId: 'child-1' }],
       }),
       'person-1',
@@ -378,6 +393,83 @@ describe('DiaryService.create', () => {
     t.requireSubject.mockResolvedValue();
     t.requireCurrentId.mockRejectedValue(AppException.notFound());
     expect((await refusal(t.service.create(admin, body()))).status).toBe(404);
+  });
+});
+
+describe('DiaryService.writableSubjects', () => {
+  const query = { sectionId: 'section-1' };
+
+  it('gives an Owner or Admin every active subject of the Society, and asks People nothing', async () => {
+    const t = build();
+    const result = await t.service.writableSubjects(admin, query);
+    expect(t.contextOf).toHaveBeenCalledWith(admin, 'section-1');
+    expect(t.requireSection).toHaveBeenCalledWith(expect.anything(), 'section-1', 'sectionId');
+    expect(t.activeSubjects).toHaveBeenCalledWith(expect.anything(), 'society-1');
+    expect(t.diarySubjectIds).not.toHaveBeenCalled();
+    expect(result.data).toEqual([{ id: 'subject-1', name: 'Maths' }]);
+  });
+
+  it('gives a teacher only the subjects they teach in the section', async () => {
+    const t = build();
+    t.diarySubjectIds.mockResolvedValue(['subject-1', 'subject-2']);
+    await t.service.writableSubjects(teacher, query);
+    expect(t.diarySubjectIds).toHaveBeenCalledWith(
+      expect.anything(),
+      'staff-1',
+      'year-1',
+      'section-1',
+    );
+    expect(t.activeSubjects).toHaveBeenCalledWith(expect.anything(), 'society-1', [
+      'subject-1',
+      'subject-2',
+    ]);
+  });
+
+  it('gives the class teacher every subject of the Society, as DIA-02 lets them write any', async () => {
+    const t = build();
+    t.diarySubjectIds.mockResolvedValue(null);
+    await t.service.writableSubjects(teacher, query);
+    expect(t.activeSubjects).toHaveBeenCalledWith(expect.anything(), 'society-1', undefined);
+  });
+
+  it('is 403 NOT_ASSIGNED for a teacher who neither leads nor teaches in the section', async () => {
+    const t = build();
+    t.diarySubjectIds.mockResolvedValue([]);
+    expect(await refusal(t.service.writableSubjects(teacher, query))).toMatchObject({
+      status: 403,
+      code: 'NOT_ASSIGNED',
+    });
+    expect(t.activeSubjects).not.toHaveBeenCalled();
+  });
+
+  it('is 403 NOT_ASSIGNED for a teacher away from their home Institution, and for one with no staff record', async () => {
+    const t = build();
+    t.ownRecord.mockResolvedValueOnce({ staffMemberId: 'staff-1', homeInstitutionId: 'inst-2' });
+    expect(await refusal(t.service.writableSubjects(teacher, query))).toMatchObject({
+      status: 403,
+      code: 'NOT_ASSIGNED',
+    });
+    t.ownRecord.mockResolvedValueOnce(undefined);
+    expect(await refusal(t.service.writableSubjects(teacher, query))).toMatchObject({
+      status: 403,
+      code: 'NOT_ASSIGNED',
+    });
+    expect(t.diarySubjectIds).not.toHaveBeenCalled();
+  });
+
+  it('refuses a closed section, and a school with no current year, before it looks at who asks', async () => {
+    const t = build();
+    t.requireSection.mockRejectedValueOnce(AppException.referenceInactive('sectionId'));
+    expect(await refusal(t.service.writableSubjects(teacher, query))).toMatchObject({
+      status: 422,
+      fields: ['sectionId:REFERENCE_INACTIVE'],
+    });
+    t.requireCurrentId.mockRejectedValueOnce(AppException.businessRule('CURRENT_YEAR_REQUIRED'));
+    expect(await refusal(t.service.writableSubjects(teacher, query))).toMatchObject({
+      status: 422,
+      code: 'CURRENT_YEAR_REQUIRED',
+    });
+    expect(t.ownRecord).not.toHaveBeenCalled();
   });
 });
 

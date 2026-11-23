@@ -128,24 +128,66 @@ describe('AssignmentRepository', () => {
   });
 });
 
-describe('AssignmentRepository.mayWriteDiary', () => {
-  it('asks whether the teacher leads the section or teaches the subject in it, in the year, by rows that still hold', async () => {
+describe('AssignmentRepository.diarySubjectIds', () => {
+  it('first asks whether the teacher leads the section in the year, by a row that still holds', async () => {
     const { tx, queries } = sqlRecorder();
     await new AssignmentRepository()
-      .mayWriteDiary(tx, 'staff-1', 'year-1', 'section-1', 'subject-1')
+      .diarySubjectIds(tx, 'staff-1', 'year-1', 'section-1')
       .catch(() => undefined);
     const { sql, parameters } = queries[0]!;
     expect(sql).toContain('from class_teacher_assignments');
-    expect(sql).toContain('from teaching_assignments');
-    expect(sql.match(/ended_at is null/g)).toHaveLength(2);
-    expect(parameters).toEqual([
-      'staff-1',
-      'year-1',
-      'section-1',
-      'staff-1',
-      'year-1',
-      'section-1',
-      'subject-1',
+    expect(sql).toContain('ended_at is null');
+    expect(parameters).toEqual(['staff-1', 'year-1', 'section-1']);
+  });
+
+  it('gives every subject, as null, to the class teacher, and asks nothing more', async () => {
+    const { tx, queries } = sqlRecorder([[{ leads: true }]]);
+    expect(
+      await new AssignmentRepository().diarySubjectIds(tx, 'staff-1', 'year-1', 'section-1'),
+    ).toBeNull();
+    expect(queries).toHaveLength(1);
+  });
+
+  it('gives any other teacher the subjects of their teaching rows that still hold, in the section and year', async () => {
+    const { tx, queries } = sqlRecorder([
+      [{ leads: false }],
+      [{ subject_id: 's1' }, { subject_id: 's2' }],
     ]);
+    expect(
+      await new AssignmentRepository().diarySubjectIds(tx, 'staff-1', 'year-1', 'section-1'),
+    ).toEqual(['s1', 's2']);
+    const { sql, parameters } = queries[1]!;
+    expect(sql).toContain('from teaching_assignments');
+    expect(sql).toContain('ended_at is null');
+    expect(parameters).toEqual(['staff-1', 'year-1', 'section-1']);
+  });
+
+  it('gives a teacher who neither leads nor teaches there no subject', async () => {
+    const { tx } = sqlRecorder([[{ leads: false }], []]);
+    expect(
+      await new AssignmentRepository().diarySubjectIds(tx, 'staff-1', 'year-1', 'section-1'),
+    ).toEqual([]);
+  });
+});
+
+const asks = (subjects: string[] | null, subjectId: string) => {
+  const repository = new AssignmentRepository();
+  const ids = vi.spyOn(repository, 'diarySubjectIds').mockResolvedValue(subjects);
+  const { tx } = sqlRecorder();
+  return {
+    allowed: repository.mayWriteDiary(tx, 'staff-1', 'year-1', 'section-1', subjectId),
+    ids,
+    tx,
+  };
+};
+
+describe('AssignmentRepository.mayWriteDiary', () => {
+  it('is the rule DIA-05 lists: every subject for the class teacher, else the ones taught', async () => {
+    const lead = asks(null, 'subject-9');
+    expect(await lead.allowed).toBe(true);
+    expect(lead.ids).toHaveBeenCalledWith(lead.tx, 'staff-1', 'year-1', 'section-1');
+    expect(await asks(['subject-1', 'subject-2'], 'subject-2').allowed).toBe(true);
+    expect(await asks(['subject-1'], 'subject-2').allowed).toBe(false);
+    expect(await asks([], 'subject-1').allowed).toBe(false);
   });
 });

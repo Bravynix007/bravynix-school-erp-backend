@@ -40,7 +40,7 @@ interface Item {
   body: string;
   tab: number;
   category: number;
-  target: { type: number; id: string } | null;
+  target: { type: number; id: string; date: string | null } | null;
 }
 
 const holiday = (fields: object = {}) => ({

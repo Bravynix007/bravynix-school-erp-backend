@@ -7,16 +7,18 @@ const tx = {} as Tx;
 
 function build() {
   const mayWriteDiary = vi.fn<AssignmentRepository['mayWriteDiary']>();
+  const diarySubjectIds = vi.fn<AssignmentRepository['diarySubjectIds']>();
   const openPlacement = vi.fn<StudentRepository['openPlacement']>();
   const placedOn = vi.fn<StudentRepository['placedOn']>();
   const guardianUsersByEnrolment = vi.fn<StudentRepository['guardianUsersByEnrolment']>();
   const diary = new PeopleDiary(
-    { mayWriteDiary } as unknown as AssignmentRepository,
+    { mayWriteDiary, diarySubjectIds } as unknown as AssignmentRepository,
     { openPlacement, placedOn, guardianUsersByEnrolment } as unknown as StudentRepository,
   );
   return {
     diary,
     mayWriteDiary,
+    diarySubjectIds,
     openPlacement,
     placedOn,
     guardianUsersByEnrolment,
@@ -29,6 +31,17 @@ describe('PeopleDiary', () => {
     t.mayWriteDiary.mockResolvedValue(true);
     expect(await t.diary.mayWrite(tx, 'staff-1', 'year-1', 'section-1', 'subject-1')).toBe(true);
     expect(t.mayWriteDiary).toHaveBeenCalledWith(tx, 'staff-1', 'year-1', 'section-1', 'subject-1');
+  });
+
+  it('asks the assignments which subjects the teacher may write, every one as null', async () => {
+    const t = build();
+    t.diarySubjectIds.mockResolvedValueOnce(['subject-1']);
+    expect(await t.diary.diarySubjectIds(tx, 'staff-1', 'year-1', 'section-1')).toEqual([
+      'subject-1',
+    ]);
+    expect(t.diarySubjectIds).toHaveBeenCalledWith(tx, 'staff-1', 'year-1', 'section-1');
+    t.diarySubjectIds.mockResolvedValueOnce(null);
+    expect(await t.diary.diarySubjectIds(tx, 'staff-1', 'year-1', 'section-1')).toBeNull();
   });
 
   it('gives the section the child sits in now', async () => {

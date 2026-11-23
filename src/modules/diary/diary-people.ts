@@ -24,6 +24,17 @@ export abstract class DiaryPeople {
     subjectId: string,
   ): Promise<boolean>;
 
+  /**
+   * The subjects the teacher may write for in this section in the year: `null` for every subject (they lead the
+   * section), else the ones they teach there. The same rule as [mayWrite], as a list.
+   */
+  abstract diarySubjectIds(
+    tx: Tx,
+    staffMemberId: string,
+    academicYearId: string,
+    sectionId: string,
+  ): Promise<string[] | null>;
+
   /** The section the child sits in now, or `undefined` for a child with no open placement. */
   abstract currentSectionId(tx: Tx, studentId: string): Promise<string | undefined>;
 

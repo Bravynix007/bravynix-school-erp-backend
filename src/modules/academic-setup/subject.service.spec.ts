@@ -4,6 +4,7 @@ import type { AuditService } from '../../platform/audit/index.js';
 import type { DatabaseService, Tx } from '../../platform/database/index.js';
 import type { PersonDirectory } from '../../platform/identity/index.js';
 import type { SubjectRepository, SubjectRow } from './subject.repository.js';
+import { SubjectDirectory } from './subject-directory.js';
 import { SubjectService } from './subject.service.js';
 import type { TeachingStaff } from './teaching-staff.js';
 
@@ -67,9 +68,12 @@ function build(current: SubjectRow | null = subject()) {
   const service = new SubjectService(
     { transaction } as unknown as DatabaseService,
     { active, find, insert, update } as unknown as SubjectRepository,
-    {
-      describe: vi.fn<PersonDirectory['describe']>().mockResolvedValue(new Map()),
-    } as unknown as PersonDirectory,
+    new SubjectDirectory(
+      {} as SubjectRepository,
+      {
+        describe: vi.fn<PersonDirectory['describe']>().mockResolvedValue(new Map()),
+      } as unknown as PersonDirectory,
+    ),
     { ownSubjectIds } as unknown as TeachingStaff,
     { record } as unknown as AuditService,
   );
