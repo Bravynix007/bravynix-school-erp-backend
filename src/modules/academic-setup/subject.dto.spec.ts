@@ -11,8 +11,8 @@ describe('CreateSubjectDto', () => {
   });
 
   it.each([
-    [{}, 'name', 'INVALID_TYPE'],
-    [{ name: '' }, 'name', 'TOO_SHORT'],
+    [{}, 'name', 'REQUIRED'],
+    [{ name: '' }, 'name', 'REQUIRED'],
     [{ name: 'x'.repeat(101) }, 'name', 'TOO_LONG'],
     [{ name: 12 }, 'name', 'INVALID_TYPE'],
     [{ name: 'Maths', code: '' }, 'code', 'TOO_SHORT'],
@@ -34,13 +34,13 @@ describe('UpdateSubjectDto', () => {
     expect(await problems(body(UpdateSubjectDto, { version: 2, code: null }))).toEqual([]);
     expect(await problems(body(UpdateSubjectDto, { name: 'Maths' }))).toContainEqual({
       field: 'version',
-      code: 'INVALID_TYPE',
+      code: 'REQUIRED',
     });
   });
 
   it.each([
     [{ version: 1, name: null }, 'name', 'INVALID_TYPE'],
-    [{ version: 1, name: '' }, 'name', 'TOO_SHORT'],
+    [{ version: 1, name: '' }, 'name', 'REQUIRED'],
     [{ version: 1, code: '' }, 'code', 'TOO_SHORT'],
     [{ version: '1', name: 'x' }, 'version', 'INVALID_TYPE'],
     [{ version: 1, status: 0 }, 'status', 'FIELD_NOT_ALLOWED'],

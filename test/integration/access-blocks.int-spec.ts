@@ -280,9 +280,9 @@ describe('PLT-42 to PLT-44 and SOC-02 section blocks (API design 6.5, 10.4e)', (
 
     it.each([
       ['an unknown section', { section: 'teachers' }, 'section', 'INVALID_CODE'],
-      ['no section', {}, 'section', 'INVALID_CODE'],
-      ['no reason', { section: 'owners' }, 'reason', 'INVALID_TYPE'],
-      ['a blank reason', { section: 'owners', reason: '   ' }, 'reason', 'TOO_SHORT'],
+      ['no section', {}, 'section', 'REQUIRED'],
+      ['no reason', { section: 'owners' }, 'reason', 'REQUIRED'],
+      ['a blank reason', { section: 'owners', reason: '   ' }, 'reason', 'REQUIRED'],
       [
         'a reason of 501 characters',
         { section: 'owners', reason: 'r'.repeat(501) },

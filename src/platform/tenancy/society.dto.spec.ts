@@ -71,7 +71,7 @@ describe('UpdateSocietyDto', () => {
     ).toEqual([]);
     expect(await problems(body(UpdateSocietyDto, { name: 'x' }))).toContainEqual({
       field: 'version',
-      code: 'INVALID_TYPE',
+      code: 'REQUIRED',
     });
     expect(await problems(body(UpdateSocietyDto, { version: 2, name: null }))).not.toEqual([]);
   });

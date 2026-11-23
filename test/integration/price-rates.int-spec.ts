@@ -212,7 +212,7 @@ describe('PLT-22 and PLT-23 per-student rates (PRD 9.2, API design 10.22)', () =
     });
 
     it.each([
-      ['no rate', { effectiveFromDate: '2020-01-01' }, 'ratePerStudentAmount', 'INVALID_TYPE'],
+      ['no rate', { effectiveFromDate: '2020-01-01' }, 'ratePerStudentAmount', 'REQUIRED'],
       [
         'a number for the rate',
         { ratePerStudentAmount: 50, effectiveFromDate: '2020-01-01' },
@@ -232,7 +232,7 @@ describe('PLT-22 and PLT-23 per-student rates (PRD 9.2, API design 10.22)', () =
         'ratePerStudentAmount',
         'INVALID_FORMAT',
       ],
-      ['no date', { ratePerStudentAmount: '50.00' }, 'effectiveFromDate', 'INVALID_TYPE'],
+      ['no date', { ratePerStudentAmount: '50.00' }, 'effectiveFromDate', 'REQUIRED'],
       [
         'a date that does not exist',
         rate('50.00', '2026-02-30'),

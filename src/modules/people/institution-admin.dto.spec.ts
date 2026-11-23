@@ -12,7 +12,7 @@ describe('GrantAdminDto', () => {
   });
 
   it.each([
-    ['nothing', {}, [{ field: 'staffMemberId', code: 'INVALID_FORMAT' }]],
+    ['nothing', {}, [{ field: 'staffMemberId', code: 'REQUIRED' }]],
     ['a word', { staffMemberId: 'nope' }, [{ field: 'staffMemberId', code: 'INVALID_FORMAT' }]],
     ['a number', { staffMemberId: 5 }, [{ field: 'staffMemberId', code: 'INVALID_FORMAT' }]],
     [

@@ -129,6 +129,7 @@ export class MarkDuePaidDto extends VersionDto {
   paidDate!: string;
 
   @ApiProperty({ enum: PAYMENT_MODES, description: '1 Cash, 2 Bank transfer, 3 UPI, 4 Cheque' })
+  @IsInt()
   @IsIn(PAYMENT_MODES)
   paymentMode!: number;
 

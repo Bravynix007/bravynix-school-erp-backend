@@ -19,7 +19,7 @@ describe('UpdateGuardianDto', () => {
     expect(await problems(body(UpdateGuardianDto, { version: 1 }))).toEqual([]);
     expect(await problems(body(UpdateGuardianDto, everything))).toEqual([]);
     expect(await problems(body(UpdateGuardianDto, { relation: 2 }))).toEqual([
-      { field: 'version', code: 'INVALID_TYPE' },
+      { field: 'version', code: 'REQUIRED' },
     ]);
   });
 

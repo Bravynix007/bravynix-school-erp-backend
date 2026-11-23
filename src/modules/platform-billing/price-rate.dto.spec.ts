@@ -18,14 +18,14 @@ describe('SetPriceRateDto', () => {
   });
 
   it.each([
-    [{ effectiveFromDate: valid.effectiveFromDate }, 'ratePerStudentAmount', 'INVALID_TYPE'],
+    [{ effectiveFromDate: valid.effectiveFromDate }, 'ratePerStudentAmount', 'REQUIRED'],
     [{ ...valid, ratePerStudentAmount: 50 }, 'ratePerStudentAmount', 'INVALID_TYPE'],
     [{ ...valid, ratePerStudentAmount: '50' }, 'ratePerStudentAmount', 'INVALID_FORMAT'],
     [{ ...valid, ratePerStudentAmount: '50.5' }, 'ratePerStudentAmount', 'INVALID_FORMAT'],
     [{ ...valid, ratePerStudentAmount: '50.001' }, 'ratePerStudentAmount', 'INVALID_FORMAT'],
     [{ ...valid, ratePerStudentAmount: '-1.00' }, 'ratePerStudentAmount', 'INVALID_FORMAT'],
     [{ ...valid, ratePerStudentAmount: '100000000.00' }, 'ratePerStudentAmount', 'INVALID_FORMAT'],
-    [{ ratePerStudentAmount: valid.ratePerStudentAmount }, 'effectiveFromDate', 'INVALID_TYPE'],
+    [{ ratePerStudentAmount: valid.ratePerStudentAmount }, 'effectiveFromDate', 'REQUIRED'],
     [{ ...valid, effectiveFromDate: '2026-02-30' }, 'effectiveFromDate', 'INVALID_FORMAT'],
     [{ ...valid, effectiveFromDate: '2026-4-1' }, 'effectiveFromDate', 'INVALID_FORMAT'],
     [

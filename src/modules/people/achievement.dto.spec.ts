@@ -15,12 +15,13 @@ describe('CreateAchievementDto', () => {
   });
 
   it.each([
-    ['no tier', { description: 'Quiz' }, 'tier', 'INVALID_CODE'],
+    ['no tier', { description: 'Quiz' }, 'tier', 'REQUIRED'],
     ['tier 0', { tier: 0, description: 'Quiz' }, 'tier', 'INVALID_CODE'],
     ['tier 4', { tier: 4, description: 'Quiz' }, 'tier', 'INVALID_CODE'],
-    ['a tier as text', { tier: '2', description: 'Quiz' }, 'tier', 'INVALID_CODE'],
-    ['no description', { tier: 1 }, 'description', 'INVALID_TYPE'],
-    ['an empty description', { tier: 1, description: '' }, 'description', 'TOO_SHORT'],
+    ['a tier as text', { tier: '2', description: 'Quiz' }, 'tier', 'INVALID_TYPE'],
+    ['an empty tier', { tier: '', description: 'Quiz' }, 'tier', 'INVALID_TYPE'],
+    ['no description', { tier: 1 }, 'description', 'REQUIRED'],
+    ['an empty description', { tier: 1, description: '' }, 'description', 'REQUIRED'],
     ['a description of 501', { tier: 1, description: 'x'.repeat(501) }, 'description', 'TOO_LONG'],
     [
       'a field that is not the star’s',

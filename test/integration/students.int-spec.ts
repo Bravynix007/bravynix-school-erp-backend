@@ -766,7 +766,7 @@ describe('students: add, read and list', () => {
       for (const [fields, field, code] of [
         [{ dateOfBirth: '2999-01-01' }, 'dateOfBirth', 'INVALID_VALUE'],
         [{ admissionDate: '2010-01-01' }, 'admissionDate', 'INVALID_VALUE'],
-        [{ firstName: '   ' }, 'firstName', 'TOO_SHORT'],
+        [{ firstName: '   ' }, 'firstName', 'REQUIRED'],
         [{ firstName: null }, 'firstName', 'INVALID_TYPE'],
         [{ institutionId: first }, 'institutionId', 'FIELD_NOT_ALLOWED'],
         [{ guardians: [] }, 'guardians', 'FIELD_NOT_ALLOWED'],

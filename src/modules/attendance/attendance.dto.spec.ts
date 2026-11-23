@@ -19,7 +19,7 @@ describe('AttendanceSectionsQueryDto', () => {
   it('takes an Institution and nothing less', async () => {
     expect(await problems(body(AttendanceSectionsQueryDto, { institutionId: uuid }))).toEqual([]);
     expect(await problems(body(AttendanceSectionsQueryDto, {}))).toEqual([
-      { field: 'institutionId', code: 'INVALID_FORMAT' },
+      { field: 'institutionId', code: 'REQUIRED' },
     ]);
     expect(await problems(body(AttendanceSectionsQueryDto, { institutionId: 'nope' }))).toEqual([
       { field: 'institutionId', code: 'INVALID_FORMAT' },
@@ -49,7 +49,7 @@ describe('ListSessionsQueryDto', () => {
     ).toEqual([]);
     expect(await problems(body(ListSessionsQueryDto, { institutionId: uuid }))).toContainEqual({
       field: 'date',
-      code: 'INVALID_TYPE',
+      code: 'REQUIRED',
     });
   });
 });
@@ -63,12 +63,12 @@ describe('SubmitAttendanceDto', () => {
   });
 
   it.each([
-    [{ ...submission, sectionId: undefined }, 'sectionId', 'INVALID_FORMAT'],
+    [{ ...submission, sectionId: undefined }, 'sectionId', 'REQUIRED'],
     [{ ...submission, attendanceDate: '23-10-2026' }, 'attendanceDate', 'INVALID_FORMAT'],
     [{ ...submission, rosterCount: '32' }, 'rosterCount', 'INVALID_TYPE'],
     [{ ...submission, rosterCount: -1 }, 'rosterCount', 'OUT_OF_RANGE'],
     [{ ...submission, rosterCount: 1001 }, 'rosterCount', 'OUT_OF_RANGE'],
-    [{ ...submission, exceptions: undefined }, 'exceptions', 'INVALID_TYPE'],
+    [{ ...submission, exceptions: undefined }, 'exceptions', 'REQUIRED'],
     [
       { ...submission, exceptions: [{ studentEnrolmentId: uuid, attendanceStatus: 1 }] },
       'exceptions[0].attendanceStatus',
@@ -78,6 +78,11 @@ describe('SubmitAttendanceDto', () => {
       { ...submission, exceptions: [{ studentEnrolmentId: uuid, attendanceStatus: 6 }] },
       'exceptions[0].attendanceStatus',
       'INVALID_CODE',
+    ],
+    [
+      { ...submission, exceptions: [{ studentEnrolmentId: uuid, attendanceStatus: '' }] },
+      'exceptions[0].attendanceStatus',
+      'INVALID_TYPE',
     ],
     [
       { ...submission, exceptions: [{ studentEnrolmentId: 'x', attendanceStatus: 2 }] },
@@ -110,9 +115,22 @@ describe('CorrectAttendanceDto', () => {
     }
   });
 
+  it('answers a status sent empty or as text by its type, not as a missing one', async () => {
+    for (const attendanceStatus of ['', '2']) {
+      expect(
+        await problems(
+          body(CorrectAttendanceDto, {
+            ...correction,
+            changes: [{ studentEnrolmentId: uuid, attendanceStatus }],
+          }),
+        ),
+      ).toEqual([{ field: 'changes[0].attendanceStatus', code: 'INVALID_TYPE' }]);
+    }
+  });
+
   it('needs a version and one to 200 changes, each a student and a status 1 to 5', async () => {
     expect(await problems(body(CorrectAttendanceDto, { changes: correction.changes }))).toEqual([
-      { field: 'version', code: 'INVALID_TYPE' },
+      { field: 'version', code: 'REQUIRED' },
     ]);
     expect(await problems(body(CorrectAttendanceDto, { ...correction, changes: [] }))).toEqual([
       { field: 'changes', code: 'TOO_FEW' },

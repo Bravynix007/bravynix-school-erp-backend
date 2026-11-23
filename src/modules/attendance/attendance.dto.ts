@@ -74,6 +74,7 @@ export class AttendanceExceptionDto {
   studentEnrolmentId!: string;
 
   @ApiProperty({ enum: EXCEPTION_STATUSES, description: '2 Absent, 3 Late, 4 Half day, 5 Leave' })
+  @IsInt()
   @IsIn(EXCEPTION_STATUSES)
   attendanceStatus!: number;
 }
@@ -122,6 +123,7 @@ export class MarkChangeDto {
     enum: ALL_STATUSES,
     description: '1 Present, 2 Absent, 3 Late, 4 Half day, 5 Leave',
   })
+  @IsInt()
   @IsIn(ALL_STATUSES)
   attendanceStatus!: number;
 }

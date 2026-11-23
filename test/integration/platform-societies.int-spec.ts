@@ -430,7 +430,7 @@ describe('PLT-02 to PLT-08 Societies', () => {
       }
       const none = await call('patch', `/v1/platform/societies/${society.id}`, { name: 'X' });
       expect(none.body.errors).toContainEqual(
-        expect.objectContaining({ field: 'version', code: 'INVALID_TYPE' }),
+        expect.objectContaining({ field: 'version', code: 'REQUIRED' }),
       );
       const nulled = await call('patch', `/v1/platform/societies/${society.id}`, {
         version: 1,

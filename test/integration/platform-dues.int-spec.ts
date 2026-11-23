@@ -541,8 +541,8 @@ describe('PLT-24 to PLT-30 platform dues (PRD 9.3, API design 10.22)', () => {
 
     describe('the body', () => {
       it.each([
-        ['no Institution', { institutionId: undefined }, 'institutionId', 'INVALID_FORMAT'],
-        ['no period start', { periodStartDate: undefined }, 'periodStartDate', 'INVALID_TYPE'],
+        ['no Institution', { institutionId: undefined }, 'institutionId', 'REQUIRED'],
+        ['no period start', { periodStartDate: undefined }, 'periodStartDate', 'REQUIRED'],
         [
           'a date that does not exist',
           { periodEndDate: '2027-02-30' },
@@ -1073,7 +1073,7 @@ describe('PLT-24 to PLT-30 platform dues (PRD 9.3, API design 10.22)', () => {
           [{ version: 1, studentCount: null }, 'studentCount', 'INVALID_TYPE'],
           [{ version: 1, adjustmentAmount: null }, 'adjustmentAmount', 'INVALID_TYPE'],
           [{ version: 1, dueDate: '15-05-2026' }, 'dueDate', 'INVALID_FORMAT'],
-          [{ studentCount: 5 }, 'version', 'INVALID_TYPE'],
+          [{ studentCount: 5 }, 'version', 'REQUIRED'],
         ] as const) {
           const res = await asAdmin('patch', dueAt(due.id), body);
           expect([res.status, res.body.code]).toEqual([400, 'VALIDATION_FAILED']);
@@ -1172,12 +1172,12 @@ describe('PLT-24 to PLT-30 platform dues (PRD 9.3, API design 10.22)', () => {
         const { institutionId } = await world();
         const due = await raised(institutionId);
         for (const [body, field, code] of [
-          [{ paidDate: undefined }, 'paidDate', 'INVALID_TYPE'],
+          [{ paidDate: undefined }, 'paidDate', 'REQUIRED'],
           [{ paidDate: '2026-02-30' }, 'paidDate', 'INVALID_FORMAT'],
-          [{ paymentMode: undefined }, 'paymentMode', 'INVALID_CODE'],
+          [{ paymentMode: undefined }, 'paymentMode', 'REQUIRED'],
           [{ paymentMode: 0 }, 'paymentMode', 'INVALID_CODE'],
           [{ paymentMode: 5 }, 'paymentMode', 'INVALID_CODE'],
-          [{ paymentMode: '2' }, 'paymentMode', 'INVALID_CODE'],
+          [{ paymentMode: '2' }, 'paymentMode', 'INVALID_TYPE'],
           [{ paymentReference: '' }, 'paymentReference', 'TOO_SHORT'],
           [{ paymentReference: 'r'.repeat(101) }, 'paymentReference', 'TOO_LONG'],
           [{ dueStatus: 2 }, 'dueStatus', 'FIELD_NOT_ALLOWED'],
@@ -1243,7 +1243,7 @@ describe('PLT-24 to PLT-30 platform dues (PRD 9.3, API design 10.22)', () => {
         const { institutionId } = await world();
         const due = await raised(institutionId);
         for (const [body, code] of [
-          [{ reason: undefined }, 'INVALID_TYPE'],
+          [{ reason: undefined }, 'REQUIRED'],
           [{ reason: 'Oops' }, 'TOO_SHORT'],
           [{ reason: 'r'.repeat(501) }, 'TOO_LONG'],
         ] as const) {

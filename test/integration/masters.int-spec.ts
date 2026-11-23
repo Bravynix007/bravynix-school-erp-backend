@@ -492,7 +492,7 @@ describe('MST-01 and PLT-31 to PLT-33 platform masters (API design 10.4g, DDD 9.
       const fields = Object.fromEntries((res.body.errors ?? []).map((e) => [e.field, e.code]));
       expect(fields).toEqual({
         code: 'INVALID_FORMAT',
-        name: 'TOO_SHORT',
+        name: 'REQUIRED',
         createdBy: 'FIELD_NOT_ALLOWED',
         displayOrder: 'INVALID_TYPE',
       });
@@ -584,7 +584,7 @@ describe('MST-01 and PLT-31 to PLT-33 platform masters (API design 10.4g, DDD 9.
       expect(code422.body.errors?.[0]).toMatchObject({ field: 'code', code: 'FIELD_NOT_ALLOWED' });
       const noVersion = await asAdmin('patch', path, { name: 'x' });
       expect(noVersion.status).toBe(400);
-      expect(noVersion.body.errors?.[0]).toMatchObject({ field: 'version', code: 'INVALID_TYPE' });
+      expect(noVersion.body.errors?.[0]).toMatchObject({ field: 'version', code: 'REQUIRED' });
 
       const india = await idOf('countries', 'iso2', 'IN');
       const state = await created('states', 'states', { countryId: india, name: name() });

@@ -303,7 +303,7 @@ describe('class teachers and teaching assignments', () => {
     it('validates the body: 400 for a missing, mistyped or extra field', async () => {
       const noSection = await rawLead({ academicYearId: year });
       expect(noSection.status).toBe(400);
-      expect(noSection.body.errors).toMatchObject([{ field: 'sectionId', code: 'INVALID_FORMAT' }]);
+      expect(noSection.body.errors).toMatchObject([{ field: 'sectionId', code: 'REQUIRED' }]);
       const badYear = await rawLead({ academicYearId: 5, sectionId: sectionA });
       expect(badYear.status).toBe(400);
       expect(badYear.body.errors).toMatchObject([{ field: 'academicYearId' }]);
@@ -464,11 +464,11 @@ describe('class teachers and teaching assignments', () => {
           .map((e) => [e.field, e.code])
           .toSorted(),
       ).toEqual([
-        ['academicYearId', 'INVALID_FORMAT'],
+        ['academicYearId', 'REQUIRED'],
         ['role', 'FIELD_NOT_ALLOWED'],
-        ['sectionId', 'INVALID_FORMAT'],
-        ['staffMemberId', 'INVALID_FORMAT'],
-        ['subjectId', 'INVALID_FORMAT'],
+        ['sectionId', 'REQUIRED'],
+        ['staffMemberId', 'REQUIRED'],
+        ['subjectId', 'REQUIRED'],
       ]);
     });
 

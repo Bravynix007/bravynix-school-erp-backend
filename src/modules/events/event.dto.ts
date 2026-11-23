@@ -10,6 +10,7 @@ import {
   IsUUID,
   Length,
   MaxLength,
+  MinLength,
 } from 'class-validator';
 import { BooleanQuery } from '../../common/validation/boolean-query.js';
 import { IsCalendarDate } from '../../common/validation/calendar-date.js';
@@ -107,12 +108,14 @@ class EventFieldsDto {
   @ApiPropertyOptional({ nullable: true, maxLength: 2000 })
   @IsOptional()
   @IsString()
+  @MinLength(1)
   @MaxLength(2000)
   description?: string | null;
 
   @ApiPropertyOptional({ nullable: true, maxLength: 200 })
   @IsOptional()
   @IsString()
+  @MinLength(1)
   @MaxLength(200)
   venue?: string | null;
 
@@ -218,12 +221,14 @@ export class UpdateEventDto extends VersionDto {
   @ApiPropertyOptional({ nullable: true, maxLength: 2000 })
   @IsOptional()
   @IsString()
+  @MinLength(1)
   @MaxLength(2000)
   description?: string | null;
 
   @ApiPropertyOptional({ nullable: true, maxLength: 200 })
   @IsOptional()
   @IsString()
+  @MinLength(1)
   @MaxLength(200)
   venue?: string | null;
 

@@ -13,7 +13,7 @@ describe('VersionedReasonDto', () => {
     }
     expect(await problems(body(VersionedReasonDto, { reason: 'x' }))).toContainEqual({
       field: 'version',
-      code: 'INVALID_TYPE',
+      code: 'REQUIRED',
     });
   });
 });
@@ -26,10 +26,10 @@ describe('VersionedStatedReasonDto', () => {
   });
 
   it.each([
-    [{ version: 1 }, 'reason', 'INVALID_TYPE'],
+    [{ version: 1 }, 'reason', 'REQUIRED'],
     [{ version: 1, reason: 'Oops' }, 'reason', 'TOO_SHORT'],
     [{ version: 1, reason: 'r'.repeat(501) }, 'reason', 'TOO_LONG'],
-    [{ reason: 'Raised twice' }, 'version', 'INVALID_TYPE'],
+    [{ reason: 'Raised twice' }, 'version', 'REQUIRED'],
   ])('refuses %j', async (value, field, code) => {
     expect(await problems(body(VersionedStatedReasonDto, value))).toContainEqual({ field, code });
   });

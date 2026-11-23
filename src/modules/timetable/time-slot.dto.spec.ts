@@ -21,7 +21,7 @@ describe('CreateTimeSlotDto', () => {
   });
 
   it.each([
-    [{ ...valid, institutionId: undefined }, 'institutionId', 'INVALID_FORMAT'],
+    [{ ...valid, institutionId: undefined }, 'institutionId', 'REQUIRED'],
     [{ ...valid, academicYearId: 'nope' }, 'academicYearId', 'INVALID_FORMAT'],
     [{ ...valid, periodNo: 0 }, 'periodNo', 'OUT_OF_RANGE'],
     [{ ...valid, periodNo: 31 }, 'periodNo', 'OUT_OF_RANGE'],
@@ -33,7 +33,7 @@ describe('CreateTimeSlotDto', () => {
     [{ ...valid, startTime: '9:40' }, 'startTime', 'INVALID_FORMAT'],
     [{ ...valid, startTime: '24:00' }, 'startTime', 'INVALID_FORMAT'],
     [{ ...valid, endTime: '10:60' }, 'endTime', 'INVALID_FORMAT'],
-    [{ ...valid, endTime: undefined }, 'endTime', 'INVALID_TYPE'],
+    [{ ...valid, endTime: undefined }, 'endTime', 'REQUIRED'],
     [{ ...valid, isBreak: 'yes' }, 'isBreak', 'INVALID_TYPE'],
     [{ ...valid, societyId: uuid }, 'societyId', 'FIELD_NOT_ALLOWED'],
   ])('refuses %j', async (value, field, code) => {
@@ -51,7 +51,7 @@ describe('UpdateTimeSlotDto', () => {
     ).toEqual([]);
     expect(await problems(body(UpdateTimeSlotDto, { label: 'x' }))).toContainEqual({
       field: 'version',
-      code: 'INVALID_TYPE',
+      code: 'REQUIRED',
     });
   });
 

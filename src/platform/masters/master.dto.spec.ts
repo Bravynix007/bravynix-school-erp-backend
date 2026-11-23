@@ -56,8 +56,8 @@ describe('the bodies of PLT-31', () => {
     ],
     [CreateCountryDto, { name: 'x'.repeat(101), iso2: 'IN' }, 'name', 'TOO_LONG'],
     [CreateStateDto, { countryId: 'nope', name: 'Goa' }, 'countryId', 'INVALID_FORMAT'],
-    [CreateStateDto, { name: 'Goa' }, 'countryId', 'INVALID_FORMAT'],
-    [CreateCityDto, { stateId: uuid, name: '' }, 'name', 'TOO_SHORT'],
+    [CreateStateDto, { name: 'Goa' }, 'countryId', 'REQUIRED'],
+    [CreateCityDto, { stateId: uuid, name: '' }, 'name', 'REQUIRED'],
     [CreateClassCategoryDto, { code: 'pre school', name: 'x' }, 'code', 'INVALID_FORMAT'],
     [CreateClassCategoryDto, { code: '1ST', name: 'x' }, 'code', 'INVALID_FORMAT'],
     [
@@ -112,7 +112,7 @@ describe('the bodies of PLT-32', () => {
   it('need the version, as a whole number (a text "1" is not one)', async () => {
     expect(await problems(body(UpdateStateDto, { name: 'Goa' }))).toContainEqual({
       field: 'version',
-      code: 'INVALID_TYPE',
+      code: 'REQUIRED',
     });
     expect(await problems(body(UpdateStateDto, { version: '1' }))).toContainEqual({
       field: 'version',

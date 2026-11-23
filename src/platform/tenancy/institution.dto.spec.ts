@@ -20,7 +20,7 @@ describe('CreateInstitutionDto', () => {
     [{ ...valid, name: undefined }, 'name', 'REQUIRED'],
     [{ ...valid, address: undefined }, 'address', 'REQUIRED'],
     [{ ...valid, address: null }, 'address', 'REQUIRED'],
-    [{ ...valid, address: {} }, 'address.line1', 'INVALID_TYPE'],
+    [{ ...valid, address: {} }, 'address.line1', 'REQUIRED'],
     [{ ...valid, boardCode: 0 }, 'boardCode', 'INVALID_CODE'],
     [{ ...valid, boardCode: 1.5 }, 'boardCode', 'INVALID_TYPE'],
     [{ ...valid, gstin: '29ABCDE1234F1Z' }, 'gstin', 'INVALID_FORMAT'],
@@ -44,7 +44,7 @@ describe('UpdateInstitutionDto', () => {
     expect(await problems(body(UpdateInstitutionDto, { version: 1 }))).toEqual([]);
     expect(await problems(body(UpdateInstitutionDto, {}))).toContainEqual({
       field: 'version',
-      code: 'INVALID_TYPE',
+      code: 'REQUIRED',
     });
   });
 

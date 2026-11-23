@@ -94,6 +94,49 @@ function valueOf(owner: Owner, property: string): unknown {
   return owner ? (owner as Record<string, unknown>)[property] : undefined;
 }
 
+/** Type rules an empty text breaks because the field is no text (a number, a list), so they keep their own code. */
+const NOT_TEXT_RULES = new Set(['isInt', 'isNumber', 'isBoolean', 'isArray', 'isObject']);
+
+/**
+ * Whether the field can be cleared with `null`: it carries `@IsOptional()`, whose condition skips a `null`. A field
+ * that only waits for a value (`@WhenPresent()`) or has no condition cannot be cleared, so an empty text there is a
+ * missing one.
+ */
+function isClearable(owner: object, property: string): boolean {
+  // The condition sees the rest of the request as it is, so one that looks at another field is judged on it.
+  const withNull = { ...owner, [property]: null };
+  return getMetadataStorage()
+    .getTargetValidationMetadatas(owner.constructor, '', true, false)
+    .some(
+      (meta) =>
+        meta.propertyName === property &&
+        meta.type === 'conditionalValidation' &&
+        (meta.constraints?.[0] as ((object: object, value: unknown) => boolean) | undefined)?.(
+          withNull,
+          null,
+        ) === false,
+    );
+}
+
+/**
+ * Whether the field was left out of the request, so it is `REQUIRED` whatever rule it failed (API design 8: a missing
+ * value comes before a wrong one). A field that may be left out is `@IsOptional()`, which skips every rule when it is
+ * missing, so a rule that fails on a missing value belongs to a required field. A field that cannot be cleared and is
+ * sent empty after trimming counts as left out too (API design 7.4), whichever text rule it fails (length, pattern, ID,
+ * email), unless it is no text field (a number or a list keeps `INVALID_TYPE`). One that `null` clears keeps its own
+ * code when sent as `""`.
+ * An unknown field is still `FIELD_NOT_ALLOWED`. Without the object the validated value cannot be seen, and the rule's
+ * own code stands.
+ */
+function isMissing(owner: Owner, property: string, constraint: string): boolean {
+  if (owner === undefined || constraint === 'whitelistValidation') return false;
+  const value = valueOf(owner, property);
+  return (
+    value === undefined ||
+    (value === '' && !NOT_TEXT_RULES.has(constraint) && !isClearable(owner, property))
+  );
+}
+
 /**
  * `@Length(min, max)` reports one constraint for both ends. The value's length
  * against `min` says which end failed, item by item for `{ each: true }`; without the value, class-validator's
@@ -146,11 +189,12 @@ export function toFieldErrors(
       const names = Object.keys(error.constraints);
       const first = PRIORITY.find((p) => names.includes(p)) ?? names[0];
       if (first) {
-        const code =
-          (error.contexts?.[first]?.['code'] as string | undefined) ??
-          lengthCode(error, owner, first) ??
-          CONSTRAINT_TO_CODE[first] ??
-          FieldErrorCode.INVALID_VALUE;
+        const code = isMissing(owner, error.property, first)
+          ? FieldErrorCode.REQUIRED
+          : ((error.contexts?.[first]?.['code'] as string | undefined) ??
+            lengthCode(error, owner, first) ??
+            CONSTRAINT_TO_CODE[first] ??
+            FieldErrorCode.INVALID_VALUE);
         const params = paramsFor(error, owner, first, code);
         result.push({
           field: path,

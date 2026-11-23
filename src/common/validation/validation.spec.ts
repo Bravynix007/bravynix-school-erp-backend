@@ -2,18 +2,27 @@ import { ValidationPipe, type ValidationError } from '@nestjs/common';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
+  IsArray,
+  IsBoolean,
+  IsEmail,
   IsInt,
   IsNotEmpty,
+  IsNumber,
+  IsObject,
   IsOptional,
   IsString,
+  IsUUID,
   Length,
   Max,
   MaxLength,
+  ValidateIf,
   ValidateNested,
   validate,
 } from 'class-validator';
 import { AppException } from '../http/app-exception.js';
+import { NotBlank } from './not-blank.js';
 import { TrimStringsPipe, createValidationPipe, toFieldErrors } from './validation.js';
+import { WhenPresent } from './when-present.js';
 
 class LimitsDto {
   @IsString()
@@ -151,6 +160,148 @@ describe('toFieldErrors with real decorators', () => {
       { field: 'score', code: 'OUT_OF_RANGE', params: { max: 100 } },
       { field: 'q', code: 'TOO_SHORT', params: { min: 2 } },
       { field: 'tags', code: 'TOO_MANY', params: { max: 5 } },
+    ]);
+  });
+});
+
+describe('a missing field', () => {
+  it('is REQUIRED whatever rule it fails, and a wrong one keeps its own code', async () => {
+    const missing = await errorsFor({ name: undefined, score: undefined, q: undefined });
+    expect(missing.map(({ field, code }) => ({ field, code }))).toEqual([
+      { field: 'name', code: 'REQUIRED' },
+      { field: 'score', code: 'REQUIRED' },
+      { field: 'q', code: 'REQUIRED' },
+    ]);
+    const wrong = await errorsFor({ name: 5, score: 'x', q: 'a' });
+    expect(wrong.map(({ field, code }) => ({ field, code }))).toEqual([
+      { field: 'name', code: 'INVALID_TYPE' },
+      { field: 'score', code: 'INVALID_TYPE' },
+      { field: 'q', code: 'TOO_SHORT' },
+    ]);
+  });
+
+  it('is REQUIRED inside a nested object too, and a null is a wrong value, not a missing one', async () => {
+    const error = await pipeErrors({ surname: null, guardians: [{}] });
+    expect(error.options.errors?.map(({ field, code }) => ({ field, code }))).toEqual([
+      { field: 'surname', code: 'INVALID_TYPE' },
+      { field: 'guardians[0].name', code: 'REQUIRED' },
+    ]);
+  });
+
+  it('leaves an unknown field as FIELD_NOT_ALLOWED beside a missing one', async () => {
+    const error = await pipeErrors({ guardians: [], status: 1 });
+    expect(error.options.errors?.map(({ field, code }) => ({ field, code }))).toEqual([
+      { field: 'status', code: 'FIELD_NOT_ALLOWED' },
+      { field: 'surname', code: 'REQUIRED' },
+    ]);
+  });
+});
+
+const ID = '0192f3b0-0000-7000-8000-000000000001';
+
+class TitlesDto {
+  @IsString()
+  @Length(1, 50)
+  @NotBlank()
+  title!: unknown;
+
+  @WhenPresent()
+  @IsString()
+  @Length(1, 50)
+  rename?: unknown;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 50)
+  note?: unknown;
+
+  @IsUUID()
+  parentId!: unknown;
+
+  @IsEmail()
+  email!: unknown;
+
+  @IsInt()
+  count!: unknown;
+
+  @IsBoolean()
+  flag!: unknown;
+
+  @IsArray()
+  list!: unknown;
+
+  @IsObject()
+  object!: unknown;
+
+  @IsNumber()
+  amount!: unknown;
+
+  @ValidateIf((dto: TitlesDto) => dto.title === 'depends')
+  @IsString()
+  @Length(1, 50)
+  dependent?: unknown;
+}
+
+async function titlesErrors(body: unknown) {
+  try {
+    const meta = { type: 'body', metatype: TitlesDto } as const;
+    const rest = {
+      parentId: ID,
+      email: 'asha@example.com',
+      count: 1,
+      flag: true,
+      list: [],
+      object: {},
+      amount: 1.5,
+    };
+    const trimmed = new TrimStringsPipe().transform({ ...rest, ...(body as object) }, meta);
+    await createValidationPipe().transform(trimmed, meta);
+  } catch (error) {
+    return (error as AppException).options.errors?.map(({ field, code }) => ({ field, code }));
+  }
+  throw new Error('expected a validation error');
+}
+
+describe('a text left empty', () => {
+  it('is REQUIRED when the field cannot be cleared, spaces only included (API design 7.4)', async () => {
+    expect(await titlesErrors({ title: '   ', rename: '' })).toEqual([
+      { field: 'title', code: 'REQUIRED' },
+      { field: 'rename', code: 'REQUIRED' },
+    ]);
+  });
+
+  it('is REQUIRED for an ID or an email left empty too, whichever rule it breaks, but not for a number', async () => {
+    expect(await titlesErrors({ title: 'x', parentId: '', email: '', count: '' })).toEqual([
+      { field: 'parentId', code: 'REQUIRED' },
+      { field: 'email', code: 'REQUIRED' },
+      { field: 'count', code: 'INVALID_TYPE' },
+    ]);
+  });
+
+  it('keeps INVALID_TYPE for a boolean, a list, an object or a number sent empty', async () => {
+    expect(await titlesErrors({ title: 'x', flag: '', list: '', object: '', amount: '' })).toEqual([
+      { field: 'flag', code: 'INVALID_TYPE' },
+      { field: 'list', code: 'INVALID_TYPE' },
+      { field: 'object', code: 'INVALID_TYPE' },
+      { field: 'amount', code: 'INVALID_TYPE' },
+    ]);
+  });
+
+  it('judges a condition on another field with the request as it is', async () => {
+    expect(await titlesErrors({ title: 'depends', dependent: '' })).toEqual([
+      { field: 'dependent', code: 'REQUIRED' },
+    ]);
+  });
+
+  it('keeps TOO_SHORT for a field that null clears, because only null clears it', async () => {
+    expect(await titlesErrors({ title: 'x', note: '' })).toEqual([
+      { field: 'note', code: 'TOO_SHORT' },
+    ]);
+  });
+
+  it('keeps the length code for a text that is there but too long', async () => {
+    expect(await titlesErrors({ title: 'x'.repeat(51) })).toEqual([
+      { field: 'title', code: 'TOO_LONG' },
     ]);
   });
 });

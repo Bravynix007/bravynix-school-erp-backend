@@ -78,7 +78,7 @@ describe('CreateStudentDto', () => {
   });
 
   it.each([
-    [{ firstName: '' }, 'firstName', 'TOO_SHORT'],
+    [{ firstName: '' }, 'firstName', 'REQUIRED'],
     [{ firstName: '   ' }, 'firstName', 'INVALID_FORMAT'],
     [{ firstName: 'x'.repeat(101) }, 'firstName', 'TOO_LONG'],
     [{ gender: 4 }, 'gender', 'INVALID_CODE'],
@@ -94,7 +94,7 @@ describe('CreateStudentDto', () => {
     [{ photoFileId: 'x' }, 'photoFileId', 'INVALID_FORMAT'],
     [{ address: { pincode: 'x'.repeat(11) } }, 'address.pincode', 'TOO_LONG'],
     [{ mobile: { countryCode: '91', number: '123' } }, 'mobile.number', 'INVALID_FORMAT'],
-    [{ enrolment: { ...valid.enrolment, rollNumber: '' } }, 'enrolment.rollNumber', 'TOO_SHORT'],
+    [{ enrolment: { ...valid.enrolment, rollNumber: '' } }, 'enrolment.rollNumber', 'REQUIRED'],
     [
       { enrolment: { ...valid.enrolment, rollNumber: ' ' } },
       'enrolment.rollNumber',
@@ -115,18 +115,14 @@ describe('CreateStudentDto', () => {
     [{ guardians: many(6, guardian) }, 'guardians', 'TOO_MANY'],
     [{ guardians: [{ ...guardian, firstName: ' ' }] }, 'guardians[0].firstName', 'INVALID_FORMAT'],
     [{ guardians: [{ ...guardian, relation: 7 }] }, 'guardians[0].relation', 'INVALID_CODE'],
-    [{ guardians: [{ ...guardian, phone: undefined }] }, 'guardians[0].phone', 'INVALID_TYPE'],
+    [{ guardians: [{ ...guardian, phone: undefined }] }, 'guardians[0].phone', 'REQUIRED'],
     [{ guardians: [{ ...guardian, email: 'x' }] }, 'guardians[0].email', 'INVALID_FORMAT'],
     [
       { guardians: [{ ...guardian, alternatePhone: '1' }] },
       'guardians[0].alternatePhone',
       'INVALID_FORMAT',
     ],
-    [
-      { guardians: [{ ...guardian, isPrimary: undefined }] },
-      'guardians[0].isPrimary',
-      'INVALID_TYPE',
-    ],
+    [{ guardians: [{ ...guardian, isPrimary: undefined }] }, 'guardians[0].isPrimary', 'REQUIRED'],
     [
       { guardians: [{ ...guardian, isEmergencyContact: 'yes' }] },
       'guardians[0].isEmergencyContact',
@@ -177,7 +173,7 @@ describe('UpdateStudentDto', () => {
     ).toEqual([]);
     expect(await problems(body(UpdateStudentDto, { firstName: 'Diya' }))).toContainEqual({
       field: 'version',
-      code: 'INVALID_TYPE',
+      code: 'REQUIRED',
     });
   });
 
@@ -218,7 +214,7 @@ describe('DeactivateStudentQueryDto', () => {
   });
 
   it.each([
-    [{}, 'INVALID_TYPE'],
+    [{}, 'REQUIRED'],
     [{ reason: '0' }, 'INVALID_CODE'],
     [{ reason: '4' }, 'INVALID_CODE'],
     [{ reason: 'left' }, 'INVALID_TYPE'],
@@ -246,7 +242,7 @@ describe('MoveStudentDto', () => {
     [{ sectionId: null }, 'sectionId', 'INVALID_FORMAT'],
     [{ sectionId: 'x' }, 'sectionId', 'INVALID_FORMAT'],
     [{ rollNumber: null }, 'rollNumber', 'INVALID_TYPE'],
-    [{ rollNumber: '' }, 'rollNumber', 'TOO_SHORT'],
+    [{ rollNumber: '' }, 'rollNumber', 'REQUIRED'],
     [{ rollNumber: '   ' }, 'rollNumber', 'INVALID_FORMAT'],
     [{ rollNumber: 'x'.repeat(21) }, 'rollNumber', 'TOO_LONG'],
     [{ effectiveDate: null }, 'effectiveDate', 'INVALID_TYPE'],
@@ -270,11 +266,11 @@ describe('CorrectStudentClassDto', () => {
   });
 
   it.each([
-    [{ sectionId: id }, 'classId', 'INVALID_FORMAT'],
-    [{ classId: id }, 'sectionId', 'INVALID_FORMAT'],
+    [{ sectionId: id }, 'classId', 'REQUIRED'],
+    [{ classId: id }, 'sectionId', 'REQUIRED'],
     [{ classId: 'x', sectionId: id }, 'classId', 'INVALID_FORMAT'],
     [{ classId: id, sectionId: null }, 'sectionId', 'INVALID_FORMAT'],
-    [{ classId: id, sectionId: id, rollNumber: '' }, 'rollNumber', 'TOO_SHORT'],
+    [{ classId: id, sectionId: id, rollNumber: '' }, 'rollNumber', 'REQUIRED'],
     [{ classId: id, sectionId: id, rollNumber: '  ' }, 'rollNumber', 'INVALID_FORMAT'],
     [{ classId: id, sectionId: id, rollNumber: 'x'.repeat(21) }, 'rollNumber', 'TOO_LONG'],
     [

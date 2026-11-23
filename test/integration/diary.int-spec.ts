@@ -331,14 +331,14 @@ describe('DIA-01 to DIA-04 the diary (API design 10.14a)', () => {
       expect(res.status).toBe(400);
       expect(fieldsOf(res)).toEqual({
         sectionId: 'INVALID_FORMAT',
-        subjectId: 'INVALID_FORMAT',
+        subjectId: 'REQUIRED',
         diaryDate: 'INVALID_FORMAT',
-        description: 'TOO_SHORT',
+        description: 'REQUIRED',
       });
       expect(fieldsOf(await add({ description: 'x'.repeat(2001) }))).toEqual({
         description: 'TOO_LONG',
       });
-      expect(fieldsOf(await add({ description: '' }))).toEqual({ description: 'TOO_SHORT' });
+      expect(fieldsOf(await add({ description: '' }))).toEqual({ description: 'REQUIRED' });
     });
 
     it('takes today and up to 7 days back, and refuses a day to come (422 DATE_IN_FUTURE) and a day further back (422 DATE_TOO_OLD)', async () => {
@@ -466,10 +466,12 @@ describe('DIA-01 to DIA-04 the diary (API design 10.14a)', () => {
         expect(await refusalOf(sectionA, token)).toEqual([404, 'NOT_FOUND']);
       }
       expect((await refusalOf(sectionA, parentA))[0]).toBe(403);
-      for (const query of ['', 'sectionId=nope']) {
+      for (const [query, code] of [
+        ['', 'REQUIRED'],
+        ['sectionId=nope', 'INVALID_FORMAT'],
+      ] as const) {
         const res = await api('get', `/v1/diary-subjects?${query}`, owner.token);
-        expect(res.status).toBe(400);
-        expect(fieldsOf(res)).toHaveProperty('sectionId');
+        expect([res.status, fieldsOf(res)]).toEqual([400, { sectionId: code }]);
       }
     });
   });
@@ -546,7 +548,7 @@ describe('DIA-01 to DIA-04 the diary (API design 10.14a)', () => {
         { studentId: 'FIELD_NOT_ALLOWED', sectionId: 'REQUIRED' },
       ]);
       const noDate = await read(`sectionId=${sectionA}`);
-      expect([noDate.status, fieldsOf(noDate)]).toEqual([400, { date: 'INVALID_TYPE' }]);
+      expect([noDate.status, fieldsOf(noDate)]).toEqual([400, { date: 'REQUIRED' }]);
     });
   });
 
@@ -617,10 +619,10 @@ describe('DIA-01 to DIA-04 the diary (API design 10.14a)', () => {
       const bad = await change(made.id, { version: 1, diaryDate: '2026-02-30', description: ' ' });
       expect([bad.status, fieldsOf(bad)]).toEqual([
         400,
-        { diaryDate: 'INVALID_FORMAT', description: 'TOO_SHORT' },
+        { diaryDate: 'INVALID_FORMAT', description: 'REQUIRED' },
       ]);
       expect(fieldsOf(await change(made.id, { description: 'x' }))).toEqual({
-        version: 'INVALID_TYPE',
+        version: 'REQUIRED',
       });
     });
 

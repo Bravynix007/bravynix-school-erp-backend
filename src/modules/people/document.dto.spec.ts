@@ -11,14 +11,14 @@ describe('CreateDocumentDto', () => {
   });
 
   it.each([
-    ['no title', { fileId: id }, [{ field: 'title', code: 'INVALID_TYPE' }]],
-    ['an empty title', { title: '', fileId: id }, [{ field: 'title', code: 'TOO_SHORT' }]],
+    ['no title', { fileId: id }, [{ field: 'title', code: 'REQUIRED' }]],
+    ['an empty title', { title: '', fileId: id }, [{ field: 'title', code: 'REQUIRED' }]],
     [
       'a title over 150',
       { title: 'x'.repeat(151), fileId: id },
       [{ field: 'title', code: 'TOO_LONG' }],
     ],
-    ['no file', { title: 'Letter' }, [{ field: 'fileId', code: 'INVALID_FORMAT' }]],
+    ['no file', { title: 'Letter' }, [{ field: 'fileId', code: 'REQUIRED' }]],
     [
       'a word for the file',
       { title: 'Letter', fileId: 'x' },

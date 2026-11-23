@@ -183,7 +183,7 @@ describe('SUB-01 to SUB-04 subjects (PRD 7.4, API design 10.4i)', () => {
       expect(bad.status).toBe(400);
       const fields = Object.fromEntries((bad.body.errors ?? []).map((e) => [e.field, e.code]));
       expect(fields).toMatchObject({
-        name: 'TOO_SHORT',
+        name: 'REQUIRED',
         code: 'TOO_LONG',
         societyId: 'FIELD_NOT_ALLOWED',
         status: 'FIELD_NOT_ALLOWED',

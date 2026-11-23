@@ -435,10 +435,12 @@ describe('ATT-07 and ATT-08 a student’s attendance (API design 10.13)', () => 
         const res = await month(studentIds.bea!, value);
         expect([res.status, res.body.code]).toEqual([422, 'OUTSIDE_ACADEMIC_YEAR']);
       }
-      for (const value of ['2026-13', '2026-5', 'november', '']) {
+      for (const value of ['2026-13', '2026-5', 'november']) {
         const res = await month(studentIds.bea!, value);
         expect([res.status, fieldsOf(res)]).toEqual([400, { month: 'INVALID_FORMAT' }]);
       }
+      const empty = await month(studentIds.bea!, '');
+      expect([empty.status, fieldsOf(empty)]).toEqual([400, { month: 'REQUIRED' }]);
       const missing = await api('get', `/v1/students/${studentIds.bea}/attendance`, owner.token);
       expect(missing.status).toBe(400);
       expect((await month('nope', '2026-11')).status).toBe(404);

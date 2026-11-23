@@ -19,11 +19,11 @@ describe('RequestUploadDto', () => {
     [{ purpose: 14 }, 'purpose', 'INVALID_CODE'],
     [{ purpose: '5' }, 'purpose', 'INVALID_TYPE'],
     [{ institutionId: 'x' }, 'institutionId', 'INVALID_FORMAT'],
-    [{ contentType: '' }, 'contentType', 'TOO_SHORT'],
+    [{ contentType: '' }, 'contentType', 'REQUIRED'],
     [{ sizeBytes: 0 }, 'sizeBytes', 'OUT_OF_RANGE'],
     [{ sizeBytes: '5' }, 'sizeBytes', 'INVALID_TYPE'],
     [{ sizeBytes: 1.5 }, 'sizeBytes', 'INVALID_TYPE'],
-    [{ fileName: '' }, 'fileName', 'TOO_SHORT'],
+    [{ fileName: '' }, 'fileName', 'REQUIRED'],
     [{ fileName: 'x'.repeat(256) }, 'fileName', 'TOO_LONG'],
     [{ owner: { type: 'student', id: 'x' } }, 'owner', 'FIELD_NOT_ALLOWED'],
   ])('refuses %j', async (change, field, code) => {

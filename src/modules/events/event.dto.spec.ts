@@ -39,19 +39,21 @@ describe('CreateEventDto', () => {
   });
 
   it.each([
-    [{ ...valid, title: undefined }, 'title', 'INVALID_TYPE'],
+    [{ ...valid, title: undefined }, 'title', 'REQUIRED'],
     [{ ...valid, title: '  ' }, 'title', 'INVALID_FORMAT'],
     [{ ...valid, title: 'x'.repeat(151) }, 'title', 'TOO_LONG'],
     [{ ...valid, startDate: '22/12/2026' }, 'startDate', 'INVALID_FORMAT'],
     [{ ...valid, endDate: '2026-02-30' }, 'endDate', 'INVALID_FORMAT'],
-    [{ ...valid, durationLabel: '' }, 'durationLabel', 'TOO_SHORT'],
+    [{ ...valid, durationLabel: '' }, 'durationLabel', 'REQUIRED'],
     [{ ...valid, durationLabel: 'x'.repeat(51) }, 'durationLabel', 'TOO_LONG'],
+    [{ ...valid, description: '' }, 'description', 'TOO_SHORT'],
     [{ ...valid, description: 'x'.repeat(2001) }, 'description', 'TOO_LONG'],
+    [{ ...valid, venue: '' }, 'venue', 'TOO_SHORT'],
     [{ ...valid, venue: 'x'.repeat(201) }, 'venue', 'TOO_LONG'],
     [{ ...valid, audience: 4 }, 'audience', 'INVALID_CODE'],
     [{ ...valid, audience: '1' }, 'audience', 'INVALID_TYPE'],
     [{ ...valid, scope: 3 }, 'scope', 'INVALID_CODE'],
-    [{ ...valid, scope: undefined }, 'scope', 'INVALID_TYPE'],
+    [{ ...valid, scope: undefined }, 'scope', 'REQUIRED'],
     [{ ...valid, institutionId: 'nope' }, 'institutionId', 'INVALID_FORMAT'],
     [{ ...valid, presetImageCode: 'unicorn' }, 'presetImageCode', 'INVALID_CODE'],
     [{ ...valid, isHoliday: 'yes' }, 'isHoliday', 'INVALID_TYPE'],
@@ -102,12 +104,20 @@ describe('UpdateEventDto', () => {
     ).toEqual([]);
     expect(await problems(body(UpdateEventDto, { title: 'x' }))).toContainEqual({
       field: 'version',
-      code: 'INVALID_TYPE',
+      code: 'REQUIRED',
     });
     expect(await problems(body(UpdateEventDto, { version: '1' }))).toContainEqual({
       field: 'version',
       code: 'INVALID_TYPE',
     });
+  });
+
+  it('refuses an empty description or venue: only null clears them', async () => {
+    for (const field of ['description', 'venue']) {
+      expect(await problems(body(UpdateEventDto, { version: 1, [field]: '' }))).toEqual([
+        { field, code: 'TOO_SHORT' },
+      ]);
+    }
   });
 
   it('refuses null for a field that cannot be cleared, and the fields that are not editable', async () => {
@@ -144,7 +154,7 @@ describe('ChangeEventScopeDto', () => {
     ).toEqual([]);
     expect(await problems(body(ChangeEventScopeDto, { version: 1 }))).toContainEqual({
       field: 'scope',
-      code: 'INVALID_TYPE',
+      code: 'REQUIRED',
     });
     expect(await problems(body(ChangeEventScopeDto, { version: 1, scope: 0 }))).toContainEqual({
       field: 'scope',
