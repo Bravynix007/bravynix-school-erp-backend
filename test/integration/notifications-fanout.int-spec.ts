@@ -32,7 +32,7 @@ interface ItemBody {
   category: number;
   studentId: string | null;
   senderDisplayName: string | null;
-  target: { type: number; id: string } | null;
+  target: { type: number; id: string; date: string | null } | null;
   isRead: boolean;
 }
 
@@ -197,6 +197,16 @@ describe('a notice reaches its receivers', () => {
     expect(await inbox(outsider)).toEqual([]);
   });
 
+  it('keeps the day a notice is about with its target, and has none for a notice that is about no day', async () => {
+    const day = notice({ target: { type: 2, id: newId(), date: '2026-11-21' } });
+    const plain = notice();
+    await send(day);
+    await send(plain);
+    const targets = (await inbox(first)).map((item) => item.target);
+    expect(targets).toContainEqual({ ...day.target, date: '2026-11-21' });
+    expect(targets).toContainEqual({ ...plain.target, date: null });
+  });
+
   it('adds nothing and pushes nothing when the same notice runs again', async () => {
     await register(first, 'fanout-1');
     const value = notice({ receivers: [{ userId: first.person }] });
@@ -274,7 +284,7 @@ describe('a notice reaches its receivers', () => {
     await expect(
       database.transaction({ societyId, institutionIds: [institutionId] }, (tx) =>
         sql`select * from maintenance.deliver_inbox_items(
-          ${other}::uuid, null, 'x:1', now(), 1::smallint, 1::smallint, 't', 'b', null, null, null,
+          ${other}::uuid, null, 'x:1', now(), 1::smallint, 1::smallint, 't', 'b', null, null, null, null,
           ${JSON.stringify([{ userId: first.person, studentId: null }])}::jsonb)`.execute(tx),
       ),
     ).rejects.toMatchObject({ code: '42501' });
@@ -284,7 +294,7 @@ describe('a notice reaches its receivers', () => {
     await expect(
       database.transaction({ institutionIds: [] }, (tx) =>
         sql`select * from maintenance.deliver_inbox_items(
-          null, null, 'x:1', now(), 1::smallint, 1::smallint, 't', 'b', null, null, null,
+          null, null, 'x:1', now(), 1::smallint, 1::smallint, 't', 'b', null, null, null, null,
           ${JSON.stringify([{ userId: first.person, studentId: null }])}::jsonb)`.execute(tx),
       ),
     ).rejects.toMatchObject({ code: '42501' });

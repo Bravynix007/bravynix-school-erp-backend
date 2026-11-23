@@ -26,6 +26,8 @@ export interface InboxItemsTable {
   /** The screen it opens: 1 Attendance, 2 Diary, 3 Event, 4 Exam, and so on (DDD 9.8). */
   target_type: number | null;
   target_id: string | null;
+  /** The day the notice is about, such as the date of a diary entry; only with a target. */
+  target_date: string | null;
   read_at: Date | null;
 }
 

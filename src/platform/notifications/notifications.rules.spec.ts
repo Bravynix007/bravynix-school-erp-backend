@@ -34,7 +34,7 @@ describe('checkNotice', () => {
           sourceKey: 'k'.repeat(MAX_SOURCE_KEY),
           title: 't'.repeat(MAX_TITLE),
           body: 'b'.repeat(MAX_BODY),
-          target: { type: 12, id: CHILD },
+          target: { type: 12, id: CHILD, date: '2026-02-28' },
           receivers: Array.from({ length: MAX_RECEIVERS }, () => ({ userId: USER })),
         }),
       ),
@@ -55,6 +55,8 @@ describe('checkNotice', () => {
     ['an Institution that is not an ID', { institutionId: 'x' }, /Institution/],
     ['a screen that does not exist', { target: { type: 13, id: CHILD } }, /screen/],
     ['a screen with no ID', { target: { type: 1, id: 'x' } }, /screen/],
+    ['a day that does not exist', { target: { type: 2, id: CHILD, date: '2026-02-30' } }, /day/],
+    ['a day written another way', { target: { type: 2, id: CHILD, date: '2/3/2026' } }, /day/],
     [
       'too many receivers',
       { receivers: Array.from({ length: MAX_RECEIVERS + 1 }, () => ({ userId: USER })) },
@@ -95,7 +97,7 @@ describe('payloadOfNotice', () => {
 
 describe('noticeOfPayload', () => {
   it('reads back what payloadOfNotice wrote', () => {
-    const payload = payloadOfNotice(notice({ target: { type: 1, id: CHILD } }));
+    const payload = payloadOfNotice(notice({ target: { type: 2, id: CHILD, date: '2026-11-21' } }));
     expect(noticeOfPayload(JSON.parse(JSON.stringify(payload)))).toEqual(payload);
   });
 

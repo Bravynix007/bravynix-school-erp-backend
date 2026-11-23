@@ -287,7 +287,7 @@ describe('DiaryService.create', () => {
         category: 2,
         title: 'New diary entry',
         body: 'Maths: a diary entry for 17 Nov 2026.',
-        target: { type: 2, id: 'entry-new' },
+        target: { type: 2, id: 'entry-new', date: '2026-11-17' },
         receivers: [{ userId: 'user-1', studentId: 'child-1' }],
       }),
       'person-1',

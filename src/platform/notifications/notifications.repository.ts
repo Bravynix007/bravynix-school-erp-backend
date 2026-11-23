@@ -9,6 +9,7 @@ import {
 } from '../../common/pagination/pagination.js';
 import type { Tx } from '../database/index.js';
 import type { InboxItemsTable, PushDevicesTable } from './notifications.tables.js';
+import type { NoticeTarget } from './notifications.rules.js';
 
 /** The unread count stops here: the bell shows "9+" (DDD 9.8). */
 const UNREAD_CAP = 10;
@@ -28,6 +29,7 @@ export type InboxRow = Pick<
   | 'sender_display_name'
   | 'target_type'
   | 'target_id'
+  | 'target_date'
   | 'read_at'
 > & { cursorAt: CursorAt };
 
@@ -42,7 +44,7 @@ export interface DeliveredNotice {
   title: string;
   body: string;
   senderDisplayName: string | null;
-  target: { type: number; id: string } | null;
+  target: NoticeTarget | null;
   receivers: { userId: string; studentId: string | null }[];
 }
 
@@ -84,6 +86,7 @@ export class NotificationsRepository {
         'sender_display_name',
         'target_type',
         'target_id',
+        'target_date',
         'read_at',
         cursorTimestamp('created_at').as('cursorAt'),
       ]);
@@ -191,7 +194,7 @@ export class NotificationsRepository {
       select receiver_id from maintenance.deliver_inbox_items(
         ${notice.societyId}::uuid, ${notice.institutionId}::uuid, ${notice.sourceKey}, ${notice.occurredAt}::timestamptz,
         ${notice.category}::smallint, ${notice.tab}::smallint, ${notice.title}, ${notice.body},
-        ${notice.senderDisplayName}, ${notice.target?.type ?? null}::smallint, ${notice.target?.id ?? null}::uuid,
+        ${notice.senderDisplayName}, ${notice.target?.type ?? null}::smallint, ${notice.target?.id ?? null}::uuid, ${notice.target?.date ?? null}::date,
         ${JSON.stringify(notice.receivers)}::jsonb
       )
     `.execute(tx);
