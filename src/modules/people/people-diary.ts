@@ -27,6 +27,15 @@ export class PeopleDiary extends DiaryPeople {
     return this.assignments.mayWriteDiary(tx, staffMemberId, academicYearId, sectionId, subjectId);
   }
 
+  diarySubjectIds(
+    tx: Tx,
+    staffMemberId: string,
+    academicYearId: string,
+    sectionId: string,
+  ): Promise<string[] | null> {
+    return this.assignments.diarySubjectIds(tx, staffMemberId, academicYearId, sectionId);
+  }
+
   async currentSectionId(tx: Tx, studentId: string): Promise<string | undefined> {
     return (await this.students.openPlacement(tx, studentId))?.section_id;
   }

@@ -5,4 +5,5 @@ export { SectionStudents } from './section-students.js';
 export { SectionDirectory, type OpenSection, type SectionName } from './section-directory.js';
 export { StaffDirectory } from './staff-directory.js';
 export { SubjectDirectory } from './subject-directory.js';
+export type { SubjectResource } from './subject.resource.js';
 export { TeachingStaff, type ClassTeacherRef } from './teaching-staff.js';
