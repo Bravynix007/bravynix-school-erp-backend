@@ -46,7 +46,9 @@ describe('CreateEventDto', () => {
     [{ ...valid, endDate: '2026-02-30' }, 'endDate', 'INVALID_FORMAT'],
     [{ ...valid, durationLabel: '' }, 'durationLabel', 'REQUIRED'],
     [{ ...valid, durationLabel: 'x'.repeat(51) }, 'durationLabel', 'TOO_LONG'],
+    [{ ...valid, description: '' }, 'description', 'TOO_SHORT'],
     [{ ...valid, description: 'x'.repeat(2001) }, 'description', 'TOO_LONG'],
+    [{ ...valid, venue: '' }, 'venue', 'TOO_SHORT'],
     [{ ...valid, venue: 'x'.repeat(201) }, 'venue', 'TOO_LONG'],
     [{ ...valid, audience: 4 }, 'audience', 'INVALID_CODE'],
     [{ ...valid, audience: '1' }, 'audience', 'INVALID_TYPE'],
@@ -108,6 +110,14 @@ describe('UpdateEventDto', () => {
       field: 'version',
       code: 'INVALID_TYPE',
     });
+  });
+
+  it('refuses an empty description or venue: only null clears them', async () => {
+    for (const field of ['description', 'venue']) {
+      expect(await problems(body(UpdateEventDto, { version: 1, [field]: '' }))).toEqual([
+        { field, code: 'TOO_SHORT' },
+      ]);
+    }
   });
 
   it('refuses null for a field that cannot be cleared, and the fields that are not editable', async () => {

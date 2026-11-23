@@ -94,8 +94,8 @@ function valueOf(owner: Owner, property: string): unknown {
   return owner ? (owner as Record<string, unknown>)[property] : undefined;
 }
 
-/** The rules a required text field fails when it is empty (the pipe has already trimmed it). */
-const EMPTY_TEXT_RULES = new Set(['minLength', 'isLength', 'isNotEmpty', 'matches']);
+/** Type rules an empty text breaks because the field is no text (a number, a list), so they keep their own code. */
+const NOT_TEXT_RULES = new Set(['isInt', 'isNumber', 'isBoolean', 'isArray', 'isObject']);
 
 /**
  * Whether the field can be cleared with `null`: it carries `@IsOptional()`, whose condition skips a `null`. A field
@@ -103,7 +103,8 @@ const EMPTY_TEXT_RULES = new Set(['minLength', 'isLength', 'isNotEmpty', 'matche
  * missing one.
  */
 function isClearable(owner: object, property: string): boolean {
-  const withNull = { [property]: null };
+  // The condition sees the rest of the request as it is, so one that looks at another field is judged on it.
+  const withNull = { ...owner, [property]: null };
   return getMetadataStorage()
     .getTargetValidationMetadatas(owner.constructor, '', true, false)
     .some(
@@ -120,8 +121,10 @@ function isClearable(owner: object, property: string): boolean {
 /**
  * Whether the field was left out of the request, so it is `REQUIRED` whatever rule it failed (API design 8: a missing
  * value comes before a wrong one). A field that may be left out is `@IsOptional()`, which skips every rule when it is
- * missing, so a rule that fails on a missing value belongs to a required field. A required text that is empty after
- * trimming counts as left out too (API design 7.4); one that `null` clears keeps its length code when sent as `""`.
+ * missing, so a rule that fails on a missing value belongs to a required field. A field that cannot be cleared and is
+ * sent empty after trimming counts as left out too (API design 7.4), whichever text rule it fails (length, pattern, ID,
+ * email), unless it is no text field (a number or a list keeps `INVALID_TYPE`). One that `null` clears keeps its own
+ * code when sent as `""`.
  * An unknown field is still `FIELD_NOT_ALLOWED`. Without the object the validated value cannot be seen, and the rule's
  * own code stands.
  */
@@ -130,7 +133,7 @@ function isMissing(owner: Owner, property: string, constraint: string): boolean 
   const value = valueOf(owner, property);
   return (
     value === undefined ||
-    (value === '' && EMPTY_TEXT_RULES.has(constraint) && !isClearable(owner, property))
+    (value === '' && !NOT_TEXT_RULES.has(constraint) && !isClearable(owner, property))
   );
 }
 

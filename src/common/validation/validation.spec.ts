@@ -2,13 +2,16 @@ import { ValidationPipe, type ValidationError } from '@nestjs/common';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
+  IsEmail,
   IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
+  IsUUID,
   Length,
   Max,
   MaxLength,
+  ValidateIf,
   ValidateNested,
   validate,
 } from 'class-validator';
@@ -190,6 +193,8 @@ describe('a missing field', () => {
   });
 });
 
+const ID = '0192f3b0-0000-7000-8000-000000000001';
+
 class TitlesDto {
   @IsString()
   @Length(1, 50)
@@ -205,12 +210,27 @@ class TitlesDto {
   @IsString()
   @Length(1, 50)
   note?: unknown;
+
+  @IsUUID()
+  parentId!: unknown;
+
+  @IsEmail()
+  email!: unknown;
+
+  @IsInt()
+  count!: unknown;
+
+  @ValidateIf((dto: TitlesDto) => dto.title === 'depends')
+  @IsString()
+  @Length(1, 50)
+  dependent?: unknown;
 }
 
 async function titlesErrors(body: unknown) {
   try {
     const meta = { type: 'body', metatype: TitlesDto } as const;
-    const trimmed = new TrimStringsPipe().transform(body, meta);
+    const rest = { parentId: ID, email: 'asha@example.com', count: 1 };
+    const trimmed = new TrimStringsPipe().transform({ ...rest, ...(body as object) }, meta);
     await createValidationPipe().transform(trimmed, meta);
   } catch (error) {
     return (error as AppException).options.errors?.map(({ field, code }) => ({ field, code }));
@@ -223,6 +243,20 @@ describe('a text left empty', () => {
     expect(await titlesErrors({ title: '   ', rename: '' })).toEqual([
       { field: 'title', code: 'REQUIRED' },
       { field: 'rename', code: 'REQUIRED' },
+    ]);
+  });
+
+  it('is REQUIRED for an ID or an email left empty too, whichever rule it breaks, but not for a number', async () => {
+    expect(await titlesErrors({ title: 'x', parentId: '', email: '', count: '' })).toEqual([
+      { field: 'parentId', code: 'REQUIRED' },
+      { field: 'email', code: 'REQUIRED' },
+      { field: 'count', code: 'INVALID_TYPE' },
+    ]);
+  });
+
+  it('judges a condition on another field with the request as it is', async () => {
+    expect(await titlesErrors({ title: 'depends', dependent: '' })).toEqual([
+      { field: 'dependent', code: 'REQUIRED' },
     ]);
   });
 
