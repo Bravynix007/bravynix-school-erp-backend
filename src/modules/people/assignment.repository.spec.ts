@@ -128,24 +128,37 @@ describe('AssignmentRepository', () => {
   });
 });
 
-describe('AssignmentRepository.mayWriteDiary', () => {
-  it('asks whether the teacher leads the section or teaches the subject in it, in the year, by rows that still hold', async () => {
+describe('AssignmentRepository.diarySubjectIds', () => {
+  it('first asks whether the teacher leads the section in the year, by a row that still holds', async () => {
     const { tx, queries } = sqlRecorder();
     await new AssignmentRepository()
-      .mayWriteDiary(tx, 'staff-1', 'year-1', 'section-1', 'subject-1')
+      .diarySubjectIds(tx, 'staff-1', 'year-1', 'section-1')
       .catch(() => undefined);
     const { sql, parameters } = queries[0]!;
     expect(sql).toContain('from class_teacher_assignments');
-    expect(sql).toContain('from teaching_assignments');
-    expect(sql.match(/ended_at is null/g)).toHaveLength(2);
-    expect(parameters).toEqual([
-      'staff-1',
-      'year-1',
-      'section-1',
-      'staff-1',
-      'year-1',
-      'section-1',
-      'subject-1',
-    ]);
+    expect(sql).toContain('ended_at is null');
+    expect(parameters).toEqual(['staff-1', 'year-1', 'section-1']);
+  });
+});
+
+const asks = (subjects: string[] | null, subjectId: string) => {
+  const repository = new AssignmentRepository();
+  const ids = vi.spyOn(repository, 'diarySubjectIds').mockResolvedValue(subjects);
+  const { tx } = sqlRecorder();
+  return {
+    allowed: repository.mayWriteDiary(tx, 'staff-1', 'year-1', 'section-1', subjectId),
+    ids,
+    tx,
+  };
+};
+
+describe('AssignmentRepository.mayWriteDiary', () => {
+  it('is the rule DIA-05 lists: every subject for the class teacher, else the ones taught', async () => {
+    const lead = asks(null, 'subject-9');
+    expect(await lead.allowed).toBe(true);
+    expect(lead.ids).toHaveBeenCalledWith(lead.tx, 'staff-1', 'year-1', 'section-1');
+    expect(await asks(['subject-1', 'subject-2'], 'subject-2').allowed).toBe(true);
+    expect(await asks(['subject-1'], 'subject-2').allowed).toBe(false);
+    expect(await asks([], 'subject-1').allowed).toBe(false);
   });
 });

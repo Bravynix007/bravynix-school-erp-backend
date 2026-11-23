@@ -125,9 +125,34 @@ export class AssignmentRepository {
   }
 
   /**
-   * Whether the staff member may write the diary for the subject in the section in the year (PRD 7.9, Phase 5 decision
-   * 6): they teach the subject there, or they lead the section as its class teacher, which is any subject of it.
+   * The subjects the staff member may write the diary for in the section in the year (PRD 7.9, Phase 5 decision 6):
+   * `null` for every subject when they lead the section as its class teacher, else the subjects they teach there.
+   * Empty when they do neither. This is the one place the rule lives: DIA-02 asks it through [mayWriteDiary], DIA-05
+   * lists it.
    */
+  async diarySubjectIds(
+    tx: Tx,
+    staffMemberId: string,
+    academicYearId: string,
+    sectionId: string,
+  ): Promise<string[] | null> {
+    const leads = await sql<{ leads: boolean }>`
+      select exists (
+        select 1 from class_teacher_assignments
+          where staff_member_id = ${staffMemberId} and academic_year_id = ${academicYearId}
+            and section_id = ${sectionId} and ended_at is null
+      ) as leads
+    `.execute(tx);
+    if (leads.rows[0]!.leads) return null;
+    const taught = await sql<{ subject_id: string }>`
+      select distinct subject_id from teaching_assignments
+        where staff_member_id = ${staffMemberId} and academic_year_id = ${academicYearId}
+          and section_id = ${sectionId} and ended_at is null
+    `.execute(tx);
+    return taught.rows.map((row) => row.subject_id);
+  }
+
+  /** Whether the staff member may write the diary for the subject in the section in the year: see [diarySubjectIds]. */
   async mayWriteDiary(
     tx: Tx,
     staffMemberId: string,
@@ -135,18 +160,8 @@ export class AssignmentRepository {
     sectionId: string,
     subjectId: string,
   ): Promise<boolean> {
-    const rows = await sql<{ allowed: boolean }>`
-      select exists (
-        select 1 from class_teacher_assignments
-          where staff_member_id = ${staffMemberId} and academic_year_id = ${academicYearId}
-            and section_id = ${sectionId} and ended_at is null
-      ) or exists (
-        select 1 from teaching_assignments
-          where staff_member_id = ${staffMemberId} and academic_year_id = ${academicYearId}
-            and section_id = ${sectionId} and subject_id = ${subjectId} and ended_at is null
-      ) as allowed
-    `.execute(tx);
-    return rows.rows[0]!.allowed;
+    const subjects = await this.diarySubjectIds(tx, staffMemberId, academicYearId, sectionId);
+    return subjects === null || subjects.includes(subjectId);
   }
 
   /** The years of the Institution in which the staff member has an active assignment of either kind. */

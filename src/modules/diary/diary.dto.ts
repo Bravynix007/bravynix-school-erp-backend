@@ -29,6 +29,14 @@ export class ListDiaryQueryDto {
   date!: string;
 }
 
+/** DIA-05 query: the section whose subjects the caller may write the diary for. */
+export class ListDiarySubjectsQueryDto {
+  @ApiProperty({ format: 'uuid' })
+  @LowerCaseUuid()
+  @IsUUID()
+  sectionId!: string;
+}
+
 /** DIA-02 body (API design 10.14a). */
 export class CreateDiaryEntryDto {
   @ApiProperty({ format: 'uuid' })

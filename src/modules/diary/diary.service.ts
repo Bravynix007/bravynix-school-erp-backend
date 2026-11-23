@@ -32,9 +32,15 @@ import {
   StaffDirectory,
   SubjectDirectory,
   TeachingStaff,
+  type SubjectResource,
 } from '../academic-setup/index.js';
 import { DiaryPeople } from './diary-people.js';
-import type { CreateDiaryEntryDto, ListDiaryQueryDto, UpdateDiaryEntryDto } from './diary.dto.js';
+import type {
+  CreateDiaryEntryDto,
+  ListDiaryQueryDto,
+  ListDiarySubjectsQueryDto,
+  UpdateDiaryEntryDto,
+} from './diary.dto.js';
 import { DiaryRepository, type DiaryEntryChanges, type DiaryEntryRow } from './diary.repository.js';
 import { diaryEntryResource, type DiaryEntryResource, type DiaryNames } from './diary.resource.js';
 import { requireDiaryDate } from './diary.rules.js';
@@ -105,6 +111,36 @@ export class DiaryService {
       return { rows: found, names: await this.namesOf(tx, found, parent) };
     });
     return ApiResult.list(await this.resources(rows, names), null);
+  }
+
+  /**
+   * DIA-05: the active subjects the caller may write the diary for in a section, so the form offers only what DIA-02
+   * accepts. An Owner or Admin gets every subject of the Society; a teacher at their home Institution gets every
+   * subject when they lead the section (a class teacher covers for a colleague on leave), else the subjects they
+   * teach in it. The order is that of DIA-02: 404 for a section out of reach, 422 `REFERENCE_INACTIVE` for a closed
+   * one, 422 `CURRENT_YEAR_REQUIRED`, 403 `NOT_ASSIGNED` for a teacher away from their home Institution or who
+   * neither leads nor teaches in the section.
+   */
+  async writableSubjects(
+    principal: Principal,
+    query: ListDiarySubjectsQueryDto,
+  ): Promise<ApiResult<SubjectResource[]>> {
+    const context = await this.sections.contextOf(principal, query.sectionId);
+    const rows = await this.database.transaction(context.tenant, async (tx) => {
+      await this.sections.requireActive(tx, query.sectionId, 'sectionId');
+      const yearId = await this.years.requireCurrentId(tx, context.institutionId);
+      if (principal.roleCode !== RoleCode.TeacherStaff) {
+        return this.subjects.active(tx, context.societyId);
+      }
+      const own = await this.staff.ownRecord(tx, principal.personId);
+      const ids =
+        own?.homeInstitutionId === context.institutionId
+          ? await this.diary.diarySubjectIds(tx, own.staffMemberId, yearId, query.sectionId)
+          : [];
+      if (ids?.length === 0) throw AppException.forbidden(ErrorCode.NOT_ASSIGNED);
+      return this.subjects.active(tx, context.societyId, ids ?? undefined);
+    });
+    return ApiResult.list(await this.subjects.resources(rows), null);
   }
 
   /**

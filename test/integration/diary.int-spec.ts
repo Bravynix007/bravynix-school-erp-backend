@@ -113,6 +113,18 @@ describe('DIA-01 to DIA-04 the diary (API design 10.14a)', () => {
     expect(res.status).toBe(200);
     return res.body.data as unknown as Entry[];
   };
+  /** DIA-05: the subjects a caller may write for in a section. */
+  const listing = (sectionId: string, token = owner.token) =>
+    api('get', `/v1/diary-subjects?sectionId=${sectionId}`, token);
+  const subjectsOf = async (sectionId: string, token = owner.token) => {
+    const res = await listing(sectionId, token);
+    expect([res.status, res.body.code]).toEqual([200, 'OK']);
+    return (res.body.data as unknown as { id: string; name: string }[]).map((s) => s.name);
+  };
+  const refusalOf = async (sectionId: string, token: string) => {
+    const res = await listing(sectionId, token);
+    return [res.status, res.body.code];
+  };
   const change = (id: string, body: object, token = owner.token) =>
     api('patch', `/v1/diary-entries/${id}`, token, body);
   const remove = (id: string, token = owner.token) =>
@@ -375,6 +387,71 @@ describe('DIA-01 to DIA-04 the diary (API design 10.14a)', () => {
       ]);
       const other = await api('get', '/v1/notifications?tab=1&limit=50', parentB);
       expect(other.body.data).toEqual([]);
+    });
+  });
+
+  describe('DIA-05 the subjects a caller may write for', () => {
+    it('gives the Owner and the Admin every active subject of the Society, by name, shown as SUB-01 shows them', async () => {
+      expect(await subjectsOf(sectionA)).toEqual(['English', 'Mathematics']);
+      expect(await subjectsOf(sectionA, firstAdmin.token)).toEqual(['English', 'Mathematics']);
+      expect((await listing(sectionA)).body.data[0]).toMatchObject({
+        id: english,
+        name: 'English',
+        status: 1,
+        version: 1,
+      });
+    });
+
+    it('gives a teacher the subjects they teach in the section, and the class teacher every subject of theirs', async () => {
+      expect(await subjectsOf(sectionA, annaToken)).toEqual(['Mathematics']);
+      // Ben teaches nothing, but leads section B: he covers for a colleague on leave (decision 6).
+      expect(await subjectsOf(sectionB, benToken)).toEqual(['English', 'Mathematics']);
+    });
+
+    it('is 403 NOT_ASSIGNED for a section a teacher neither leads nor teaches, and for a teacher with no assignment', async () => {
+      expect(await refusalOf(sectionB, annaToken)).toEqual([403, 'NOT_ASSIGNED']);
+      expect(await refusalOf(sectionA, benToken)).toEqual([403, 'NOT_ASSIGNED']);
+      expect(await refusalOf(sectionA, caraToken)).toEqual([403, 'NOT_ASSIGNED']);
+    });
+
+    it('offers exactly what DIA-02 accepts, for each teacher, section and subject', async () => {
+      for (const [token, sectionId] of [
+        [annaToken, sectionA],
+        [annaToken, sectionB],
+        [benToken, sectionA],
+        [benToken, sectionB],
+        [caraToken, sectionA],
+      ] as const) {
+        const res = await listing(sectionId, token);
+        const offered = res.status === 200 ? (res.body.data as unknown as { id: string }[]) : [];
+        for (const subjectId of [maths, english]) {
+          const written = await add({ sectionId, subjectId }, token);
+          expect(written.status === 201, `${sectionId} ${subjectId}`).toBe(
+            offered.some((subject) => subject.id === subjectId),
+          );
+        }
+      }
+    });
+
+    it('leaves out a closed subject, and is 422 REFERENCE_INACTIVE for a closed section', async () => {
+      succeeded(await api('delete', `/v1/subjects/${english}`, owner.token), 200, 'subject');
+      expect(await subjectsOf(sectionB, benToken)).toEqual(['Mathematics']);
+      succeeded(await api('delete', `/v1/sections/${sectionC}`, owner.token), 200, 'section');
+      const closed = await listing(sectionC);
+      expect([closed.status, closed.body.code]).toEqual([422, 'REFERENCE_INACTIVE']);
+      expect(fieldsOf(closed)).toEqual({ sectionId: 'REFERENCE_INACTIVE' });
+    });
+
+    it('is 404 beyond the caller’s reach, 403 for a parent, and 400 for a section that is missing or not an ID', async () => {
+      for (const token of [secondAdmin.token, otherOwner.token, devToken]) {
+        expect(await refusalOf(sectionA, token)).toEqual([404, 'NOT_FOUND']);
+      }
+      expect((await refusalOf(sectionA, parentA))[0]).toBe(403);
+      for (const query of ['', 'sectionId=nope']) {
+        const res = await api('get', `/v1/diary-subjects?${query}`, owner.token);
+        expect(res.status).toBe(400);
+        expect(fieldsOf(res)).toHaveProperty('sectionId');
+      }
     });
   });
 
