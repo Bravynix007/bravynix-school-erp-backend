@@ -127,3 +127,25 @@ describe('AssignmentRepository', () => {
     });
   });
 });
+
+describe('AssignmentRepository.mayWriteDiary', () => {
+  it('asks whether the teacher leads the section or teaches the subject in it, in the year, by rows that still hold', async () => {
+    const { tx, queries } = sqlRecorder();
+    await new AssignmentRepository()
+      .mayWriteDiary(tx, 'staff-1', 'year-1', 'section-1', 'subject-1')
+      .catch(() => undefined);
+    const { sql, parameters } = queries[0]!;
+    expect(sql).toContain('from class_teacher_assignments');
+    expect(sql).toContain('from teaching_assignments');
+    expect(sql.match(/ended_at is null/g)).toHaveLength(2);
+    expect(parameters).toEqual([
+      'staff-1',
+      'year-1',
+      'section-1',
+      'staff-1',
+      'year-1',
+      'section-1',
+      'subject-1',
+    ]);
+  });
+});

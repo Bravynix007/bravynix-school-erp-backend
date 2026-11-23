@@ -11,6 +11,7 @@ import type {
 import type {
   AcademicYearDirectory,
   SectionDirectory,
+  StaffDirectory,
   SubjectDirectory,
   TeachingStaff,
 } from '../academic-setup/index.js';
@@ -162,13 +163,13 @@ function build(current: TimetableEntryRow | null = entry()) {
     .mockResolvedValue(new Set(['section-1']));
   const requireTeacher = vi.fn<TimetableStaff['requireTeacher']>().mockResolvedValue();
   const ownRecord = vi
-    .fn<TimetableStaff['ownRecord']>()
+    .fn<StaffDirectory['ownRecord']>()
     .mockResolvedValue({ staffMemberId: 'staff-1', homeInstitutionId: 'inst-1' });
   const teacherNames = vi
-    .fn<TimetableStaff['names']>()
+    .fn<StaffDirectory['names']>()
     .mockResolvedValue(new Map([['staff-1', 'Asha Rao']]));
   const parentNames = vi
-    .fn<TimetableStaff['namesForParent']>()
+    .fn<StaffDirectory['namesForParent']>()
     .mockResolvedValue(new Map([['staff-1', 'Asha Rao']]));
   const childContextOf = vi.fn<ChildContexts['of']>().mockResolvedValue(childContext);
   const currentSectionId = vi
@@ -194,12 +195,8 @@ function build(current: TimetableEntryRow | null = entry()) {
     } as unknown as SectionDirectory,
     { requireActive: requireSubject, names: subjectNames } as unknown as SubjectDirectory,
     { ownSectionIds } as unknown as TeachingStaff,
-    {
-      requireTeacher,
-      ownRecord,
-      names: teacherNames,
-      namesForParent: parentNames,
-    } as unknown as TimetableStaff,
+    { ownRecord, names: teacherNames, namesForParent: parentNames } as unknown as StaffDirectory,
+    { requireTeacher } as unknown as TimetableStaff,
     { currentSectionId } as unknown as TimetableChildren,
     { of: childContextOf } as unknown as ChildContexts,
     {

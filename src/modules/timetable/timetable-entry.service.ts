@@ -26,6 +26,7 @@ import {
 import {
   AcademicYearDirectory,
   SectionDirectory,
+  StaffDirectory,
   SubjectDirectory,
   TeachingStaff,
 } from '../academic-setup/index.js';
@@ -101,7 +102,8 @@ export class TimetableEntryService {
     private readonly sections: SectionDirectory,
     private readonly subjects: SubjectDirectory,
     private readonly teaching: TeachingStaff,
-    private readonly staff: TimetableStaff,
+    private readonly staff: StaffDirectory,
+    private readonly teachers: TimetableStaff,
     private readonly children: TimetableChildren,
     private readonly childContexts: ChildContexts,
     private readonly people: PersonDirectory,
@@ -347,7 +349,7 @@ export class TimetableEntryService {
     );
     if (entry.subjectId !== null && entry.staffMemberId !== null) {
       await this.subjects.requireActive(tx, [entry.subjectId], 'subjectId');
-      await this.staff.requireTeacher(tx, entry.staffMemberId, institutionId, entry.subjectId);
+      await this.teachers.requireTeacher(tx, entry.staffMemberId, institutionId, entry.subjectId);
     }
     if (
       await this.entries.taken(

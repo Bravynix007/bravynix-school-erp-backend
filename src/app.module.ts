@@ -9,6 +9,7 @@ import { AppConfig, AppConfigModule } from './config/app-config.js';
 import { HealthModule } from './health/health.module.js';
 import { AcademicSetupModule } from './modules/academic-setup/index.js';
 import { AttendanceModule } from './modules/attendance/index.js';
+import { DiaryModule } from './modules/diary/index.js';
 import { EventsModule } from './modules/events/index.js';
 import { TimetableModule } from './modules/timetable/index.js';
 import { PeopleModule } from './modules/people/index.js';
@@ -93,6 +94,7 @@ import { TenancyModule } from './platform/tenancy/tenancy.module.js';
     EventsModule,
     TimetableModule,
     AttendanceModule,
+    DiaryModule,
     PlatformBillingModule,
     PlatformDashboardModule,
   ],

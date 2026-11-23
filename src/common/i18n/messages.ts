@@ -112,8 +112,9 @@ const en: Catalogue = {
   ATTENDANCE_TAKEN:
     'The student’s section already has attendance taken from that date; date the move after it, or void that day’s attendance first',
   ROSTER_CHANGED: 'The students of this section changed; reload the list and mark again',
-  DATE_IN_FUTURE: 'Attendance cannot be marked for a day that has not come',
+  DATE_IN_FUTURE: 'This date has not come yet',
   DATE_OUTSIDE_CURRENT_YEAR: 'This date is outside the current academic year',
+  DATE_TOO_OLD: 'This date is more than 7 days back',
   DATE_IS_HOLIDAY: 'This date is a holiday for this class',
   OUTSIDE_ACADEMIC_YEAR: 'This month or day is outside every academic year of the school',
   STUDENT_NOT_IN_SECTION: 'A student marked is not in this section on this date',

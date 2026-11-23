@@ -8,9 +8,12 @@ import type { IdempotencyService } from '../../platform/idempotency/index.js';
 import type { PersonDirectory } from '../../platform/identity/index.js';
 import type { Notifications } from '../../platform/notifications/index.js';
 import type { InstitutionContext, ScopeService } from '../../platform/tenancy/index.js';
-import type { AcademicYearDirectory, SectionDirectory } from '../academic-setup/index.js';
+import type {
+  AcademicYearDirectory,
+  SectionDirectory,
+  StaffDirectory,
+} from '../academic-setup/index.js';
 import type { HolidayCalendar } from '../events/index.js';
-import type { AttendanceStaff } from './attendance-staff.js';
 import type { AttendanceRepository, SessionRow } from './attendance.repository.js';
 import { AttendanceService } from './attendance.service.js';
 import type { RosterStudent, SectionRoster } from './section-roster.js';
@@ -166,7 +169,7 @@ function build() {
   };
   const staff = {
     ownRecord: vi
-      .fn<AttendanceStaff['ownRecord']>()
+      .fn<StaffDirectory['ownRecord']>()
       .mockResolvedValue({ staffMemberId: 'staff-1', homeInstitutionId: 'inst-1' }),
   };
   const people = {
@@ -195,7 +198,7 @@ function build() {
     sections as unknown as SectionDirectory,
     holidays as unknown as HolidayCalendar,
     roster as unknown as SectionRoster,
-    staff as unknown as AttendanceStaff,
+    staff as unknown as StaffDirectory,
     people as unknown as PersonDirectory,
     idempotency as unknown as IdempotencyService,
     notifications as unknown as Notifications,
