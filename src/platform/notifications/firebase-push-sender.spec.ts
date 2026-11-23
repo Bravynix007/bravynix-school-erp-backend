@@ -1,22 +1,11 @@
-import { generateKeyPairSync } from 'node:crypto';
 import { Logger } from '@nestjs/common';
 import { decodeJwt } from 'jose';
 import { FixedClock } from '../../common/time/clock.js';
-import type { FirebaseCredentials } from './firebase-credentials.js';
+import { demoServiceAccount, placeholderPem } from '../../../test/support/firebase-key.js';
 import { FirebasePushSender, type FirebaseTransport } from './firebase-push-sender.js';
 import type { PushMessage } from './push-sender.js';
 
-// Built in pieces so secret scanners do not take the placeholder for a key.
-const brokenPem = `-----BEGIN ${'PRIVATE'} KEY-----\nnot a key\n-----END ${'PRIVATE'} KEY-----`;
-
-const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
-const credentials: FirebaseCredentials = {
-  type: 'service_account',
-  project_id: 'demo-project',
-  client_email: 'push@demo-project.iam.gserviceaccount.com',
-  private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
-  token_uri: 'https://auth.example.test/token',
-};
+const credentials = demoServiceAccount({ token_uri: 'https://auth.example.test/token' });
 
 const message = (token: string): PushMessage => ({
   token,
@@ -196,7 +185,7 @@ describe('FirebasePushSender', () => {
     const broken = new FirebasePushSender(
       {
         ...credentials,
-        private_key: brokenPem,
+        private_key: placeholderPem('not a key'),
       },
       new FixedClock(),
     );

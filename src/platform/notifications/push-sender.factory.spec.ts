@@ -1,22 +1,13 @@
-import { generateKeyPairSync } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FixedClock } from '../../common/time/clock.js';
+import { demoServiceAccount, placeholderPem } from '../../../test/support/firebase-key.js';
 import { FirebasePushSender } from './firebase-push-sender.js';
 import { LogPushSender } from './push-sender.js';
 import { createPushSender } from './push-sender.factory.js';
 
-// Built in pieces so secret scanners do not take the placeholder for a key.
-const brokenPem = `-----BEGIN ${'PRIVATE'} KEY-----\nnot a key\n-----END ${'PRIVATE'} KEY-----`;
-
-const keyText = (privateKey = generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey) =>
-  JSON.stringify({
-    type: 'service_account',
-    project_id: 'demo-project',
-    client_email: 'push@demo-project.iam.gserviceaccount.com',
-    private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
-  });
+const keyText = () => JSON.stringify(demoServiceAccount());
 
 describe('createPushSender', () => {
   const clock = new FixedClock();
@@ -53,10 +44,7 @@ describe('createPushSender', () => {
   });
 
   it('stops the start for a key that cannot be used, without echoing it', async () => {
-    const broken = JSON.stringify({
-      ...JSON.parse(keyText()),
-      private_key: brokenPem,
-    });
+    const broken = JSON.stringify(demoServiceAccount({ private_key: placeholderPem('not a key') }));
     const attempt = createPushSender(
       { PUSH_DRIVER: 'firebase', FIREBASE_SERVICE_ACCOUNT_JSON: broken },
       clock,

@@ -1,14 +1,7 @@
+import { demoServiceAccount } from '../../../test/support/firebase-key.js';
 import { parseFirebaseCredentials } from './firebase-credentials.js';
 
-// Built in pieces so secret scanners do not take the placeholder for a key.
-const PEM_EDGE = (edge: 'BEGIN' | 'END') => `-----${edge} ${'PRIVATE'} KEY-----`;
-
-const key = {
-  type: 'service_account',
-  project_id: 'demo-project',
-  client_email: 'push@demo-project.iam.gserviceaccount.com',
-  private_key: `${PEM_EDGE('BEGIN')}\nSECRET-BODY\n${PEM_EDGE('END')}\n`,
-};
+const { token_uri: _googleAddress, ...key } = demoServiceAccount();
 
 describe('parseFirebaseCredentials', () => {
   it('reads a service-account key and fills in the Google token address', () => {
