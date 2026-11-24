@@ -144,6 +144,38 @@ describe('parseEnv', () => {
     expect(() => parseEnv({ ...base, STORAGE_DRIVER: 's3' })).toThrow(/STORAGE_DRIVER/);
   });
 
+  it('refuses an r2.dev public address when deployed, unless the public images have a bucket of their own', () => {
+    const deployed = {
+      ...base,
+      EMAIL_DRIVER: 'smtp',
+      PUSH_DRIVER: 'firebase',
+      FIREBASE_SERVICE_ACCOUNT_FILE: '/run/secrets/firebase.json',
+      SMTP_URL: 'smtp://x',
+      EMAIL_FROM: 'BravyNix <no-reply@bravynix.in>',
+      OTP_HMAC_SECRET: 'x'.repeat(32),
+      JWT_SIGNING_KEY: 'pem',
+      MFA_ENCRYPTION_KEY: Buffer.alloc(32, 1).toString('base64'),
+    };
+    const open = { ...R2, R2_PUBLIC_BASE_URL: 'https://pub-abc123.r2.dev' };
+    for (const NODE_ENV of ['staging', 'production']) {
+      const deployedR2 = { ...deployed, NODE_ENV, STORAGE_DRIVER: 'r2', ...open };
+      expect(() => parseEnv(deployedR2)).toThrow(/R2_PUBLIC_BASE_URL/);
+      expect(() => parseEnv({ ...deployedR2, R2_PUBLIC_BUCKET: 'bucket' })).toThrow(
+        /R2_PUBLIC_BASE_URL/,
+      );
+      expect(parseEnv({ ...deployedR2, R2_PUBLIC_BUCKET: 'images' }).R2_PUBLIC_BUCKET).toBe(
+        'images',
+      );
+      expect(
+        parseEnv({ ...deployedR2, R2_PUBLIC_BASE_URL: 'https://files.bravynix.in' }),
+      ).toBeTruthy();
+    }
+    // Development may use it: the shared dev bucket holds made-up data only.
+    expect(parseEnv({ ...base, STORAGE_DRIVER: 'r2', ...open }).R2_PUBLIC_BASE_URL).toBe(
+      'https://pub-abc123.r2.dev',
+    );
+  });
+
   it('needs both Aadhaar keys, 32 bytes each and different, in every environment', () => {
     const { IDENTITY_ENCRYPTION_KEY, IDENTITY_HMAC_KEY: _hmac, ...bare } = base;
     expect(() => parseEnv(bare)).toThrow(/IDENTITY_ENCRYPTION_KEY/);

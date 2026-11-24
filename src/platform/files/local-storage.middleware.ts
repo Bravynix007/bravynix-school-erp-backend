@@ -1,7 +1,7 @@
 import Busboy from 'busboy';
 import type { NextFunction, Request, Response } from 'express';
 import { sniffImageType } from './file-signature.js';
-import { PUBLIC_KEY_PREFIX } from './object-storage.js';
+import { PUBLIC_KEY_PREFIX, attachmentDisposition } from './object-storage.js';
 import {
   LOCAL_STORAGE_PATH,
   type LocalGrant,
@@ -13,12 +13,6 @@ const ADDRESS = new RegExp(`^/v1${LOCAL_STORAGE_PATH}/([^/?#]+)$`);
 const PUBLIC_ADDRESS = new RegExp(
   `^/v1${LOCAL_STORAGE_PATH}/(${PUBLIC_KEY_PREFIX.slice(0, -1)}(?:/[\\w-]+)+)$`,
 );
-
-/** An `Content-Disposition` filename that cannot break out of its quotes. */
-function attachment(name: string | null): string {
-  const safe = (name ?? 'file').replace(/[^\w.\- ]/g, '_');
-  return `attachment; filename="${safe}"`;
-}
 
 function refuse(response: Response, status: number, code: string): void {
   response.status(status).json({ code });
@@ -98,7 +92,6 @@ function servePublic(
       .status(200)
       .set({
         'Content-Type': type,
-        'X-Content-Type-Options': 'nosniff',
         'Cache-Control': 'public, max-age=31536000, immutable',
       })
       .end(bytes);
@@ -129,7 +122,7 @@ export function localStorageMiddleware(storage: LocalObjectStorage) {
           .status(200)
           .set({
             'Content-Type': grant.contentType,
-            'Content-Disposition': attachment(grant.fileName),
+            'Content-Disposition': attachmentDisposition(grant.fileName),
             'Cache-Control': 'private, no-store',
           })
           .end(bytes);

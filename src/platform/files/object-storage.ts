@@ -13,6 +13,11 @@ export interface UploadTicket {
 /** Objects of the public bucket have keys that begin with this; every other key is in the private bucket (DDD 16.1). */
 export const PUBLIC_KEY_PREFIX = 'public/';
 
+/** A `Content-Disposition` that downloads the object under [name], which cannot break out of its quotes. */
+export function attachmentDisposition(name: string | null): string {
+  return `attachment; filename="${(name ?? 'file').replace(/[^\w.\- ]/g, '_')}"`;
+}
+
 export const isPublicKey = (key: string): boolean => key.startsWith(PUBLIC_KEY_PREFIX);
 
 /** A short-lived link that downloads one object (API design 15.3). */
