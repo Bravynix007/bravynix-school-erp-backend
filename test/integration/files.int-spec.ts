@@ -381,6 +381,15 @@ describe('FIL-01 to FIL-03 files (API design 15)', () => {
       expect(data.expiresAt).toBeNull();
     });
 
+    it('never serves bytes that are no image, even before they are confirmed', async () => {
+      const given = await ticket(eventImage);
+      expect((await send(given, PDF, 'image/jpeg')).status).toBe(204);
+      const key = (await row(given.fileId)).object_key;
+      expect((await request(t.app.getHttpServer()).get(`/v1/local-storage/${key}`)).status).toBe(
+        404,
+      );
+    });
+
     it('is not for a PDF, nor for an Admin of another Institution', async () => {
       expect((await ask({ ...eventImage, contentType: 'application/pdf' })).status).toBe(415);
       expect((await ask(eventImage, institutionAdmin.token, second)).status).toBe(404);

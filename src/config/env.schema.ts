@@ -139,8 +139,8 @@ export const envSchema = z
     R2_PUBLIC_BUCKET: z.string().min(1).optional(),
     R2_PUBLIC_BASE_URL: z.url().optional(),
     /**
-     * Where the local file store keeps uploads (development, tests and the demo; API design 15). The real store
-     * (R2) arrives with the deployment slice.
+     * Where the local file store keeps uploads (development, tests and the demo; API design 15). Deployed
+     * environments use R2 instead.
      */
     STORAGE_LOCAL_DIR: z.string().min(1).default('.local-storage'),
     /** The address clients reach this API at, for the upload and download links the local store hands out. */
@@ -194,6 +194,23 @@ export const envSchema = z
           });
         }
       }
+    }
+    // An r2.dev address serves every object of its bucket. With one bucket for all files that would include the
+    // private ones, so a deployed API may use it only for a bucket of public images alone; the custom domain that
+    // serves `/public/` only is the other way (API design 15.1).
+    if (
+      deployed &&
+      env.STORAGE_DRIVER === 'r2' &&
+      env.R2_PUBLIC_BASE_URL &&
+      new URL(env.R2_PUBLIC_BASE_URL).hostname.endsWith('.r2.dev') &&
+      (!env.R2_PUBLIC_BUCKET || env.R2_PUBLIC_BUCKET === env.R2_BUCKET)
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['R2_PUBLIC_BASE_URL'],
+        message:
+          'may not be an r2.dev address in staging and production while the public images share a bucket with private files: use a custom domain that serves only /public/, or name a separate R2_PUBLIC_BUCKET',
+      });
     }
     if (deployed && env.PUSH_DRIVER !== 'firebase') {
       ctx.addIssue({

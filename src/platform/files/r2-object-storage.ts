@@ -9,6 +9,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type { Clock } from '../../common/time/clock.js';
 import { MAX_FILE_BYTES } from './file-purposes.js';
 import {
+  attachmentDisposition,
   isPublicKey,
   ObjectStorage,
   type DownloadTicket,
@@ -84,7 +85,6 @@ export class R2ObjectStorage extends ObjectStorage {
       {
         expiresIn: this.secondsUntil(input.expiresAt),
         signableHeaders: new Set(Object.keys(headers)),
-        unhoistableHeaders: new Set(['if-none-match']),
       },
     );
     return { url, method: 'PUT', fields: {}, headers, expiresAt: input.expiresAt };
@@ -96,14 +96,13 @@ export class R2ObjectStorage extends ObjectStorage {
     fileName: string | null;
     expiresAt: Date;
   }): Promise<DownloadTicket> {
-    const safe = (input.fileName ?? 'file').replace(/[^\w.\- ]/g, '_');
     const url = await getSignedUrl(
       this.client,
       new GetObjectCommand({
         Bucket: this.bucketOf(input.key),
         Key: input.key,
         ResponseContentType: input.contentType,
-        ResponseContentDisposition: `attachment; filename="${safe}"`,
+        ResponseContentDisposition: attachmentDisposition(input.fileName),
       }),
       { expiresIn: this.secondsUntil(input.expiresAt) },
     );

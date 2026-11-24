@@ -31,6 +31,15 @@ describe('createLocalStorage', () => {
   });
 });
 
+const upload = (settings: Parameters<typeof createObjectStorage>[0], key: string) =>
+  createObjectStorage(settings, new FixedClock()).createUpload({
+    key,
+    contentType: 'image/png',
+    sizeBytes: 5,
+    maxBytes: 10,
+    expiresAt: new Date(new FixedClock().now().getTime() + 60_000),
+  });
+
 describe('createObjectStorage', () => {
   const clock = new FixedClock();
 
@@ -42,6 +51,13 @@ describe('createObjectStorage', () => {
     const storage = createObjectStorage(r2, clock);
     expect(storage).toBeInstanceOf(R2ObjectStorage);
     expect(storage.publicUrl('public/a')).toBe('https://cdn.example.test/public/a');
+  });
+
+  it('keeps public images in R2_PUBLIC_BUCKET when one is named, and in the one bucket when not', async () => {
+    const named = { ...r2, R2_PUBLIC_BUCKET: 'images' };
+    expect((await upload(named, 'public/a')).url).toContain('/images/public/a');
+    expect((await upload(named, 's/i/3/a')).url).toContain('/bucket/s/i/3/a');
+    expect((await upload(r2, 'public/a')).url).toContain('/bucket/public/a');
   });
 
   it('refuses r2 without its settings, so a deploy cannot quietly use the server disk', () => {
