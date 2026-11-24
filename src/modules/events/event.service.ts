@@ -343,6 +343,15 @@ export class EventService {
         return { row: current, classIds, images: await this.imagesOf(tx, [current]) };
       }
       if (institutionId !== null) await this.scopes.requireInstitution(principal, institutionId);
+      // An Institution's event shows a picture of that Institution (as EVT-02 and EVT-04 ask): a move to another one asks
+      // for the picture to be changed or removed first (400 INVALID_VALUE on institutionId).
+      if (
+        institutionId !== null &&
+        current.image_file_id !== null &&
+        (await this.files.institutionOf(tx, current.image_file_id)) !== institutionId
+      ) {
+        throw AppException.validation([fieldError('institutionId', FieldErrorCode.INVALID_VALUE)]);
+      }
       const updated = await this.events.update(tx, id, {
         scope: body.scope,
         institution_id: institutionId,

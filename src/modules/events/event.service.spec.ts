@@ -147,6 +147,7 @@ function build(current: EventRow | null = event(), currentClasses: string[] = []
     .mockResolvedValue(['parent-1', 'staff-2']);
   const childTenant = vi.fn<ChildContexts['of']>().mockResolvedValue(childContext);
   const requireUploaded = vi.fn<FileDirectory['requireUploaded']>().mockResolvedValue();
+  const institutionOf = vi.fn<FileDirectory['institutionOf']>().mockResolvedValue('inst-1');
   const publicUrls = vi
     .fn<FileDirectory['publicUrls']>()
     .mockResolvedValue(new Map([['file-1', 'https://files.test/public/file-1']]));
@@ -163,7 +164,7 @@ function build(current: EventRow | null = event(), currentClasses: string[] = []
     { notify } as unknown as Notifications,
     { staffUserIds, parentUserIds } as unknown as EventPeople,
     { of: childTenant } as unknown as ChildContexts,
-    { requireUploaded, publicUrls } as unknown as FileDirectory,
+    { requireUploaded, publicUrls, institutionOf } as unknown as FileDirectory,
   );
   return {
     service,
@@ -185,6 +186,7 @@ function build(current: EventRow | null = event(), currentClasses: string[] = []
     childTenant,
     requireUploaded,
     publicUrls,
+    institutionOf,
   };
 }
 
@@ -641,6 +643,19 @@ describe('EventService.changeScope', () => {
       expect.anything(),
       expect.objectContaining({ action: 'event.scope_changed' }),
     );
+  });
+
+  it('refuses a move to an Institution other than the one its picture was uploaded for, and takes the Society', async () => {
+    const { service, update, institutionOf } = build(event({ image_file_id: 'file-1' }));
+    institutionOf.mockResolvedValue('inst-1');
+    expect(
+      await refusal(
+        service.changeScope(owner, 'event-1', { version: 1, scope: 2, institutionId: 'inst-2' }),
+      ),
+    ).toEqual({ status: 400, code: 'VALIDATION_FAILED', fields: ['institutionId'] });
+    expect(update).not.toHaveBeenCalled();
+    await service.changeScope(owner, 'event-1', { version: 1, scope: 1 });
+    expect(update).toHaveBeenCalledOnce();
   });
 
   it('moves a Society event to an Institution the Owner reaches', async () => {

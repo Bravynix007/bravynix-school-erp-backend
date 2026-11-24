@@ -78,6 +78,11 @@ export class FileDirectory {
     }
   }
 
+  /** The Institution a file was uploaded for, or null when the file cannot be seen. */
+  async institutionOf(tx: Tx, fileId: string): Promise<string | null> {
+    return (await this.files.find(tx, fileId))?.institution_id ?? null;
+  }
+
   /**
    * The address of each Ready public file among `ids` (an event image), by ID, for anyone the record is shown to: the
    * row of a public file is readable across the Society, and its object needs no signature (DDD 16.1). A file that is

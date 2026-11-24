@@ -261,6 +261,13 @@ describe('FileDirectory.publicUrls', () => {
   });
 });
 
+describe('FileDirectory.institutionOf', () => {
+  it('names the Institution a file was uploaded for, and null for a file that cannot be seen', async () => {
+    await expect(directory(ready()).institutionOf(tx, 'file-1')).resolves.toBe('institution-1');
+    await expect(directory(undefined).institutionOf(tx, 'file-1')).resolves.toBeNull();
+  });
+});
+
 describe('FileDirectory.contentOf', () => {
   it('reads what a Ready file holds', async () => {
     const content = await directory(ready({ object_key: 'k' })).contentOf(tx, 'file-1');

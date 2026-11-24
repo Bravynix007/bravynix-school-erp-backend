@@ -656,6 +656,20 @@ describe('EVT-01 to EVT-06 events and holidays (PRD 7.12, API design 10.26)', ()
       ]);
     });
 
+    it('keeps a picture with the Institution it was uploaded for: a move to another asks for the picture to change first', async () => {
+      const fileId = await eventImage(owner.token, first);
+      const made = await added({ imageFileId: fileId });
+      const elsewhere = await move(made.id, { version: 1, scope: 2, institutionId: second });
+      expect(elsewhere.status).toBe(400);
+      expect(fieldsOf(elsewhere)).toEqual({ institutionId: 'INVALID_VALUE' });
+      // The Society takes any Institution's picture, and back to its own Institution is as it was.
+      const society = await move(made.id, { version: 1, scope: 1 });
+      expect(society.status).toBe(200);
+      expect((society.body.data as unknown as Event).image?.id).toBe(fileId);
+      const home = await move(made.id, { version: 2, scope: 2, institutionId: first });
+      expect(home.status).toBe(200);
+    });
+
     it('is for the Owner only, and needs the Institution exactly when the scope is 2', async () => {
       const made = await added();
       expect((await move(made.id, { version: 1, scope: 1 }, firstAdmin.token)).status).toBe(403);
