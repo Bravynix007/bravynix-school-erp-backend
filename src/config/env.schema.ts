@@ -202,6 +202,8 @@ export const envSchema = z
       deployed &&
       env.STORAGE_DRIVER === 'r2' &&
       env.R2_PUBLIC_BASE_URL &&
+      // A value that is no address is refused on its own by `z.url()`; it has no host to read here.
+      URL.canParse(env.R2_PUBLIC_BASE_URL) &&
       new URL(env.R2_PUBLIC_BASE_URL).hostname.endsWith('.r2.dev') &&
       (!env.R2_PUBLIC_BUCKET || env.R2_PUBLIC_BUCKET === env.R2_BUCKET)
     ) {
