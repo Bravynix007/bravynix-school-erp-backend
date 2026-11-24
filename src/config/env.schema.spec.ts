@@ -170,6 +170,16 @@ describe('parseEnv', () => {
         parseEnv({ ...deployedR2, R2_PUBLIC_BASE_URL: 'https://files.bravynix.in' }),
       ).toBeTruthy();
     }
+    // A value that is no address names its own setting, not a bare TypeError.
+    expect(() =>
+      parseEnv({
+        ...deployed,
+        NODE_ENV: 'production',
+        STORAGE_DRIVER: 'r2',
+        ...R2,
+        R2_PUBLIC_BASE_URL: 'not a url',
+      }),
+    ).toThrow(/R2_PUBLIC_BASE_URL/);
     // Development may use it: the shared dev bucket holds made-up data only.
     expect(parseEnv({ ...base, STORAGE_DRIVER: 'r2', ...open }).R2_PUBLIC_BASE_URL).toBe(
       'https://pub-abc123.r2.dev',
