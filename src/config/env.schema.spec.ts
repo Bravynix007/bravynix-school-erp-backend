@@ -10,6 +10,13 @@ const base = {
 };
 const SECRET = 'unit-test-secret-not-used-anywhere-0123456789';
 const KEY = Buffer.alloc(32, 9).toString('base64');
+const R2 = {
+  R2_ENDPOINT: 'https://acct.r2.cloudflarestorage.com',
+  R2_ACCESS_KEY_ID: 'access-key',
+  R2_SECRET_ACCESS_KEY: 'secret-key',
+  R2_BUCKET: 'bucket',
+  R2_PUBLIC_BASE_URL: 'https://cdn.example.test',
+};
 
 describe('parseEnv', () => {
   it('applies defaults', () => {
@@ -39,6 +46,16 @@ describe('parseEnv', () => {
       /EMAIL_DRIVER/,
     );
     expect(() => parseEnv({ ...base, NODE_ENV: 'staging' })).toThrow(/EMAIL_DRIVER/);
+  });
+
+  it('needs every R2 setting for the r2 store, and names the one that is missing', () => {
+    expect(parseEnv({ ...base, STORAGE_DRIVER: 'r2', ...R2 }).R2_BUCKET).toBe('bucket');
+    for (const name of Object.keys(R2)) {
+      expect(() => parseEnv({ ...base, STORAGE_DRIVER: 'r2', ...R2, [name]: undefined })).toThrow(
+        new RegExp(name),
+      );
+    }
+    expect(parseEnv({ ...base }).R2_BUCKET).toBeUndefined();
   });
 
   it('sends no push by default, and needs the service account for the firebase driver', () => {
@@ -86,6 +103,7 @@ describe('parseEnv', () => {
       PUSH_DRIVER: 'firebase',
       FIREBASE_SERVICE_ACCOUNT_FILE: '/run/secrets/firebase.json',
       STORAGE_DRIVER: 'r2',
+      ...R2,
       SMTP_URL: 'smtp://x',
       OTP_HMAC_SECRET: SECRET,
       JWT_SIGNING_KEY: 'pem',
@@ -119,9 +137,53 @@ describe('parseEnv', () => {
       expect(() => parseEnv({ ...deployed, NODE_ENV, STORAGE_DRIVER: 'local' })).toThrow(
         /STORAGE_DRIVER/,
       );
-      expect(parseEnv({ ...deployed, NODE_ENV, STORAGE_DRIVER: 'r2' }).STORAGE_DRIVER).toBe('r2');
+      expect(parseEnv({ ...deployed, NODE_ENV, STORAGE_DRIVER: 'r2', ...R2 }).STORAGE_DRIVER).toBe(
+        'r2',
+      );
     }
     expect(() => parseEnv({ ...base, STORAGE_DRIVER: 's3' })).toThrow(/STORAGE_DRIVER/);
+  });
+
+  it('refuses an r2.dev public address when deployed, unless the public images have a bucket of their own', () => {
+    const deployed = {
+      ...base,
+      EMAIL_DRIVER: 'smtp',
+      PUSH_DRIVER: 'firebase',
+      FIREBASE_SERVICE_ACCOUNT_FILE: '/run/secrets/firebase.json',
+      SMTP_URL: 'smtp://x',
+      EMAIL_FROM: 'BravyNix <no-reply@bravynix.in>',
+      OTP_HMAC_SECRET: 'x'.repeat(32),
+      JWT_SIGNING_KEY: 'pem',
+      MFA_ENCRYPTION_KEY: Buffer.alloc(32, 1).toString('base64'),
+    };
+    const open = { ...R2, R2_PUBLIC_BASE_URL: 'https://pub-abc123.r2.dev' };
+    for (const NODE_ENV of ['staging', 'production']) {
+      const deployedR2 = { ...deployed, NODE_ENV, STORAGE_DRIVER: 'r2', ...open };
+      expect(() => parseEnv(deployedR2)).toThrow(/R2_PUBLIC_BASE_URL/);
+      expect(() => parseEnv({ ...deployedR2, R2_PUBLIC_BUCKET: 'bucket' })).toThrow(
+        /R2_PUBLIC_BASE_URL/,
+      );
+      expect(parseEnv({ ...deployedR2, R2_PUBLIC_BUCKET: 'images' }).R2_PUBLIC_BUCKET).toBe(
+        'images',
+      );
+      expect(
+        parseEnv({ ...deployedR2, R2_PUBLIC_BASE_URL: 'https://files.bravynix.in' }),
+      ).toBeTruthy();
+    }
+    // A value that is no address names its own setting, not a bare TypeError.
+    expect(() =>
+      parseEnv({
+        ...deployed,
+        NODE_ENV: 'production',
+        STORAGE_DRIVER: 'r2',
+        ...R2,
+        R2_PUBLIC_BASE_URL: 'not a url',
+      }),
+    ).toThrow(/R2_PUBLIC_BASE_URL/);
+    // Development may use it: the shared dev bucket holds made-up data only.
+    expect(parseEnv({ ...base, STORAGE_DRIVER: 'r2', ...open }).R2_PUBLIC_BASE_URL).toBe(
+      'https://pub-abc123.r2.dev',
+    );
   });
 
   it('needs both Aadhaar keys, 32 bytes each and different, in every environment', () => {
@@ -143,6 +205,8 @@ describe('parseEnv', () => {
         PUSH_DRIVER: 'firebase',
         FIREBASE_SERVICE_ACCOUNT_FILE: '/run/secrets/firebase.json',
         STORAGE_DRIVER: 'r2',
+        ...R2,
+        ...R2,
         SMTP_URL: 'smtp://x',
         EMAIL_FROM: 'BravyNix <no-reply@bravynix.in>',
         OTP_HMAC_SECRET: SECRET,
@@ -179,6 +243,7 @@ describe('parseEnv', () => {
       PUSH_DRIVER: 'firebase',
       FIREBASE_SERVICE_ACCOUNT_FILE: '/run/secrets/firebase.json',
       STORAGE_DRIVER: 'r2',
+      ...R2,
       SMTP_URL: 'smtp://x',
       EMAIL_FROM: 'BravyNix <no-reply@bravynix.in>',
       OTP_HMAC_SECRET: SECRET,
@@ -221,6 +286,7 @@ describe('parseEnv', () => {
       PUSH_DRIVER: 'firebase',
       FIREBASE_SERVICE_ACCOUNT_FILE: '/run/secrets/firebase.json',
       STORAGE_DRIVER: 'r2',
+      ...R2,
       SMTP_URL: 'smtp://x',
       EMAIL_FROM: 'BravyNix <no-reply@bravynix.in>',
     };

@@ -1,4 +1,4 @@
-import { matchesDeclaredType } from './file-signature.js';
+import { matchesDeclaredType, sniffImageType } from './file-signature.js';
 
 const bytes = (...values: number[]) => Buffer.from(values);
 const ascii = (text: string) => Buffer.from(text, 'latin1');
@@ -38,5 +38,13 @@ describe('matchesDeclaredType', () => {
 
   it('refuses a type nobody declared', () => {
     expect(matchesDeclaredType(ascii('<script>'), 'text/html')).toBe(false);
+  });
+
+  it('names the image type the first bytes show, and nothing for a file that is no image', () => {
+    expect(sniffImageType(bytes(0xff, 0xd8, 0xff, 0xe0))).toBe('image/jpeg');
+    expect(sniffImageType(bytes(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a))).toBe('image/png');
+    expect(sniffImageType(ascii('RIFF....WEBPVP8 '))).toBe('image/webp');
+    expect(sniffImageType(ascii('%PDF-1.7'))).toBeNull();
+    expect(sniffImageType(ascii('<script>alert(1)</script>'))).toBeNull();
   });
 });

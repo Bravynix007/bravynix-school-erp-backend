@@ -26,11 +26,14 @@ describe('LocalObjectStorage', () => {
       const ticket = await storage.createUpload({
         key: 'a/b/3/photo',
         contentType: 'image/png',
+        sizeBytes: 50,
         maxBytes: 100,
         expiresAt: later(300),
       });
       expect(ticket.url).toMatch(/^http:\/\/api\.test\/v1\/local-storage\/[\w-]+\.[\w-]+$/);
+      expect(ticket.method).toBe('POST');
       expect(ticket.fields).toEqual({});
+      expect(ticket.headers).toEqual({});
       expect(ticket.expiresAt).toEqual(later(300));
       expect(storage.verify(tokenOf(ticket.url))).toMatchObject({
         op: 'put',
@@ -44,6 +47,7 @@ describe('LocalObjectStorage', () => {
       const ticket = await storage.createUpload({
         key: 'k',
         contentType: 'image/png',
+        sizeBytes: 50,
         maxBytes: 1,
         expiresAt: later(300),
       });
@@ -55,6 +59,7 @@ describe('LocalObjectStorage', () => {
       const ticket = await storage.createUpload({
         key: 'k',
         contentType: 'image/png',
+        sizeBytes: 50,
         maxBytes: 1,
         expiresAt: later(300),
       });
@@ -75,6 +80,7 @@ describe('LocalObjectStorage', () => {
       const ticket = await storage.createUpload({
         key: 'k',
         contentType: 'image/png',
+        sizeBytes: 50,
         maxBytes: 1,
         expiresAt: later(300),
       });
@@ -102,10 +108,22 @@ describe('LocalObjectStorage', () => {
       expect(await storage.write('s/i/3/once', Buffer.from('again'))).toBe(true);
     });
 
+    it('reading a key that is a folder of keys, or runs through an object, is null', async () => {
+      await storage.write('s/i/3/one', Buffer.from('bytes'));
+      expect(await storage.read('s/i')).toBeNull();
+      expect(await storage.read('s/i/3/one/more')).toBeNull();
+    });
+
     it('is never kept outside the storage directory', async () => {
       await expect(storage.write('../escape', Buffer.from('x'))).rejects.toThrow(/outside/);
       await expect(storage.read('../../etc/passwd')).rejects.toThrow(/outside/);
     });
+  });
+
+  it('a public object has an address of this API that needs no signature', () => {
+    expect(storage.publicUrl('public/s/i/10/abc')).toBe(
+      'http://api.test/v1/local-storage/public/s/i/10/abc',
+    );
   });
 
   it('a download link carries the object, its fixed type and the name offered', async () => {

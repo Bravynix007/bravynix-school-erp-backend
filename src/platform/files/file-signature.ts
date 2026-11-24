@@ -32,3 +32,11 @@ export function matchesDeclaredType(bytes: Buffer, contentType: string): boolean
       return false;
   }
 }
+
+/** The image type the first bytes show, or null: a public object is served as what it is, never as what it claims. */
+export function sniffImageType(bytes: Buffer): 'image/jpeg' | 'image/png' | 'image/webp' | null {
+  for (const type of ['image/jpeg', 'image/png', 'image/webp'] as const) {
+    if (matchesDeclaredType(bytes, type)) return type;
+  }
+  return null;
+}

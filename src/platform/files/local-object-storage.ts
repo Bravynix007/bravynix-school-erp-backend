@@ -39,6 +39,7 @@ export class LocalObjectStorage extends ObjectStorage {
   createUpload(input: {
     key: string;
     contentType: string;
+    sizeBytes: number;
     maxBytes: number;
     expiresAt: Date;
   }): Promise<UploadTicket> {
@@ -50,7 +51,13 @@ export class LocalObjectStorage extends ObjectStorage {
       fileName: null,
       expires: input.expiresAt.getTime(),
     });
-    return Promise.resolve({ url: this.addressOf(token), fields: {}, expiresAt: input.expiresAt });
+    return Promise.resolve({
+      url: this.addressOf(token),
+      method: 'POST',
+      fields: {},
+      headers: {},
+      expiresAt: input.expiresAt,
+    });
   }
 
   createDownload(input: {
@@ -74,7 +81,9 @@ export class LocalObjectStorage extends ObjectStorage {
     try {
       return await readFile(this.pathOf(key));
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      // A key that names a folder of keys (`public/<society>`), or runs through a file, is no object either.
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT' || code === 'EISDIR' || code === 'ENOTDIR') return null;
       throw error;
     }
   }
@@ -97,6 +106,11 @@ export class LocalObjectStorage extends ObjectStorage {
       if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
       throw error;
     }
+  }
+
+  /** A public object is read at an address of this API, with no signature: that is what makes it public. */
+  publicUrl(key: string): string {
+    return `${this.baseUrl}/v1${LOCAL_STORAGE_PATH}/${key}`;
   }
 
   /** The grant a signed address carries, or null when it is forged, malformed or expired. */
