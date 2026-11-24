@@ -18,6 +18,7 @@ import {
   type TenantContext,
   type Tx,
 } from '../../platform/database/index.js';
+import { FileDirectory, FilePurpose } from '../../platform/files/index.js';
 import { PersonDirectory } from '../../platform/identity/index.js';
 import { MAX_RECEIVERS, Notifications } from '../../platform/notifications/index.js';
 import { MasterReferences } from '../../platform/masters/index.js';
@@ -47,6 +48,7 @@ import {
   checkScope,
   mayEdit,
   parentsAreTold,
+  pictureAfter,
   visibleAudiences,
   type EventFields,
 } from './event.rules.js';
@@ -61,6 +63,8 @@ function auditView(row: EventRow, classIds: readonly string[]): AuditValues {
     endDate: row.end_date,
     durationLabel: row.duration_label,
     audience: row.audience,
+    presetImageCode: row.preset_image_code,
+    imageFileId: row.image_file_id,
     isHoliday: row.is_holiday,
     holidayType: row.holiday_type,
     holidayForStudents: row.holiday_for_students,
@@ -91,6 +95,7 @@ export class EventService {
     private readonly notifications: Notifications,
     private readonly audience: EventPeople,
     private readonly children: ChildContexts,
+    private readonly files: FileDirectory,
   ) {}
 
   /**
@@ -101,7 +106,7 @@ export class EventService {
   async list(principal: Principal, query: ListEventsQueryDto): Promise<ApiResult<EventResource[]>> {
     const parent = principal.roleCode === RoleCode.StudentParent;
     const tenant = await this.readTenant(principal, query);
-    const { rows, classes } = await this.database.transaction(tenant, async (tx) => {
+    const { rows, classes, images } = await this.database.transaction(tenant, async (tx) => {
       const span = await this.span(tx, query);
       const found = await this.events.list(tx, {
         ...span,
@@ -115,11 +120,14 @@ export class EventService {
           tx,
           found.map((row) => row.id),
         ),
+        images: await this.imagesOf(tx, found),
       };
     });
     const people = await this.people.describe(authorIdsOf(rows));
     return ApiResult.list(
-      rows.map((row) => eventResource(row, classes.get(row.id) ?? [], principal.roleCode, people)),
+      rows.map((row) =>
+        eventResource(row, classes.get(row.id) ?? [], principal.roleCode, people, images),
+      ),
       null,
     );
   }
@@ -144,9 +152,13 @@ export class EventService {
       ) {
         throw AppException.notFound();
       }
-      return { row, classIds: (await this.events.classesOf(tx, [id])).get(id) ?? [] };
+      return {
+        row,
+        classIds: (await this.events.classesOf(tx, [id])).get(id) ?? [],
+        images: await this.imagesOf(tx, [row]),
+      };
     });
-    return this.resource(principal, found.row, found.classIds);
+    return this.resource(principal, found.row, found.classIds, found.images);
   }
 
   /**
@@ -163,6 +175,13 @@ export class EventService {
     const { tenant, societyId } = await this.homeOf(principal, body.institutionId);
     const created = await this.database.transaction(tenant, async (tx) => {
       await this.requireClasses(tx, fields.holidayPredefinedClassIds, []);
+      const picture = pictureAfter(
+        { presetImageCode: null, imageFileId: null },
+        { presetImageCode: body.presetImageCode, imageFileId: body.imageFileId },
+      );
+      if (picture.imageFileId !== null) {
+        await this.requireImage(tx, principal, picture.imageFileId, body.institutionId ?? null);
+      }
       const row = await this.events.insert(tx, {
         id: newId(),
         society_id: societyId,
@@ -175,7 +194,8 @@ export class EventService {
         end_date: body.endDate,
         duration_label: body.durationLabel,
         audience: body.audience ?? 1,
-        preset_image_code: body.presetImageCode ?? null,
+        preset_image_code: picture.presetImageCode,
+        image_file_id: picture.imageFileId,
         is_holiday: fields.isHoliday,
         holiday_type: fields.holidayType,
         holiday_for_students: fields.holidayForStudents,
@@ -187,9 +207,13 @@ export class EventService {
         after: auditView(row, fields.holidayPredefinedClassIds),
       });
       await this.announce(tx, principal, row, fields.holidayPredefinedClassIds, 'created');
-      return { row, classIds: fields.holidayPredefinedClassIds.toSorted() };
+      return {
+        row,
+        classIds: fields.holidayPredefinedClassIds.toSorted(),
+        images: await this.imagesOf(tx, [row]),
+      };
     });
-    return this.resource(principal, created.row, created.classIds);
+    return this.resource(principal, created.row, created.classIds, created.images);
   }
 
   /**
@@ -223,6 +247,10 @@ export class EventService {
           : (body.holidayPredefinedClassIds ?? currentClasses),
       };
       checkEventFields(fields);
+      const picture = pictureAfter(
+        { presetImageCode: current.preset_image_code, imageFileId: current.image_file_id },
+        { presetImageCode: body.presetImageCode, imageFileId: body.imageFileId },
+      );
       const wanted: EventChanges = {
         title: body.title,
         description: body.description,
@@ -231,7 +259,8 @@ export class EventService {
         end_date: body.endDate,
         duration_label: body.durationLabel,
         audience: body.audience,
-        preset_image_code: body.presetImageCode,
+        preset_image_code: picture.presetImageCode,
+        image_file_id: picture.imageFileId,
         is_holiday: fields.isHoliday,
         holiday_type: fields.holidayType,
         holiday_for_students: fields.holidayForStudents,
@@ -240,9 +269,16 @@ export class EventService {
       const changes = changedColumns(current, wanted);
       const classesChanged = !sameSet(fields.holidayPredefinedClassIds, currentClasses);
       if (Object.keys(changes).length === 0 && !classesChanged) {
-        return { row: current, classIds: currentClasses };
+        return {
+          row: current,
+          classIds: currentClasses,
+          images: await this.imagesOf(tx, [current]),
+        };
       }
       await this.requireClasses(tx, fields.holidayPredefinedClassIds, currentClasses);
+      if (picture.imageFileId !== null && picture.imageFileId !== current.image_file_id) {
+        await this.requireImage(tx, principal, picture.imageFileId, current.institution_id);
+      }
       const updated = await this.events.update(tx, id, {
         ...changes,
         ...updateStamp(principal.personId),
@@ -260,9 +296,13 @@ export class EventService {
         after: auditView(updated, fields.holidayPredefinedClassIds),
       });
       await this.announce(tx, principal, updated, fields.holidayPredefinedClassIds, 'updated');
-      return { row: updated, classIds: fields.holidayPredefinedClassIds.toSorted() };
+      return {
+        row: updated,
+        classIds: fields.holidayPredefinedClassIds.toSorted(),
+        images: await this.imagesOf(tx, [updated]),
+      };
     });
-    return this.resource(principal, result.row, result.classIds);
+    return this.resource(principal, result.row, result.classIds, result.images);
   }
 
   /** EVT-05: deactivates; nothing is deleted. 404 when already deactivated. */
@@ -300,9 +340,18 @@ export class EventService {
       const classIds = (await this.events.classesOf(tx, [id])).get(id) ?? [];
       const institutionId = body.scope === EventScope.Institution ? body.institutionId! : null;
       if (body.scope === current.scope && institutionId === current.institution_id) {
-        return { row: current, classIds };
+        return { row: current, classIds, images: await this.imagesOf(tx, [current]) };
       }
       if (institutionId !== null) await this.scopes.requireInstitution(principal, institutionId);
+      // An Institution's event shows a picture of that Institution (as EVT-02 and EVT-04 ask): a move to another one asks
+      // for the picture to be changed or removed first (400 INVALID_VALUE on institutionId).
+      if (
+        institutionId !== null &&
+        current.image_file_id !== null &&
+        (await this.files.institutionOf(tx, current.image_file_id)) !== institutionId
+      ) {
+        throw AppException.validation([fieldError('institutionId', FieldErrorCode.INVALID_VALUE)]);
+      }
       const updated = await this.events.update(tx, id, {
         scope: body.scope,
         institution_id: institutionId,
@@ -312,9 +361,9 @@ export class EventService {
         before: auditView(current, classIds),
         after: auditView(updated, classIds),
       });
-      return { row: updated, classIds };
+      return { row: updated, classIds, images: await this.imagesOf(tx, [updated]) };
     });
-    return this.resource(principal, result.row, result.classIds);
+    return this.resource(principal, result.row, result.classIds, result.images);
   }
 
   /**
@@ -446,12 +495,41 @@ export class EventService {
     principal: Principal,
     row: EventRow,
     classIds: readonly string[],
+    images: ReadonlyMap<string, string>,
   ): Promise<EventResource> {
     return eventResource(
       row,
       classIds,
       principal.roleCode,
       await this.people.describe(authorIdsOf([row])),
+      images,
+    );
+  }
+
+  /** The public addresses of the pictures the events carry, by file ID. */
+  private imagesOf(tx: Tx, rows: readonly EventRow[]): Promise<Map<string, string>> {
+    return this.files.publicUrls(
+      tx,
+      rows.flatMap((row) => (row.image_file_id === null ? [] : [row.image_file_id])),
+    );
+  }
+
+  /**
+   * A new picture must be a Ready Event image the caller uploaded (404 when it is not theirs to see, 400
+   * `INVALID_VALUE` for another kind of file, 422 `FILE_NOT_READY`). An Institution's event takes one uploaded for that
+   * Institution; the Society's takes one of any Institution the caller reached.
+   */
+  private requireImage(
+    tx: Tx,
+    principal: Principal,
+    fileId: string,
+    institutionId: string | null,
+  ): Promise<void> {
+    return this.files.requireUploaded(
+      tx,
+      fileId,
+      { purpose: FilePurpose.EventImage, institutionId, uploadedBy: principal.personId },
+      'imageFileId',
     );
   }
 

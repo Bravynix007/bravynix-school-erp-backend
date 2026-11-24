@@ -8,6 +8,7 @@ import {
   inboxTabOf,
   mayEdit,
   parentsAreTold,
+  pictureAfter,
   visibleAudiences,
   type EventFields,
 } from './event.rules.js';
@@ -196,5 +197,40 @@ describe('inboxTabOf', () => {
     expect(inboxTabOf(1)).toBe(2);
     expect(inboxTabOf(3)).toBe(3);
     expect(inboxTabOf(2)).toBe(4);
+  });
+});
+
+describe('pictureAfter', () => {
+  const preset = { presetImageCode: 'exam', imageFileId: null };
+  const upload = { presetImageCode: null, imageFileId: 'file-1' };
+
+  it('keeps what is left out', () => {
+    expect(pictureAfter(preset, {})).toEqual(preset);
+    expect(pictureAfter(upload, {})).toEqual(upload);
+  });
+
+  it('drops the other kind of picture when one is named, and clears with null', () => {
+    expect(pictureAfter(preset, { imageFileId: 'file-2' })).toEqual({
+      presetImageCode: null,
+      imageFileId: 'file-2',
+    });
+    expect(pictureAfter(upload, { presetImageCode: 'festival' })).toEqual({
+      presetImageCode: 'festival',
+      imageFileId: null,
+    });
+    expect(pictureAfter(upload, { imageFileId: null })).toEqual({
+      presetImageCode: null,
+      imageFileId: null,
+    });
+    expect(pictureAfter(preset, { presetImageCode: null, imageFileId: 'file-2' })).toEqual({
+      presetImageCode: null,
+      imageFileId: 'file-2',
+    });
+  });
+
+  it('is 400 on the preset when both are named', () => {
+    expect(() => pictureAfter(preset, { presetImageCode: 'exam', imageFileId: 'file-2' })).toThrow(
+      AppException,
+    );
   });
 });

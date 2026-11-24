@@ -20,6 +20,8 @@ export interface EventResource extends AuthorStamps {
   scope: number;
   institutionId: string | null;
   presetImageCode: string | null;
+  /** The event's own picture: its ID and its public address; null with none (or one that is gone). */
+  image: { id: string; url: string } | null;
   isHoliday: boolean;
   holidayType: number | null;
   holidayForStudents: boolean;
@@ -37,7 +39,9 @@ export function eventResource(
   classIds: readonly string[],
   role: RoleCode | null,
   people: ReadonlyMap<string, AuthorRef>,
+  imageUrls: ReadonlyMap<string, string>,
 ): EventResource {
+  const imageUrl = row.image_file_id === null ? undefined : imageUrls.get(row.image_file_id);
   return {
     id: row.id,
     title: row.title,
@@ -50,6 +54,7 @@ export function eventResource(
     scope: row.scope,
     institutionId: row.institution_id,
     presetImageCode: row.preset_image_code,
+    image: row.image_file_id !== null && imageUrl ? { id: row.image_file_id, url: imageUrl } : null,
     isHoliday: row.is_holiday,
     holidayType: row.holiday_type,
     holidayForStudents: row.holiday_for_students,

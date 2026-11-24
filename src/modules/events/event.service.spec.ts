@@ -2,6 +2,7 @@ import type { Principal } from '../../common/auth/access-token-verifier.js';
 import { AppException } from '../../common/http/app-exception.js';
 import type { AuditService } from '../../platform/audit/index.js';
 import type { DatabaseService, TenantContext, Tx } from '../../platform/database/index.js';
+import type { FileDirectory } from '../../platform/files/index.js';
 import type { PersonDirectory } from '../../platform/identity/index.js';
 import type { MasterReferences } from '../../platform/masters/index.js';
 import type {
@@ -72,6 +73,7 @@ const event = (overrides: Partial<EventRow> = {}): EventRow => ({
   duration_label: '3 Days',
   audience: 1,
   preset_image_code: null,
+  image_file_id: null,
   is_holiday: false,
   holiday_type: null,
   holiday_for_students: false,
@@ -144,6 +146,11 @@ function build(current: EventRow | null = event(), currentClasses: string[] = []
     .fn<EventPeople['parentUserIds']>()
     .mockResolvedValue(['parent-1', 'staff-2']);
   const childTenant = vi.fn<ChildContexts['of']>().mockResolvedValue(childContext);
+  const requireUploaded = vi.fn<FileDirectory['requireUploaded']>().mockResolvedValue();
+  const institutionOf = vi.fn<FileDirectory['institutionOf']>().mockResolvedValue('inst-1');
+  const publicUrls = vi
+    .fn<FileDirectory['publicUrls']>()
+    .mockResolvedValue(new Map([['file-1', 'https://files.test/public/file-1']]));
   const service = new EventService(
     { transaction } as unknown as DatabaseService,
     { list, find, insert, update, classesOf, replaceClasses } as unknown as EventRepository,
@@ -157,6 +164,7 @@ function build(current: EventRow | null = event(), currentClasses: string[] = []
     { notify } as unknown as Notifications,
     { staffUserIds, parentUserIds } as unknown as EventPeople,
     { of: childTenant } as unknown as ChildContexts,
+    { requireUploaded, publicUrls, institutionOf } as unknown as FileDirectory,
   );
   return {
     service,
@@ -176,6 +184,9 @@ function build(current: EventRow | null = event(), currentClasses: string[] = []
     staffUserIds,
     parentUserIds,
     childTenant,
+    requireUploaded,
+    publicUrls,
+    institutionOf,
   };
 }
 
@@ -364,6 +375,52 @@ describe('EventService.create', () => {
     expect(requireAllShown).not.toHaveBeenCalled();
     expect(replaceClasses).toHaveBeenCalledWith(expect.anything(), 'event-new', 'society-1', []);
   });
+  it('takes an uploaded picture for the Institution of the event, and shows its address', async () => {
+    const { service, insert, requireUploaded } = build();
+    const result = await service.create(owner, { ...created, imageFileId: 'file-1' });
+    expect(requireUploaded).toHaveBeenCalledWith(
+      expect.anything(),
+      'file-1',
+      { purpose: 10, institutionId: 'inst-1', uploadedBy: 'person-1' },
+      'imageFileId',
+    );
+    expect(insert).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ image_file_id: 'file-1', preset_image_code: null }),
+    );
+    expect(result.image).toEqual({ id: 'file-1', url: 'https://files.test/public/file-1' });
+  });
+
+  it('takes a picture of any Institution for a Society event, and refuses a preset with it', async () => {
+    const { service, requireUploaded, insert } = build();
+    await service.create(owner, {
+      title: 'Founders Day',
+      startDate: '2026-12-22',
+      endDate: '2026-12-22',
+      durationLabel: '1 Day',
+      scope: 1,
+      imageFileId: 'file-1',
+    });
+    expect(requireUploaded).toHaveBeenCalledWith(
+      expect.anything(),
+      'file-1',
+      expect.objectContaining({ institutionId: null }),
+      'imageFileId',
+    );
+    insert.mockClear();
+    expect(
+      await refusal(
+        service.create(owner, { ...created, imageFileId: 'file-1', presetImageCode: 'exam' }),
+      ),
+    ).toEqual({ status: 400, code: 'VALIDATION_FAILED', fields: ['presetImageCode'] });
+    expect(insert).not.toHaveBeenCalled();
+  });
+
+  it('does not look up a file for an event with no picture of its own', async () => {
+    const { service, requireUploaded } = build();
+    await service.create(owner, { ...created, presetImageCode: 'exam' });
+    expect(requireUploaded).not.toHaveBeenCalled();
+  });
 });
 
 describe('EventService.update', () => {
@@ -385,6 +442,54 @@ describe('EventService.update', () => {
       }),
     );
     expect(result.version).toBe(2);
+  });
+
+  it('puts an uploaded picture in place of the preset, checked as the Institution’s own', async () => {
+    const { service, update, requireUploaded } = build(event({ preset_image_code: 'exam' }));
+    const result = await service.update(owner, 'event-1', edit({ imageFileId: 'file-1' }));
+    expect(requireUploaded).toHaveBeenCalledWith(
+      expect.anything(),
+      'file-1',
+      { purpose: 10, institutionId: 'inst-1', uploadedBy: 'person-1' },
+      'imageFileId',
+    );
+    expect(update).toHaveBeenCalledWith(
+      expect.anything(),
+      'event-1',
+      expect.objectContaining({ image_file_id: 'file-1', preset_image_code: null }),
+    );
+    expect(result.image?.id).toBe('file-1');
+  });
+
+  it('does not check a picture the event already has, and clears it with null', async () => {
+    const { service, update, requireUploaded } = build(event({ image_file_id: 'file-1' }));
+    await service.update(
+      owner,
+      'event-1',
+      edit({ imageFileId: 'file-1', title: 'Annual Day 2026' }),
+    );
+    expect(requireUploaded).not.toHaveBeenCalled();
+    await service.update(owner, 'event-1', edit({ imageFileId: null }));
+    expect(update).toHaveBeenLastCalledWith(
+      expect.anything(),
+      'event-1',
+      expect.objectContaining({ image_file_id: null }),
+    );
+  });
+
+  it('puts a preset in place of the upload, and refuses both together', async () => {
+    const { service, update } = build(event({ image_file_id: 'file-1' }));
+    await service.update(owner, 'event-1', edit({ presetImageCode: 'exam' }));
+    expect(update).toHaveBeenCalledWith(
+      expect.anything(),
+      'event-1',
+      expect.objectContaining({ image_file_id: null, preset_image_code: 'exam' }),
+    );
+    expect(
+      await refusal(
+        service.update(owner, 'event-1', edit({ presetImageCode: 'exam', imageFileId: 'file-2' })),
+      ),
+    ).toEqual({ status: 400, code: 'VALIDATION_FAILED', fields: ['presetImageCode'] });
   });
 
   it('writes nothing for a request that changes nothing', async () => {
@@ -538,6 +643,19 @@ describe('EventService.changeScope', () => {
       expect.anything(),
       expect.objectContaining({ action: 'event.scope_changed' }),
     );
+  });
+
+  it('refuses a move to an Institution other than the one its picture was uploaded for, and takes the Society', async () => {
+    const { service, update, institutionOf } = build(event({ image_file_id: 'file-1' }));
+    institutionOf.mockResolvedValue('inst-1');
+    expect(
+      await refusal(
+        service.changeScope(owner, 'event-1', { version: 1, scope: 2, institutionId: 'inst-2' }),
+      ),
+    ).toEqual({ status: 400, code: 'VALIDATION_FAILED', fields: ['institutionId'] });
+    expect(update).not.toHaveBeenCalled();
+    await service.changeScope(owner, 'event-1', { version: 1, scope: 1 });
+    expect(update).toHaveBeenCalledOnce();
   });
 
   it('moves a Society event to an Institution the Owner reaches', async () => {

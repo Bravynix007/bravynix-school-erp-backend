@@ -1,4 +1,5 @@
 import { Kysely, PostgresDialect, sql } from 'kysely';
+import request from 'supertest';
 import { newId } from '../../src/common/ids/ids.js';
 import { DatabaseService } from '../../src/platform/database/index.js';
 import { createPool } from '../../src/platform/database/database.service.js';
@@ -31,6 +32,8 @@ interface Event {
   holidayForStudents: boolean;
   holidayForStaff: boolean;
   holidayPredefinedClassIds: string[];
+  presetImageCode: string | null;
+  image: { id: string; url: string } | null;
   canEdit: boolean;
   status: number;
   version: number;
@@ -85,6 +88,17 @@ describe('EVT-01 to EVT-06 events and holidays (PRD 7.12, API design 10.26)', ()
     expect(res.status).toBe(201);
     return res.body.data as unknown as Event;
   };
+
+  /** A Ready Event image of an Institution, uploaded by the token's person. */
+  const eventImage = (token: string, institutionId = first) =>
+    kit.readyFile(
+      token,
+      institutionId,
+      { purpose: 10, contentType: 'image/jpeg', fileName: 'poster.jpg' },
+      true,
+    );
+  const imageOf = async (id: string, token = owner.token) =>
+    ((await api('get', `/v1/events/${id}`, token)).body.data as unknown as Event).image;
 
   const list = async (query: string, token = owner.token) => {
     const res = await api('get', `/v1/events?${query}`, token);
@@ -497,6 +511,105 @@ describe('EVT-01 to EVT-06 events and holidays (PRD 7.12, API design 10.26)', ()
     });
   });
 
+  describe('the own picture of an event (EVT-02, EVT-04, DDD 16.1)', () => {
+    it('shows the picture with a public address that anyone can open, with the preset left empty', async () => {
+      const fileId = await eventImage(owner.token);
+      const event = await added({ imageFileId: fileId });
+      expect(event.presetImageCode).toBeNull();
+      expect(event.image).toEqual({
+        id: fileId,
+        url: expect.stringMatching(/\/public\//) as string,
+      });
+      expect(JSON.stringify(event)).not.toContain('object_key');
+      expect(await imageOf(event.id, teacherToken)).toEqual(event.image);
+      const read = await request(t.app.getHttpServer()).get(new URL(event.image!.url).pathname);
+      expect(read.status).toBe(200);
+      expect(read.headers['content-type']).toBe('image/jpeg');
+      expect((await list('from=2026-12-01&to=2026-12-31'))[0]!.image).toEqual(event.image);
+    });
+
+    it('lets an Admin use a picture they uploaded for their own Institution', async () => {
+      const fileId = await eventImage(firstAdmin.token);
+      expect((await added({ imageFileId: fileId }, firstAdmin.token)).image?.id).toBe(fileId);
+    });
+
+    it('takes a file that is the caller’s own Ready Event image of the event’s Institution, and says what is wrong with another', async () => {
+      const fieldOf = async (fields: object) => {
+        const res = await add(owner.token, fields);
+        return [res.status, fieldsOf(res).imageFileId ?? res.body.code];
+      };
+      const pdf = await kit.readyFile(owner.token, first);
+      expect(await fieldOf({ imageFileId: pdf })).toEqual([400, 'INVALID_VALUE']);
+      const theirs = await eventImage(firstAdmin.token);
+      expect(await fieldOf({ imageFileId: theirs })).toEqual([400, 'INVALID_VALUE']);
+      const secondOnes = await eventImage(owner.token, second);
+      expect(await fieldOf({ imageFileId: secondOnes })).toEqual([400, 'INVALID_VALUE']);
+      const pending = (
+        await api('post', '/v1/files/uploads', owner.token, {
+          purpose: 10,
+          institutionId: first,
+          contentType: 'image/jpeg',
+          sizeBytes: 64,
+          fileName: 'poster.jpg',
+        })
+      ).body.data as unknown as { fileId: string };
+      expect(await fieldOf({ imageFileId: pending.fileId })).toEqual([422, 'FILE_NOT_READY']);
+      expect(await fieldOf({ imageFileId: missing })).toEqual([404, 'NOT_FOUND']);
+      expect(await titles('from=2026-12-01&to=2026-12-31')).toEqual([]);
+    });
+
+    it('lets a Society event take a picture of any Institution the Owner uploaded for', async () => {
+      const fileId = await eventImage(owner.token, second);
+      const event = await added({ scope: 1, institutionId: undefined, imageFileId: fileId });
+      expect(event.image?.id).toBe(fileId);
+    });
+
+    it('is either a preset or an upload: naming both is 400, and naming one drops the other', async () => {
+      const fileId = await eventImage(owner.token);
+      const both = await add(owner.token, { imageFileId: fileId, presetImageCode: 'exam' });
+      expect(both.status).toBe(400);
+      expect(fieldsOf(both)).toEqual({ presetImageCode: 'FIELD_NOT_ALLOWED' });
+
+      const event = await added({ presetImageCode: 'exam' });
+      const withUpload = await edit(event.id, { version: 1, imageFileId: fileId });
+      expect(withUpload.status).toBe(200);
+      expect(withUpload.body.data).toMatchObject({ presetImageCode: null, image: { id: fileId } });
+      const backToPreset = await edit(event.id, { version: 2, presetImageCode: 'festival' });
+      expect(backToPreset.body.data).toMatchObject({ presetImageCode: 'festival', image: null });
+      expect((await edit(event.id, { version: 3, imageFileId: fileId })).status).toBe(200);
+      const cleared = await edit(event.id, { version: 4, imageFileId: null });
+      expect(cleared.body.data).toMatchObject({ presetImageCode: null, image: null });
+    });
+
+    it('does not check a picture the event already holds again, and writes nothing for the same one', async () => {
+      const fileId = await eventImage(owner.token);
+      const event = await added({ imageFileId: fileId });
+      // The Admin did not upload it, and may still change the event: only a new link is checked.
+      const renamed = await edit(event.id, { version: 1, title: 'New title' }, firstAdmin.token);
+      expect(renamed.status).toBe(200);
+      expect((renamed.body.data as unknown as Event).image?.id).toBe(fileId);
+      const same = await edit(event.id, { version: 2, imageFileId: fileId });
+      expect(same.status).toBe(200);
+      expect((same.body.data as unknown as Event).version).toBe(2);
+    });
+
+    it('keeps the file in the audit entry of the event', async () => {
+      const fileId = await eventImage(owner.token);
+      const event = await added({ imageFileId: fileId });
+      expect((await audit(event.id))[0]!.new_values).toMatchObject({ imageFileId: fileId });
+    });
+
+    it('refuses in the table itself an event with both kinds of picture, and a picture that is no file of the Society', async () => {
+      const fileId = await eventImage(owner.token);
+      await expect(
+        insertWith(sql`preset_image_code, image_file_id`, sql`${'exam'}, ${fileId}`),
+      ).rejects.toThrow(/ck_events_image/);
+      await expect(insertWith(sql`image_file_id`, sql`${missing}`)).rejects.toThrow(
+        /fk_events_image_file/,
+      );
+    });
+  });
+
   describe('EVT-05 deactivate', () => {
     it('deactivates for who may edit, once, and keeps the row', async () => {
       const mine = await added({ title: 'Mine' });
@@ -541,6 +654,20 @@ describe('EVT-01 to EVT-06 events and holidays (PRD 7.12, API design 10.26)', ()
         'event.scope_changed',
         'event.scope_changed',
       ]);
+    });
+
+    it('keeps a picture with the Institution it was uploaded for: a move to another asks for the picture to change first', async () => {
+      const fileId = await eventImage(owner.token, first);
+      const made = await added({ imageFileId: fileId });
+      const elsewhere = await move(made.id, { version: 1, scope: 2, institutionId: second });
+      expect(elsewhere.status).toBe(400);
+      expect(fieldsOf(elsewhere)).toEqual({ institutionId: 'INVALID_VALUE' });
+      // The Society takes any Institution's picture, and back to its own Institution is as it was.
+      const society = await move(made.id, { version: 1, scope: 1 });
+      expect(society.status).toBe(200);
+      expect((society.body.data as unknown as Event).image?.id).toBe(fileId);
+      const home = await move(made.id, { version: 2, scope: 2, institutionId: first });
+      expect(home.status).toBe(200);
     });
 
     it('is for the Owner only, and needs the Institution exactly when the scope is 2', async () => {

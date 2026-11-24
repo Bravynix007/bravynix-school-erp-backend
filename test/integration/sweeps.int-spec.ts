@@ -82,6 +82,7 @@ describe('worker sweeps', () => {
     return given.fileId;
   };
   const photo = () => readyFile(3, JPEG, 'image/jpeg');
+  const eventImage = () => readyFile(10, JPEG, 'image/jpeg');
 
   const file = async (id: string) =>
     (
@@ -301,6 +302,39 @@ describe('worker sweeps', () => {
       expect((await file(looseDocument)).file_status).toBe(4);
       expect((await file(heldPhoto)).file_status).toBe(2);
       expect((await file(heldDocument)).file_status).toBe(2);
+    });
+
+    it('gives up an event image no event holds, whether it was never used or was replaced, and keeps the one an event shows', async () => {
+      const held = await eventImage();
+      const replaced = await eventImage();
+      const unused = await eventImage();
+      const event = succeeded(
+        await api('post', '/v1/events', owner.token, {
+          title: 'Poster day',
+          startDate: '2026-12-22',
+          endDate: '2026-12-22',
+          durationLabel: '1 Day',
+          scope: 2,
+          institutionId,
+          imageFileId: replaced,
+        }),
+        201,
+        'event',
+      ).body.data as unknown as { id: string };
+      succeeded(
+        await api('patch', `/v1/events/${event.id}`, owner.token, {
+          version: 1,
+          imageFileId: held,
+        }),
+        200,
+        'event',
+      );
+      for (const id of [held, replaced, unused]) await age(id, 3);
+
+      await sweeps.sweep();
+      expect((await file(held)).file_status).toBe(2);
+      expect((await file(replaced)).file_status).toBe(4);
+      expect((await file(unused)).file_status).toBe(4);
     });
 
     it('waits the 24 hours: a file confirmed 23 hours ago stays, one confirmed 25 hours ago goes', async () => {

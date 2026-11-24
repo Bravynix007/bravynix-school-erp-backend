@@ -168,6 +168,35 @@ describe('FileDirectory.requireUploaded', () => {
   });
 });
 
+describe('FileDirectory.requireUploaded for a record of the whole Society', () => {
+  const society = {
+    purpose: FilePurpose.ImportCsv,
+    institutionId: null,
+    uploadedBy: 'person-1',
+  };
+
+  it('takes a file of any Institution, still of the purpose and uploaded by this person', async () => {
+    await expect(
+      directory(uploaded({ institution_id: 'institution-9' })).requireUploaded(
+        tx,
+        'file-1',
+        society,
+        'fileId',
+      ),
+    ).resolves.toBeUndefined();
+    expect(
+      await refusal(
+        directory(uploaded({ created_by: 'person-2' })).requireUploaded(
+          tx,
+          'file-1',
+          society,
+          'fileId',
+        ),
+      ),
+    ).toMatchObject({ status: 400 });
+  });
+});
+
 describe('FileDirectory.requireUploaded and a file whose time has come', () => {
   const upload = { ...want, purpose: FilePurpose.ImportCsv, uploadedBy: 'person-1' };
 
@@ -190,6 +219,52 @@ describe('FileDirectory.requireUploaded and a file whose time has come', () => {
         'fileId',
       ),
     ).resolves.toBeUndefined();
+  });
+});
+
+const publicFile = (changes: Partial<FileRow> = {}) =>
+  ready({ id: 'a', storage_bucket: 2, object_key: 'public/s/i/10/a', ...changes });
+
+describe('FileDirectory.publicUrls', () => {
+  const storage = { publicUrl: (key: string) => `https://files.test/${key}` } as ObjectStorage;
+  const urls = (rows: FileRow[]) =>
+    new FileDirectory(
+      { findMany: () => Promise.resolve(rows) } as unknown as FilesRepository,
+      storage,
+      clock,
+    ).publicUrls(
+      tx,
+      rows.map((row) => row.id),
+    );
+  it('gives the address of each Ready public file by its ID', async () => {
+    expect(
+      await urls([publicFile(), publicFile({ id: 'b', object_key: 'public/s/i/10/b' })]),
+    ).toEqual(
+      new Map([
+        ['a', 'https://files.test/public/s/i/10/a'],
+        ['b', 'https://files.test/public/s/i/10/b'],
+      ]),
+    );
+  });
+
+  it.each([
+    ['private', { storage_bucket: 1 }],
+    ['Pending', { file_status: 1 }],
+    ['Deleted', { file_status: 4 }],
+    ['past its delete_after', { delete_after: new Date('2026-11-16T04:30:00.000Z') }],
+  ])('gives no address for a file that is %s', async (_name, changes) => {
+    expect((await urls([publicFile(changes)])).size).toBe(0);
+  });
+
+  it('asks nothing of the store for no files', async () => {
+    expect((await urls([])).size).toBe(0);
+  });
+});
+
+describe('FileDirectory.institutionOf', () => {
+  it('names the Institution a file was uploaded for, and null for a file that cannot be seen', async () => {
+    await expect(directory(ready()).institutionOf(tx, 'file-1')).resolves.toBe('institution-1');
+    await expect(directory(undefined).institutionOf(tx, 'file-1')).resolves.toBeNull();
   });
 });
 
