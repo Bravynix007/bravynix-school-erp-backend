@@ -125,3 +125,22 @@ describe('StaffRepository.activeUserIds', () => {
     expect(queries[0]!.parameters).toEqual([1, 'institution-1', 'institution-1']);
   });
 });
+
+describe('StaffRepository.userIdsOf', () => {
+  const repository = new StaffRepository();
+
+  it('reads nothing for no staff members', async () => {
+    const { tx, queries } = recorder();
+    expect(await repository.userIdsOf(tx, [])).toEqual([]);
+    expect(queries).toHaveLength(0);
+  });
+
+  it('reads the people behind active staff records, each once', async () => {
+    const { tx, queries } = recorder();
+    await repository.userIdsOf(tx, ['staff-1', 'staff-2']);
+    expect(queries[0]!.sql).toMatch(
+      /^select distinct "user_id" from "staff_members" where "id" in \(\$1, \$2\) and "status" = \$3$/,
+    );
+    expect(queries[0]!.parameters).toEqual(['staff-1', 'staff-2', 1]);
+  });
+});

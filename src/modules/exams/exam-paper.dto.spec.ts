@@ -2,6 +2,7 @@ import { body, problems } from '../../../test/support/dto-validation.js';
 import {
   CreateExamPaperDto,
   ListExamPapersQueryDto,
+  ListMyExamPapersQueryDto,
   UpdateExamPaperDto,
 } from './exam-paper.dto.js';
 
@@ -118,5 +119,32 @@ describe('ListExamPapersQueryDto', () => {
       field: 'sectionId',
       code: 'INVALID_FORMAT',
     });
+  });
+});
+
+describe('ListMyExamPapersQueryDto', () => {
+  it('takes the Institution, a year, and whose papers', async () => {
+    expect(
+      await problems(body(ListMyExamPapersQueryDto, { institutionId: uuid, mine: 'true' })),
+    ).toEqual([]);
+    expect(
+      await problems(
+        body(ListMyExamPapersQueryDto, {
+          institutionId: uuid,
+          academicYearId: uuid,
+          staffMemberId: uuid,
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it.each([
+    [{}, 'institutionId', 'REQUIRED'],
+    [{ institutionId: 'x' }, 'institutionId', 'INVALID_FORMAT'],
+    [{ institutionId: uuid, mine: 'yes' }, 'mine', 'INVALID_TYPE'],
+    [{ institutionId: uuid, staffMemberId: 'x' }, 'staffMemberId', 'INVALID_FORMAT'],
+    [{ institutionId: uuid, academicYearId: 'x' }, 'academicYearId', 'INVALID_FORMAT'],
+  ])('refuses %j', async (value, field, code) => {
+    expect(await problems(body(ListMyExamPapersQueryDto, value))).toContainEqual({ field, code });
   });
 });

@@ -9,18 +9,24 @@ import { UuidParamPipe } from '../../common/http/uuid-param.pipe.js';
 import {
   CreateExamPaperDto,
   ListExamPapersQueryDto,
+  ListMyExamPapersQueryDto,
   UpdateExamPaperDto,
 } from './exam-paper.dto.js';
-import type { ExamPaperResource } from './exam-paper.resource.js';
+import type { ExamPaperResource, MyPaperResource } from './exam-paper.resource.js';
 import { ExamPaperService } from './exam-paper.service.js';
+import { DatesheetService } from './datesheet.service.js';
+import type { ExamResource } from './exam.resource.js';
 
 const WRITERS = [RoleCode.SocietyOwner, RoleCode.InstitutionAdmin];
 
-/** EXM-05 to EXM-08 (API design 9.8): the papers of an exam, its datesheet (PRD 7.11 step 2). */
+/** EXM-05 to EXM-10 (API design 9.8): the papers of an exam, its datesheet and a teacher's duties (PRD 7.11 step 2). */
 @ApiTags('Exams')
 @Controller()
 export class ExamPaperController {
-  constructor(private readonly papers: ExamPaperService) {}
+  constructor(
+    private readonly papers: ExamPaperService,
+    private readonly datesheets: DatesheetService,
+  ) {}
 
   @Policy({
     roles: [...WRITERS, RoleCode.TeacherStaff, RoleCode.StudentParent],
@@ -79,5 +85,33 @@ export class ExamPaperController {
     @Param('paperId', UuidParamPipe) paperId: string,
   ): Promise<{ id: string; status: 0 }> {
     return this.papers.deactivate(principal, paperId);
+  }
+
+  @Policy({
+    roles: WRITERS,
+    scope: 'institution',
+    operationId: 'EXM-09',
+    rule: 'Publishes an active exam’s datesheet: 422 DATESHEET_EMPTY without an active paper, 409 DATESHEET_PUBLISHED once it is out; from then on parents read their child’s section and the guardians of the papers’ sections and the staff on them are told; a later paper change tells them again',
+  })
+  @Post('exams/:examId/datesheet/publish')
+  publish(
+    @CurrentPrincipal() principal: Principal,
+    @Param('examId', UuidParamPipe) examId: string,
+  ): Promise<ExamResource> {
+    return this.datesheets.publish(principal, examId);
+  }
+
+  @Policy({
+    roles: [...WRITERS, RoleCode.TeacherStaff],
+    scope: 'institution',
+    operationId: 'EXM-10',
+    rule: 'The active papers of an Institution’s year (the current year when none is named) that a staff member marks or invigilates, in the order they are sat, shown with their exam and the duties: `mine=true` for the caller’s own staff record (404 without one) or `staffMemberId` (not both, 400); a teacher may name only themselves (403 NOT_ASSIGNED); papers show before the datesheet is published',
+  })
+  @Get('exam-papers')
+  mine(
+    @CurrentPrincipal() principal: Principal,
+    @Query() query: ListMyExamPapersQueryDto,
+  ): Promise<ApiResult<MyPaperResource[]>> {
+    return this.papers.mine(principal, query);
   }
 }

@@ -1,5 +1,6 @@
 import { sql, Kysely, PostgresDialect } from 'kysely';
 import { DatabaseService } from '../../src/platform/database/index.js';
+import { JobRunner } from '../../src/platform/jobs/index.js';
 import { createPool } from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
 import { writeIdentitySeed } from '../../src/seeds/identity-seed.js';
@@ -7,6 +8,7 @@ import { personaByKey } from '../../src/seeds/two-worlds.js';
 import { apiCaller } from '../support/api.js';
 import { superAdminToken } from '../support/admin-token.js';
 import { readAuditRows } from '../support/audit-rows.js';
+import { readJobs } from '../support/job-rows.js';
 import { FixtureModule } from '../support/fixture.module.js';
 import { clearLoginState } from '../support/login-state.js';
 import { PlatformFixtures, type SignedInPerson } from '../support/platform-fixtures.js';
@@ -52,7 +54,7 @@ const guardian = (email: string) => ({
   isEmergencyContact: true,
 });
 
-describe('EXM-05 to EXM-08 exam papers (API design 9.8, 12.6)', () => {
+describe('EXM-05 to EXM-10 exam papers and the datesheet (API design 9.8, 12.6)', () => {
   let ownerDb: Kysely<unknown>;
   let t: TestApp;
   let database: DatabaseService;
@@ -60,6 +62,7 @@ describe('EXM-05 to EXM-08 exam papers (API design 9.8, 12.6)', () => {
   let api: ReturnType<typeof apiCaller>;
   let kit: SchoolKit;
   let admin: string;
+  let runner: JobRunner;
 
   /** Society A: the first Institution has a year, an exam, two sections, two subjects and three staff. */
   let societyA: string;
@@ -116,6 +119,33 @@ describe('EXM-05 to EXM-08 exam papers (API design 9.8, 12.6)', () => {
   const removeExam = () => api('delete', `/v1/exams/${exam}`, owner.token);
   const moveTo = (fields: object, version = 1) =>
     api('patch', `/v1/exams/${exam}`, owner.token, { version, ...fields });
+  const publishIt = (token = owner.token, examId = exam) =>
+    api('post', `/v1/exams/${examId}/datesheet/publish`, token);
+  const drain = async () => {
+    while (await runner.runNext()) {
+      // the worker drains the queue
+    }
+  };
+  const inboxOf = async (token: string) =>
+    (await api('get', '/v1/notifications?tab=1&limit=50', token)).body.data as unknown as {
+      title: string;
+      body: string;
+      category: number;
+      studentId: string | null;
+      target: { type: number; id: string };
+    }[];
+  const noticeKeys = async () =>
+    (await readJobs(ownerDb, societyA, 'notify')).map(
+      (job) => (job.payload as { sourceKey: string }).sourceKey,
+    );
+  const myPapers = async (query: string, token = owner.token) => {
+    const res = await api('get', `/v1/exam-papers?${query}`, token);
+    expect([res.status, query]).toEqual([200, query]);
+    return res.body.data as unknown as (Paper & {
+      exam: { id: string; name: string };
+      duties: string[];
+    })[];
+  };
   const audit = (entityId: string) =>
     readAuditRows<{
       action: string;
@@ -166,6 +196,7 @@ describe('EXM-05 to EXM-08 exam papers (API design 9.8, 12.6)', () => {
     fixtures = new PlatformFixtures(t, ownerDb);
     api = apiCaller(t);
     kit = new SchoolKit(t, api);
+    runner = t.app.get(JobRunner);
   });
 
   afterAll(async () => {
@@ -832,6 +863,235 @@ describe('EXM-05 to EXM-08 exam papers (API design 9.8, 12.6)', () => {
       expect((await moveTo({ startDate: '2026-08-11' }, 2)).status).toBe(409);
       await remove(paper.id);
       expect((await moveTo({ startDate: '2026-08-11' }, 2)).status).toBe(200);
+    });
+  });
+
+  describe('EXM-09 publish the datesheet', () => {
+    it('publishes, audits, opens the papers to the child’s parent and tells the section’s parents and the staff on the papers', async () => {
+      const paper = await added({ subjectTeacherStaffMemberId: anna.id });
+      await added({ sectionId: sectionB, subjectId: english, invigilatorStaffMemberId: cara.id });
+      expect(await papers(`?studentId=${childId}`, parentToken)).toEqual([]);
+      const res = await publishIt(firstAdmin.token);
+      expect(res.status).toBe(200);
+      expect(res.body.data).toMatchObject({
+        id: exam,
+        datesheetPublishedAt: expect.any(String),
+        version: 2,
+      });
+      expect((await papers(`?studentId=${childId}`, parentToken)).map((p) => p.id)).toEqual([
+        paper.id,
+      ]);
+      const entries = await audit(exam);
+      expect(entries.at(-1)).toMatchObject({
+        action: 'exam.datesheet_published',
+        institution_id: first,
+        old_values: expect.objectContaining({ datesheet_published_at: null }),
+        new_values: expect.objectContaining({ datesheet_published_at: expect.any(String) }),
+      });
+      expect(await noticeKeys()).toContain(`datesheet:${exam}`);
+      await drain();
+      expect(await inboxOf(parentToken)).toEqual([
+        expect.objectContaining({
+          title: 'Exam datesheet published',
+          body: 'Unit Test 1: 10 Aug 2026 to 14 Aug 2026.',
+          category: 4,
+          studentId: childId,
+          target: expect.objectContaining({ type: 4, id: exam }),
+        }),
+      ]);
+      expect(await inboxOf(annaToken)).toEqual([
+        expect.objectContaining({ title: 'Exam datesheet published' }),
+      ]);
+      expect(await inboxOf(strangerToken)).toEqual([]);
+    });
+
+    it('does not tell a section that has no paper', async () => {
+      await added({ sectionId: sectionB });
+      succeeded(await publishIt(), 200, 'publish');
+      await drain();
+      expect(await inboxOf(parentToken)).toEqual([]);
+    });
+
+    it('needs a paper (422 DATESHEET_EMPTY) and is published once (409 DATESHEET_PUBLISHED)', async () => {
+      const empty = await publishIt();
+      expect([empty.status, empty.body.code]).toEqual([422, 'DATESHEET_EMPTY']);
+      const paper = await added();
+      await remove(paper.id);
+      expect((await publishIt()).body.code).toBe('DATESHEET_EMPTY');
+      await added();
+      succeeded(await publishIt(), 200, 'publish');
+      const again = await publishIt();
+      expect([again.status, again.body.code]).toEqual([409, 'DATESHEET_PUBLISHED']);
+      expect(
+        (await audit(exam)).filter((e) => e.action === 'exam.datesheet_published'),
+      ).toHaveLength(1);
+    });
+
+    it('lets only one of two publishes at once through', async () => {
+      await added();
+      const results = await Promise.all([publishIt(), publishIt(firstAdmin.token)]);
+      expect(results.map((r) => r.status).toSorted()).toEqual([200, 409]);
+      expect(await noticeKeys()).toEqual([`datesheet:${exam}`]);
+    });
+
+    it('is 404 for an exam that is gone or out of reach, and for the Owner and the Admin only', async () => {
+      await added();
+      expect((await publishIt(owner.token, missing)).status).toBe(404);
+      expect((await publishIt(secondAdmin.token)).status).toBe(404);
+      expect((await publishIt(otherOwner.token)).status).toBe(404);
+      expect((await publishIt(annaToken)).status).toBe(403);
+      expect((await publishIt(parentToken)).status).toBe(403);
+      expect((await api('get', `/v1/exams?institutionId=${first}`, owner.token)).body.data).toEqual(
+        [expect.objectContaining({ datesheetPublishedAt: null })],
+      );
+    });
+
+    it('shows the publication on the exam list', async () => {
+      await added();
+      succeeded(await publishIt(), 200, 'publish');
+      const listed = await api('get', `/v1/exams?institutionId=${first}`, owner.token);
+      expect(listed.body.data).toEqual([
+        expect.objectContaining({ datesheetPublishedAt: expect.any(String) }),
+      ]);
+    });
+
+    it('tells the section again for a paper added, changed or removed afterwards, and not for a change that changes nothing', async () => {
+      const paper = await added({ subjectTeacherStaffMemberId: anna.id });
+      succeeded(await publishIt(), 200, 'publish');
+      await drain();
+      const added2 = await added({
+        subjectId: english,
+        startTime: '11:00',
+        endTime: '12:00',
+      });
+      await drain();
+      const changed = await edit(paper.id, { version: 1, roomName: 'Room 3' });
+      expect(changed.status).toBe(200);
+      await drain();
+      expect((await edit(paper.id, { version: 2, roomName: 'Room 3' })).status).toBe(200);
+      succeeded(await remove(added2.id), 200, 'remove');
+      await drain();
+      expect((await inboxOf(parentToken)).map((item) => item.body).toSorted()).toEqual([
+        'Unit Test 1: 10 Aug 2026 to 14 Aug 2026.',
+        'Unit Test 1: the English paper was added.',
+        'Unit Test 1: the English paper was removed.',
+        'Unit Test 1: the Mathematics paper was changed.',
+      ]);
+      expect(await noticeKeys()).toHaveLength(4);
+    });
+
+    it('tells a teacher who is taken off a paper, and says nothing before the datesheet is published', async () => {
+      const paper = await added({ subjectTeacherStaffMemberId: anna.id });
+      await edit(paper.id, { version: 1, roomName: 'Room 3' });
+      await added({ sectionId: sectionB, subjectId: english });
+      expect(await noticeKeys()).toEqual([]);
+      succeeded(await publishIt(), 200, 'publish');
+      await drain();
+      const before = (await inboxOf(annaToken)).length;
+      await edit(paper.id, { version: 2, subjectTeacherStaffMemberId: null });
+      await drain();
+      expect(await inboxOf(annaToken)).toHaveLength(before + 1);
+    });
+
+    it('writes no notice for a refused change', async () => {
+      await added();
+      succeeded(await publishIt(), 200, 'publish');
+      const refused = await add({ subjectId: english, startTime: '10:00', endTime: '12:00' });
+      expect(refused.status).toBe(409);
+      expect(await noticeKeys()).toEqual([`datesheet:${exam}`]);
+    });
+  });
+
+  describe('EXM-10 a staff member’s papers', () => {
+    it('gives a teacher the papers they mark and invigilate, with the exam and their duties, before it is published', async () => {
+      const marking = await added({ subjectTeacherStaffMemberId: anna.id });
+      const watching = await added({
+        sectionId: sectionB,
+        examDate: '2026-08-11',
+        invigilatorStaffMemberId: anna.id,
+      });
+      const both = await added({
+        subjectId: english,
+        examDate: '2026-08-12',
+        subjectTeacherStaffMemberId: anna.id,
+        invigilatorStaffMemberId: anna.id,
+      });
+      await added({ sectionId: sectionB, subjectId: english, examDate: '2026-08-13' });
+      const mine = await myPapers(`institutionId=${first}&mine=true`, annaToken);
+      expect(mine.map((p) => [p.id, p.duties])).toEqual([
+        [marking.id, ['subjectTeacher']],
+        [watching.id, ['invigilator']],
+        [both.id, ['subjectTeacher', 'invigilator']],
+      ]);
+      expect(mine[0]).toMatchObject({
+        exam: { id: exam, name: 'Unit Test 1' },
+        subject: { name: 'Mathematics' },
+        sectionName: 'A',
+        startTime: '09:00',
+      });
+    });
+
+    it('lets an Admin or Owner name a staff member, a teacher only themselves, and refuses mine and a name together', async () => {
+      const paper = await added({ subjectTeacherStaffMemberId: anna.id });
+      for (const token of [owner.token, firstAdmin.token, annaToken]) {
+        expect(
+          (await myPapers(`institutionId=${first}&staffMemberId=${anna.id}`, token)).map(
+            (p) => p.id,
+          ),
+        ).toEqual([paper.id]);
+      }
+      expect(await myPapers(`institutionId=${first}&staffMemberId=${ben.id}`)).toEqual([]);
+      const other = await api(
+        'get',
+        `/v1/exam-papers?institutionId=${first}&staffMemberId=${ben.id}`,
+        annaToken,
+      );
+      expect([other.status, other.body.code]).toEqual([403, 'NOT_ASSIGNED']);
+      const both = await api(
+        'get',
+        `/v1/exam-papers?institutionId=${first}&mine=true&staffMemberId=${anna.id}`,
+        owner.token,
+      );
+      expect(fieldsOf(both)).toEqual({ staffMemberId: 'FIELD_NOT_ALLOWED' });
+      const neither = await api('get', `/v1/exam-papers?institutionId=${first}`, owner.token);
+      expect(fieldsOf(neither)).toEqual({ mine: 'REQUIRED' });
+      const none = await api('get', '/v1/exam-papers?mine=true', owner.token);
+      expect(fieldsOf(none)).toEqual({ institutionId: 'REQUIRED' });
+    });
+
+    it('is 404 for an Owner with no staff record, for an Institution or a year out of reach, and 403 for a parent', async () => {
+      expect(
+        (await api('get', `/v1/exam-papers?institutionId=${first}&mine=true`, owner.token)).status,
+      ).toBe(404);
+      expect(
+        (await api('get', `/v1/exam-papers?institutionId=${first}&mine=true`, secondAdmin.token))
+          .status,
+      ).toBe(404);
+      expect(
+        (await api('get', `/v1/exam-papers?institutionId=${first}&mine=true`, otherOwner.token))
+          .status,
+      ).toBe(404);
+      expect(
+        (
+          await api(
+            'get',
+            `/v1/exam-papers?institutionId=${first}&mine=true&academicYearId=${missing}`,
+            annaToken,
+          )
+        ).status,
+      ).toBe(404);
+      expect(
+        (await api('get', `/v1/exam-papers?institutionId=${first}&mine=true`, parentToken)).status,
+      ).toBe(403);
+    });
+
+    it('reads the year named, and leaves out a removed paper', async () => {
+      const paper = await added({ subjectTeacherStaffMemberId: anna.id });
+      expect(
+        await myPapers(`institutionId=${first}&mine=true&academicYearId=${year}`, annaToken),
+      ).toHaveLength(1);
+      await remove(paper.id);
+      expect(await myPapers(`institutionId=${first}&mine=true`, annaToken)).toEqual([]);
     });
   });
 

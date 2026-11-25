@@ -184,6 +184,19 @@ export class StaffRepository {
     return rows.map((row) => row.user_id);
   }
 
+  /** The people behind these active staff records, each once. Read under the caller's row-level security. */
+  async userIdsOf(tx: Tx, staffMemberIds: readonly string[]): Promise<string[]> {
+    if (staffMemberIds.length === 0) return [];
+    const rows = await tx
+      .selectFrom('staff_members')
+      .select('user_id')
+      .distinct()
+      .where('id', 'in', staffMemberIds)
+      .where('status', '=', 1)
+      .execute();
+    return rows.map((row) => row.user_id);
+  }
+
   /** The active staff record of this person in the caller's Society: a person holds at most one. */
   activeOfUser(tx: Tx, userId: string): Promise<StaffRow | undefined> {
     return tx

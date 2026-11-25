@@ -1,5 +1,5 @@
 import type { ExamPaperRow } from './exam-paper.repository.js';
-import { examPaperResource, type PaperNames } from './exam-paper.resource.js';
+import { examPaperResource, myPaperResource, type PaperNames } from './exam-paper.resource.js';
 
 const row: ExamPaperRow = {
   id: 'paper-1',
@@ -89,5 +89,26 @@ describe('examPaperResource', () => {
       subjectTeacher: null,
       invigilator: null,
     });
+  });
+});
+
+describe('myPaperResource', () => {
+  const mine = { ...row, exam_name: 'Unit Test 1' };
+
+  it('shows the exam and the duty of a subject teacher', () => {
+    expect(myPaperResource(mine, 'staff-1', names, new Map())).toMatchObject({
+      id: 'paper-1',
+      exam: { id: 'exam-1', name: 'Unit Test 1' },
+      duties: ['subjectTeacher'],
+    });
+  });
+
+  it('shows an invigilator’s duty, and both for one person who does both', () => {
+    expect(myPaperResource(mine, 'staff-2', names, new Map()).duties).toEqual(['invigilator']);
+    const both = { ...mine, invigilator_staff_member_id: 'staff-1' };
+    expect(myPaperResource(both, 'staff-1', names, new Map()).duties).toEqual([
+      'subjectTeacher',
+      'invigilator',
+    ]);
   });
 });

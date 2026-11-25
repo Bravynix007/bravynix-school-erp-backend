@@ -5,9 +5,11 @@ import { ApiResult } from '../../common/http/api-result.js';
 import { AppException } from '../../common/http/app-exception.js';
 import { authorIdsOf } from '../../common/http/author-stamps.js';
 import { changedColumns } from '../../common/http/changed-columns.js';
+import { ErrorCode, FieldErrorCode } from '../../common/http/error-codes.js';
 import { requireVersion } from '../../common/http/require-version.js';
 import { newId } from '../../common/ids/ids.js';
 import { clockOf, requireTimes } from '../../common/validation/clock-time.js';
+import { fieldError } from '../../common/validation/field-error.js';
 import { parentReadErrors, staffReadErrors } from '../../common/validation/parent-read.js';
 import { AuditService, type AuditValues } from '../../platform/audit/index.js';
 import {
@@ -22,10 +24,16 @@ import {
   ScopeService,
   type InstitutionContext,
 } from '../../platform/tenancy/index.js';
-import { SectionDirectory, StaffDirectory, SubjectDirectory } from '../academic-setup/index.js';
+import {
+  AcademicYearDirectory,
+  SectionDirectory,
+  StaffDirectory,
+  SubjectDirectory,
+} from '../academic-setup/index.js';
 import type {
   CreateExamPaperDto,
   ListExamPapersQueryDto,
+  ListMyExamPapersQueryDto,
   UpdateExamPaperDto,
 } from './exam-paper.dto.js';
 import {
@@ -35,7 +43,9 @@ import {
 } from './exam-paper.repository.js';
 import {
   examPaperResource,
+  myPaperResource,
   type ExamPaperResource,
+  type MyPaperResource,
   type PaperNames,
 } from './exam-paper.resource.js';
 import {
@@ -44,6 +54,7 @@ import {
   requirePassingMarks,
   translatePaperError,
 } from './exam-paper.rules.js';
+import { DatesheetNotifier } from './datesheet.notifier.js';
 import { ExamPeople } from './exam-people.js';
 import { ExamRepository, type ExamRow } from './exam.repository.js';
 
@@ -82,6 +93,8 @@ export class ExamPaperService {
     private readonly subjects: SubjectDirectory,
     private readonly staff: StaffDirectory,
     private readonly examPeople: ExamPeople,
+    private readonly years: AcademicYearDirectory,
+    private readonly notifier: DatesheetNotifier,
     private readonly people: PersonDirectory,
     private readonly audit: AuditService,
   ) {}
@@ -150,6 +163,9 @@ export class ExamPaperService {
           ...insertStamp(principal.personId),
         });
         await this.record(tx, 'exam_paper.created', created, { after: auditView(created) });
+        if (exam.datesheet_published_at !== null) {
+          await this.notifier.changed(tx, exam, created, 'added', [], principal.personId);
+        }
         return { row: created, names: await this.namesOf(tx, [created], false) };
       })
       .catch((error: unknown) => {
@@ -224,6 +240,16 @@ export class ExamPaperService {
           before: auditView(current),
           after: auditView(updated),
         });
+        if (exam.datesheet_published_at !== null) {
+          await this.notifier.changed(
+            tx,
+            exam,
+            updated,
+            'changed',
+            [current.subject_teacher_staff_member_id, current.invigilator_staff_member_id],
+            principal.personId,
+          );
+        }
         return { row: updated, names: await this.namesOf(tx, [updated], false) };
       })
       .catch((error: unknown) => {
@@ -236,7 +262,7 @@ export class ExamPaperService {
   async deactivate(principal: Principal, id: string): Promise<{ id: string; status: 0 }> {
     const context = await this.contextOfPaper(principal, id);
     await this.database.transaction(context.tenant, async (tx) => {
-      const { paper: current } = await this.lockedActive(tx, id);
+      const { paper: current, exam } = await this.lockedActive(tx, id);
       const updated = await this.papers.update(tx, id, {
         status: 0,
         ...updateStamp(principal.personId),
@@ -245,8 +271,68 @@ export class ExamPaperService {
         before: auditView(current),
         after: auditView(updated),
       });
+      if (exam.datesheet_published_at !== null) {
+        await this.notifier.changed(tx, exam, updated, 'removed', [], principal.personId);
+      }
     });
     return { id, status: 0 };
+  }
+
+  /**
+   * EXM-10: the papers a staff member marks or invigilates in a year, in the order they are sat, from the first day
+   * (a teacher sees theirs before the datesheet is published). Name `mine` for the caller's own staff record (404
+   * without one) or `staffMemberId`, not both (400); a teacher may name only themselves (403 `NOT_ASSIGNED`).
+   */
+  async mine(
+    principal: Principal,
+    query: ListMyExamPapersQueryDto,
+  ): Promise<ApiResult<MyPaperResource[]>> {
+    const own = query.mine === true;
+    const errors = [
+      ...(!own && query.staffMemberId === undefined
+        ? [fieldError('mine', FieldErrorCode.REQUIRED)]
+        : []),
+      ...(own && query.staffMemberId !== undefined
+        ? [fieldError('staffMemberId', FieldErrorCode.FIELD_NOT_ALLOWED)]
+        : []),
+    ];
+    if (errors.length > 0) throw AppException.validation(errors);
+    const context = await this.scope.requireInstitution(principal, query.institutionId);
+    const { rows, names, staffMemberId } = await this.database.transaction(
+      context.tenant,
+      async (tx) => {
+        const record = await this.staff.ownRecord(tx, principal.personId);
+        let staffId = query.staffMemberId ?? '';
+        if (own) {
+          if (!record) throw AppException.notFound();
+          staffId = record.staffMemberId;
+        } else if (
+          principal.roleCode === RoleCode.TeacherStaff &&
+          record?.staffMemberId !== staffId
+        ) {
+          throw AppException.forbidden(ErrorCode.NOT_ASSIGNED);
+        }
+        const yearId =
+          query.academicYearId === undefined
+            ? await this.years.requireCurrentId(tx, context.institutionId)
+            : await this.namedYear(tx, query.academicYearId, context.institutionId);
+        const found = await this.papers.ofStaff(tx, yearId, staffId);
+        return { rows: found, names: await this.namesOf(tx, found, false), staffMemberId: staffId };
+      },
+    );
+    const people = await this.people.describe(authorIdsOf(rows));
+    return ApiResult.list(
+      rows.map((row) => myPaperResource(row, staffMemberId, names, people)),
+      null,
+    );
+  }
+
+  /** A year of the Institution, open or not, to read; 404 for any other. */
+  private async namedYear(tx: Tx, yearId: string, institutionId: string): Promise<string> {
+    if ((await this.years.openYear(tx, yearId, institutionId)) === undefined) {
+      throw AppException.notFound();
+    }
+    return yearId;
   }
 
   /**

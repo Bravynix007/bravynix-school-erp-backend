@@ -112,6 +112,9 @@ const en: Catalogue = {
   PAPER_OVERLAP: 'This section already has a paper that overlaps that time',
   INVIGILATOR_DOUBLE_BOOKED: 'This invigilator already has a paper that overlaps that time',
   ROOM_TAKEN: 'This room already has a paper that overlaps that time',
+  DATESHEET_PUBLISHED:
+    'This datesheet is already published; changes to its papers tell the sections',
+  DATESHEET_EMPTY: 'Add at least one paper before publishing the datesheet',
   EXAM_IN_USE: 'This exam still has papers; remove them first',
   PAPER_OUTSIDE_EXAM:
     'A paper of this exam is dated outside the new dates; move or remove it first',

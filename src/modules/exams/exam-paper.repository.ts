@@ -7,6 +7,11 @@ export type ExamPaperRow = Selectable<ExamPapersTable>;
 export type NewExamPaper = Insertable<ExamPapersTable>;
 export type ExamPaperChanges = Updateable<ExamPapersTable>;
 
+/** A paper with the name of its exam. */
+export interface ExamPaperWithExam extends ExamPaperRow {
+  exam_name: string;
+}
+
 /** Queries on `exam_papers`; every one runs in the caller's transaction, under row-level security. */
 @Injectable()
 export class ExamPaperRepository {
@@ -19,6 +24,31 @@ export class ExamPaperRepository {
       .where('status', '=', 1);
     if (sectionId !== undefined) query = query.where('section_id', '=', sectionId);
     return query.orderBy('exam_date').orderBy('start_time').orderBy('section_id').execute();
+  }
+
+  /**
+   * The active papers of the year's active exams that this staff member marks (as the subject teacher) or invigilates,
+   * in the order they are sat.
+   */
+  ofStaff(tx: Tx, academicYearId: string, staffMemberId: string): Promise<ExamPaperWithExam[]> {
+    return tx
+      .selectFrom('exam_papers as p')
+      .innerJoin('exams as e', 'e.id', 'p.exam_id')
+      .selectAll('p')
+      .select('e.name as exam_name')
+      .where('p.academic_year_id', '=', academicYearId)
+      .where('p.status', '=', 1)
+      .where('e.status', '=', 1)
+      .where((clause) =>
+        clause.or([
+          clause('p.subject_teacher_staff_member_id', '=', staffMemberId),
+          clause('p.invigilator_staff_member_id', '=', staffMemberId),
+        ]),
+      )
+      .orderBy('p.exam_date')
+      .orderBy('p.start_time')
+      .orderBy('p.id')
+      .execute();
   }
 
   find(tx: Tx, id: string, lock = false): Promise<ExamPaperRow | undefined> {

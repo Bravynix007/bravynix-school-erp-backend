@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { Tx } from '../../platform/database/index.js';
 import { DiaryPeople, type DiaryReceiver } from '../diary/index.js';
 import { AssignmentRepository } from './assignment.repository.js';
+import { guardianReceiversOf } from './section-guardians.js';
 import { StudentRepository } from './student.repository.js';
 
 /**
@@ -40,17 +41,7 @@ export class PeopleDiary extends DiaryPeople {
     return (await this.students.openPlacement(tx, studentId))?.section_id;
   }
 
-  async receiversOf(tx: Tx, sectionId: string, date: string): Promise<DiaryReceiver[]> {
-    const placed = await this.students.placedOn(tx, sectionId, date);
-    const guardians = await this.students.guardianUsersByEnrolment(
-      tx,
-      placed.map((student) => student.studentEnrolmentId),
-    );
-    return placed.flatMap((student) =>
-      (guardians.get(student.studentEnrolmentId) ?? []).map((userId) => ({
-        userId,
-        studentId: student.studentId,
-      })),
-    );
+  receiversOf(tx: Tx, sectionId: string, date: string): Promise<DiaryReceiver[]> {
+    return guardianReceiversOf(this.students, tx, sectionId, date);
   }
 }

@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsInt, IsOptional, IsString, IsUUID, Length, Max, Min } from 'class-validator';
+import { BooleanQuery } from '../../common/validation/boolean-query.js';
 import { IsCalendarDate } from '../../common/validation/calendar-date.js';
 import { IsClockTime } from '../../common/validation/clock-time.js';
 import { LowerCaseUuid } from '../../common/validation/lower-case-uuid.js';
@@ -30,6 +31,36 @@ export class ListExamPapersQueryDto {
   @LowerCaseUuid()
   @IsUUID()
   studentId?: string;
+}
+
+/**
+ * EXM-10 query: the Institution, one of its academic years (the current year when left out), and whose papers: the
+ * caller's own (`mine`), or one staff member's by their ID (an Admin or Owner; a teacher only their own).
+ */
+export class ListMyExamPapersQueryDto {
+  @ApiProperty({ format: 'uuid' })
+  @LowerCaseUuid()
+  @IsUUID()
+  institutionId!: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description: 'An academic year of `institutionId`; the current year when left out',
+  })
+  @IsOptional()
+  @LowerCaseUuid()
+  @IsUUID()
+  academicYearId?: string;
+
+  @ApiPropertyOptional({ description: 'The caller’s own papers; this or `staffMemberId`' })
+  @BooleanQuery()
+  mine?: boolean;
+
+  @ApiPropertyOptional({ format: 'uuid', description: 'A staff member of the Institution' })
+  @IsOptional()
+  @LowerCaseUuid()
+  @IsUUID()
+  staffMemberId?: string;
 }
 
 /** EXM-06 body (API design 9.8): the exam is the one in the path. */

@@ -27,20 +27,9 @@ import { AcademicYearDirectory, type YearSpan } from '../academic-setup/index.js
 import type { CreateExamDto, ListExamsQueryDto, UpdateExamDto } from './exam.dto.js';
 import { ExamPaperRepository } from './exam-paper.repository.js';
 import { ExamRepository, type ExamChanges, type ExamRow } from './exam.repository.js';
+import { examAuditView } from './exam.audit.js';
 import { examResource, type ExamResource } from './exam.resource.js';
 import { requireDates, translateExamError } from './exam.rules.js';
-
-/** What the audit log keeps of an exam. */
-function auditView(row: ExamRow): AuditValues {
-  return {
-    academic_year_id: row.academic_year_id,
-    name: row.name,
-    exam_type: row.exam_type,
-    start_date: row.start_date,
-    end_date: row.end_date,
-    status: row.status,
-  };
-}
 
 /**
  * EXM-01 to EXM-04 (API design 9.8): the exams of one Institution's academic year. A Society Owner and an Institution
@@ -105,7 +94,7 @@ export class ExamService {
           end_date: body.endDate,
           ...insertStamp(principal.personId),
         });
-        await this.record(tx, 'exam.created', created, { after: auditView(created) });
+        await this.record(tx, 'exam.created', created, { after: examAuditView(created) });
         return created;
       })
       .catch((error: unknown) => {
@@ -151,8 +140,8 @@ export class ExamService {
           ...updateStamp(principal.personId),
         });
         await this.record(tx, 'exam.updated', updated, {
-          before: auditView(current),
-          after: auditView(updated),
+          before: examAuditView(current),
+          after: examAuditView(updated),
         });
         return updated;
       })
@@ -176,8 +165,8 @@ export class ExamService {
         ...updateStamp(principal.personId),
       });
       await this.record(tx, 'exam.deactivated', updated, {
-        before: auditView(current),
-        after: auditView(updated),
+        before: examAuditView(current),
+        after: examAuditView(updated),
       });
     });
     return { id, status: 0 };

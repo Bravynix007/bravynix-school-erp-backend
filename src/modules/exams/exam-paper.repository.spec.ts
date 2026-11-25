@@ -39,4 +39,24 @@ describe('ExamPaperRepository', () => {
     expect(sql).toContain('("exam_date" < $3 or "exam_date" > $4)');
     expect(parameters).toEqual(['exam-1', 1, '2026-08-10', '2026-08-14', 1]);
   });
+
+  it('lists the papers a staff member marks or invigilates, with the exam’s name, in the order they are sat', async () => {
+    const { tx, queries } = sqlRecorder();
+    await repository.ofStaff(tx, 'year-1', 'staff-1');
+    const { sql, parameters } = queries[0]!;
+    expect(sql).toContain('inner join "exams" as "e" on "e"."id" = "p"."exam_id"');
+    expect(sql).toContain('"e"."name" as "exam_name"');
+    expect(sql).toContain('"p"."status" = $2 and "e"."status" = $3');
+    expect(sql).toContain(
+      '("p"."subject_teacher_staff_member_id" = $4 or "p"."invigilator_staff_member_id" = $5)',
+    );
+    expect(sql).toMatch(/order by "p"."exam_date", "p"."start_time", "p"."id"$/);
+    expect(parameters).toEqual(['year-1', 1, 1, 'staff-1', 'staff-1']);
+  });
+
+  it('asks whether the exam still has an active paper', async () => {
+    const { tx, queries } = sqlRecorder();
+    expect(await repository.anyActive(tx, 'exam-1')).toBe(false);
+    expect(queries[0]!.sql).toContain('"exam_id" = $1 and "status" = $2');
+  });
 });

@@ -4,7 +4,7 @@ import {
   type AuthorStamps,
 } from '../../common/http/author-stamps.js';
 import { clockOf } from '../../common/validation/clock-time.js';
-import type { ExamPaperRow } from './exam-paper.repository.js';
+import type { ExamPaperRow, ExamPaperWithExam } from './exam-paper.repository.js';
 
 /** One paper of a datesheet as the API shows it (API design 9.8, EXM-05 to EXM-08). */
 export interface ExamPaperResource extends AuthorStamps {
@@ -66,5 +66,33 @@ export function examPaperResource(
     status: row.status,
     version: row.version,
     ...authorStamps(row, people),
+  };
+}
+
+/** What a staff member does on a paper. */
+export type PaperDuty = 'subjectTeacher' | 'invigilator';
+
+/** One paper of a staff member's duties (EXM-10): the paper, its exam and what they do on it. */
+export interface MyPaperResource extends ExamPaperResource {
+  exam: { id: string; name: string };
+  /** `subjectTeacher` to mark it, `invigilator` to supervise it; both when the same person does both. */
+  duties: PaperDuty[];
+}
+
+export function myPaperResource(
+  row: ExamPaperWithExam,
+  staffMemberId: string,
+  names: PaperNames,
+  people: ReadonlyMap<string, AuthorRef>,
+): MyPaperResource {
+  return {
+    ...examPaperResource(row, names, people),
+    exam: { id: row.exam_id, name: row.exam_name },
+    duties: [
+      ...(row.subject_teacher_staff_member_id === staffMemberId
+        ? (['subjectTeacher'] as const)
+        : []),
+      ...(row.invigilator_staff_member_id === staffMemberId ? (['invigilator'] as const) : []),
+    ],
   };
 }

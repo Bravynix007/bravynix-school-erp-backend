@@ -1,5 +1,11 @@
 import type { Tx } from '../../platform/database/index.js';
 
+/** One person to tell about a datesheet, and the child it is for. */
+export interface ExamReceiver {
+  userId: string;
+  studentId: string;
+}
+
 /**
  * What Exams asks of People about the staff of a paper. The staff records belong to People, which provides this
  * (SDD 9.3 rules 1 and 7). Every call runs in the caller's transaction, under row-level security. Each call names the
@@ -26,4 +32,10 @@ export abstract class ExamPeople {
     institutionId: string,
     field: string,
   ): Promise<void>;
+
+  /** The people with a login who guard the students placed in the section on the date, each with the child. */
+  abstract guardianReceivers(tx: Tx, sectionId: string, date: string): Promise<ExamReceiver[]>;
+
+  /** The people behind these active staff members, each once. */
+  abstract staffUserIds(tx: Tx, staffMemberIds: readonly string[]): Promise<readonly string[]>;
 }
