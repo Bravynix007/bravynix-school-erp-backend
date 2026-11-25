@@ -534,7 +534,7 @@ export async function writeDemoSeed(db: Kysely<unknown>): Promise<void> {
   await insertGradeBands(
     db,
     institutions.map((i) => i.id),
-    (i, n) => id(9301 + i * 10 + n),
+    (i, n) => id(10101 + i * 10 + n),
   );
 
   for (const d of dues) {

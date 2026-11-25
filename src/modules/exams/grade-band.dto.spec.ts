@@ -72,6 +72,14 @@ describe('UpdateGradeBandDto', () => {
     [{ version: 1, name: null }, 'name', 'INVALID_TYPE'],
     [{ version: 1, minPercentage: null }, 'minPercentage', 'INVALID_TYPE'],
     [{ version: 1, maxPercentage: null }, 'maxPercentage', 'INVALID_TYPE'],
+    [{ version: 1, name: 'x'.repeat(21) }, 'name', 'TOO_LONG'],
+    [{ version: 1, minPercentage: -0.01 }, 'minPercentage', 'OUT_OF_RANGE'],
+    [{ version: 1, minPercentage: 90.555 }, 'minPercentage', 'INVALID_TYPE'],
+    [{ version: 1, maxPercentage: 100.01 }, 'maxPercentage', 'OUT_OF_RANGE'],
+    [{ version: 1, gradePoint: 10.5 }, 'gradePoint', 'OUT_OF_RANGE'],
+    [{ version: 1, gradePoint: -1 }, 'gradePoint', 'OUT_OF_RANGE'],
+    [{ version: 1, gradePoint: '9' }, 'gradePoint', 'INVALID_TYPE'],
+    [{ version: 1, description: 'x'.repeat(101) }, 'description', 'TOO_LONG'],
     [{ version: 1, institutionId: uuid }, 'institutionId', 'FIELD_NOT_ALLOWED'],
   ])('refuses %j', async (value, field, code) => {
     expect(await problems(body(UpdateGradeBandDto, value))).toContainEqual({ field, code });

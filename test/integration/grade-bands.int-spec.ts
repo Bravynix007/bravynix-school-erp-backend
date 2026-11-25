@@ -419,6 +419,39 @@ describe('GRD-01 to GRD-04 grade bands (API design 9.4)', () => {
       });
     });
 
+    it('refuses a grade point, a percentage or a name outside what a band holds (400), writing nothing', async () => {
+      const made = await added();
+      const cases: [object, Record<string, string>][] = [
+        [{ gradePoint: 10.5 }, { gradePoint: 'OUT_OF_RANGE' }],
+        [{ gradePoint: -1 }, { gradePoint: 'OUT_OF_RANGE' }],
+        [{ minPercentage: 100.01 }, { minPercentage: 'OUT_OF_RANGE' }],
+        [{ maxPercentage: 100.01 }, { maxPercentage: 'OUT_OF_RANGE' }],
+        [{ minPercentage: 90.555 }, { minPercentage: 'INVALID_TYPE' }],
+        [{ name: 'x'.repeat(21) }, { name: 'TOO_LONG' }],
+      ];
+      for (const [fields, expected] of cases) {
+        const res = await edit(made.id, { version: 1, ...fields });
+        expect([res.status, fieldsOf(res)]).toEqual([400, expected]);
+      }
+      expect((await audit(made.id)).map((r) => r.action)).toEqual(['grade_band.created']);
+      expect(await bands()).toMatchObject([{ version: 1, gradePoint: 10 }]);
+    });
+
+    it('writes no audit entry for an edit that is refused', async () => {
+      const top = await added();
+      await added({ name: 'A2', minPercentage: 81, maxPercentage: 90.99 });
+      expect((await edit(top.id, { version: 1, minPercentage: 90 })).status).toBe(409);
+      expect((await edit(top.id, { version: 1, name: 'a2' })).status).toBe(409);
+      expect((await edit(top.id, { version: 7, name: 'B' })).status).toBe(409);
+      expect(
+        (await edit(top.id, { version: 1, minPercentage: 100, maxPercentage: 95 })).status,
+      ).toBe(400);
+      expect((await edit(top.id, { version: 1, name: 'B' }, teacherToken)).status).toBe(403);
+      expect((await edit(top.id, { version: 1, name: 'B' }, secondAdmin.token)).status).toBe(404);
+      expect((await audit(top.id)).map((r) => r.action)).toEqual(['grade_band.created']);
+      expect(await bands()).toMatchObject([{ name: 'A1', version: 1 }, { name: 'A2' }]);
+    });
+
     it('refuses a minimum above the maximum that stays, on maxPercentage', async () => {
       const made = await added();
       const res = await edit(made.id, { version: 1, minPercentage: 100.0, maxPercentage: 95 });
@@ -475,6 +508,21 @@ describe('GRD-01 to GRD-04 grade bands (API design 9.4)', () => {
       expect((await remove(made.id, otherOwner.token)).status).toBe(404);
       expect((await remove(made.id)).status).toBe(200);
       expect((await remove(made.id)).status).toBe(404);
+    });
+
+    it('writes no audit entry for a deactivation that is refused', async () => {
+      const made = await added();
+      expect((await remove(made.id, teacherToken)).status).toBe(403);
+      expect((await remove(made.id, parentToken)).status).toBe(403);
+      expect((await remove(made.id, secondAdmin.token)).status).toBe(404);
+      expect((await remove(missing)).status).toBe(404);
+      expect((await audit(made.id)).map((r) => r.action)).toEqual(['grade_band.created']);
+      expect((await remove(made.id)).status).toBe(200);
+      expect((await remove(made.id)).status).toBe(404);
+      expect((await audit(made.id)).map((r) => r.action)).toEqual([
+        'grade_band.created',
+        'grade_band.deactivated',
+      ]);
     });
   });
 
