@@ -81,10 +81,7 @@ export class TimeSlotService {
   ): Promise<ApiResult<TimeSlotResource[]>> {
     const context = await this.readContext(principal, query);
     const rows = await this.database.transaction(context.tenant, async (tx) => {
-      const yearId =
-        query.academicYearId === undefined
-          ? await this.years.requireCurrentId(tx, context.institutionId)
-          : await this.namedYear(tx, query.academicYearId, context.institutionId);
+      const yearId = await this.years.yearToRead(tx, context.institutionId, query.academicYearId);
       return this.slots.active(tx, yearId);
     });
     const people = await this.people.describe(authorIdsOf(rows));
@@ -216,14 +213,6 @@ export class TimeSlotService {
     ];
     if (errors.length > 0) throw AppException.validation(errors);
     return this.scope.requireInstitution(principal, query.institutionId!);
-  }
-
-  /** A year of the Institution, open or not, to read; 404 for any other. */
-  private async namedYear(tx: Tx, yearId: string, institutionId: string): Promise<string> {
-    if ((await this.years.openYear(tx, yearId, institutionId)) === undefined) {
-      throw AppException.notFound();
-    }
-    return yearId;
   }
 
   /** A year of the Institution to add to: 404 for any other, 422 `REFERENCE_INACTIVE` when it is deactivated. */

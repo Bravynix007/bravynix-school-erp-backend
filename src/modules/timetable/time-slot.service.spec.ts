@@ -111,6 +111,9 @@ function build(current: TimeSlotRow | null = slot()) {
   const requireCurrentId = vi
     .fn<AcademicYearDirectory['requireCurrentId']>()
     .mockResolvedValue('year-1');
+  const yearToRead = vi
+    .fn<AcademicYearDirectory['yearToRead']>()
+    .mockImplementation((_tx, _institutionId, yearId) => Promise.resolve(yearId ?? 'year-1'));
   const openYear = vi
     .fn<AcademicYearDirectory['openYear']>()
     .mockResolvedValue({ open: true, startDate: '2026-06-01', endDate: '2027-03-31' });
@@ -123,7 +126,7 @@ function build(current: TimeSlotRow | null = slot()) {
     { active, find, insert, update } as unknown as TimeSlotRepository,
     { usesSlot } as unknown as TimetableEntryRepository,
     { forPrincipal, requireInstitution } as unknown as ScopeService,
-    { requireCurrentId, openYear, requireActive } as unknown as AcademicYearDirectory,
+    { requireCurrentId, yearToRead, openYear, requireActive } as unknown as AcademicYearDirectory,
     { of: childContextOf } as unknown as ChildContexts,
     {
       describe: vi.fn<PersonDirectory['describe']>().mockResolvedValue(new Map()),
@@ -140,6 +143,7 @@ function build(current: TimeSlotRow | null = slot()) {
     forPrincipal,
     requireInstitution,
     requireCurrentId,
+    yearToRead,
     openYear,
     requireActive,
     childContextOf,
@@ -154,7 +158,7 @@ describe('TimeSlotService.list', () => {
     const result = await t.service.list(teacher, { institutionId: 'inst-1' });
     expect(t.requireInstitution).toHaveBeenCalledWith(teacher, 'inst-1');
     expect(t.transaction).toHaveBeenCalledWith(narrowed, expect.any(Function));
-    expect(t.requireCurrentId).toHaveBeenCalledWith(expect.anything(), 'inst-1');
+    expect(t.yearToRead).toHaveBeenCalledWith(expect.anything(), 'inst-1', undefined);
     expect(t.active).toHaveBeenCalledWith(expect.anything(), 'year-1');
     expect(result.data).toHaveLength(1);
     expect(result.data[0]).toMatchObject({ startTime: '09:50', endTime: '10:30' });
@@ -163,10 +167,9 @@ describe('TimeSlotService.list', () => {
   it('reads the year named, which must be one of the Institution', async () => {
     const t = build();
     await t.service.list(admin, { institutionId: 'inst-1', academicYearId: 'year-7' });
-    expect(t.openYear).toHaveBeenCalledWith(expect.anything(), 'year-7', 'inst-1');
-    expect(t.requireCurrentId).not.toHaveBeenCalled();
+    expect(t.yearToRead).toHaveBeenCalledWith(expect.anything(), 'inst-1', 'year-7');
     expect(t.active).toHaveBeenCalledWith(expect.anything(), 'year-7');
-    t.openYear.mockResolvedValue(undefined);
+    t.yearToRead.mockRejectedValueOnce(AppException.notFound());
     expect(
       await refusal(t.service.list(admin, { institutionId: 'inst-1', academicYearId: 'y' })),
     ).toMatchObject({ status: 404 });
@@ -189,7 +192,7 @@ describe('TimeSlotService.list', () => {
     await t.service.list(parent, { studentId: 'child-1' });
     expect(t.childContextOf).toHaveBeenCalledWith(parent, 'child-1');
     expect(t.transaction).toHaveBeenCalledWith(childContext.tenant, expect.any(Function));
-    expect(t.requireCurrentId).toHaveBeenCalledWith(expect.anything(), 'inst-1');
+    expect(t.yearToRead).toHaveBeenCalledWith(expect.anything(), 'inst-1', undefined);
     expect(await refusal(t.service.list(parent, {}))).toMatchObject({ fields: ['studentId'] });
     expect(
       await refusal(

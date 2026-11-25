@@ -312,10 +312,7 @@ export class ExamPaperService {
         ) {
           throw AppException.forbidden(ErrorCode.NOT_ASSIGNED);
         }
-        const yearId =
-          query.academicYearId === undefined
-            ? await this.years.requireCurrentId(tx, context.institutionId)
-            : await this.namedYear(tx, query.academicYearId, context.institutionId);
+        const yearId = await this.years.yearToRead(tx, context.institutionId, query.academicYearId);
         const found = await this.papers.ofStaff(tx, yearId, staffId);
         return { rows: found, names: await this.namesOf(tx, found, false), staffMemberId: staffId };
       },
@@ -325,14 +322,6 @@ export class ExamPaperService {
       rows.map((row) => myPaperResource(row, staffMemberId, names, people)),
       null,
     );
-  }
-
-  /** A year of the Institution, open or not, to read; 404 for any other. */
-  private async namedYear(tx: Tx, yearId: string, institutionId: string): Promise<string> {
-    if ((await this.years.openYear(tx, yearId, institutionId)) === undefined) {
-      throw AppException.notFound();
-    }
-    return yearId;
   }
 
   /**

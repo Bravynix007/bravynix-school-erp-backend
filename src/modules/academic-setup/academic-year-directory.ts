@@ -68,4 +68,16 @@ export class AcademicYearDirectory {
     if (id === null) throw AppException.businessRule(ErrorCode.CURRENT_YEAR_REQUIRED);
     return id;
   }
+
+  /**
+   * The year a read is about: the one named, open or not (404 when it is not one of this Institution's), or the
+   * Institution's current year when none is named (422 `CURRENT_YEAR_REQUIRED` when it has none).
+   */
+  async yearToRead(tx: Tx, institutionId: string, yearId?: string): Promise<string> {
+    if (yearId === undefined) return this.requireCurrentId(tx, institutionId);
+    if ((await this.openYear(tx, yearId, institutionId)) === undefined) {
+      throw AppException.notFound();
+    }
+    return yearId;
+  }
 }

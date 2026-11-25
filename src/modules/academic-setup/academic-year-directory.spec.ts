@@ -123,4 +123,30 @@ describe('AcademicYearDirectory', () => {
       ).toBeUndefined();
     });
   });
+
+  describe('yearToRead', () => {
+    it('answers the year named, open or not, when it is one of the Institution’s', async () => {
+      for (const status of [0, 1]) {
+        await expect(
+          build(year({ status })).directory.yearToRead(tx, 'institution-1', 'year-1'),
+        ).resolves.toBe('year-1');
+      }
+    });
+
+    it('is 404 for a year that is not there or is another Institution’s', async () => {
+      for (const found of [undefined, year({ institution_id: 'institution-2' })]) {
+        await expect(
+          build(found).directory.yearToRead(tx, 'institution-1', 'year-1'),
+        ).rejects.toMatchObject({ status: 404 });
+      }
+    });
+
+    it('answers the current year when none is named, and is 422 CURRENT_YEAR_REQUIRED without one', async () => {
+      await expect(build(year()).directory.yearToRead(tx, 'institution-1')).resolves.toBe('year-1');
+      await expect(build().directory.yearToRead(tx, 'institution-1')).rejects.toMatchObject({
+        status: 422,
+        code: 'CURRENT_YEAR_REQUIRED',
+      });
+    });
+  });
 });
