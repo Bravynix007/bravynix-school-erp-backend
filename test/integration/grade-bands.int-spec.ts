@@ -88,6 +88,11 @@ describe('GRD-01 to GRD-04 grade bands (API design 9.4)', () => {
     expect(res.status).toBe(200);
     return res.body.data as unknown as Band[];
   };
+  /** The bands a request sees as a parent with these children in it (row-level security). */
+  const rowsSeenAsParent = (childIds: string[]) =>
+    database.transaction({ personId: owner.person, roleCode: 5, childIds }, (tx) =>
+      tx.selectFrom('grade_bands').select(['id', 'institution_id']).execute(),
+    );
   const edit = (id: string, fields: object, token = owner.token) =>
     api('patch', `/v1/grade-bands/${id}`, token, fields);
   const remove = (id: string, token = owner.token) => api('delete', `/v1/grade-bands/${id}`, token);
@@ -481,13 +486,9 @@ describe('GRD-01 to GRD-04 grade bands (API design 9.4)', () => {
       const foreign = await kit.institution(otherOwner.token, categoryId);
       await added({ institutionId: foreign }, otherOwner.token);
       succeeded(await remove(gone.id), 200, 'deactivated band');
-      const seen = (childIds: string[]) =>
-        database.transaction({ personId: owner.person, roleCode: 5, childIds }, (tx) =>
-          tx.selectFrom('grade_bands').select(['id', 'institution_id']).execute(),
-        );
-      expect(await seen([childId])).toEqual([{ id: mine.id, institution_id: first }]);
-      expect(await seen([])).toEqual([]);
-      expect(await seen([missing])).toEqual([]);
+      expect(await rowsSeenAsParent([childId])).toEqual([{ id: mine.id, institution_id: first }]);
+      expect(await rowsSeenAsParent([])).toEqual([]);
+      expect(await rowsSeenAsParent([missing])).toEqual([]);
     });
   });
 
