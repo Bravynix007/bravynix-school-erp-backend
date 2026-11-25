@@ -219,6 +219,7 @@ describe('tenant isolation', () => {
         'documents',
         'event_holiday_classes',
         'events',
+        'exam_papers',
         'exams',
         'files',
         'grade_bands',

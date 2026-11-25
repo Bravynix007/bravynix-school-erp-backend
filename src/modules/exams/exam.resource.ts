@@ -16,6 +16,8 @@ export interface ExamResource extends AuthorStamps {
   /** `YYYY-MM-DD`. */
   startDate: string;
   endDate: string;
+  /** When the datesheet was published to the sections, or `null` while it is not (EXM-09). */
+  datesheetPublishedAt: string | null;
   status: number;
   version: number;
 }
@@ -29,6 +31,7 @@ export function examResource(row: ExamRow, people: ReadonlyMap<string, AuthorRef
     examType: row.exam_type,
     startDate: row.start_date,
     endDate: row.end_date,
+    datesheetPublishedAt: row.datesheet_published_at?.toISOString() ?? null,
     status: row.status,
     version: row.version,
     ...authorStamps(row, people),

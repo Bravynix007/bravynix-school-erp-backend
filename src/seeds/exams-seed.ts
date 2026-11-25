@@ -1,5 +1,6 @@
 import { sql, type Kysely } from 'kysely';
-import { clearScope, scopeTo, seededYearId } from './academic-seed.js';
+import { classes, clearScope, scopeTo, seededYearId } from './academic-seed.js';
+import { seededStaffId } from './people-seed.js';
 import { institutions } from './two-worlds.js';
 
 const seedId = (n: number): string => `00000000-0000-7000-8000-${n.toString().padStart(12, '0')}`;
@@ -126,9 +127,34 @@ export function seededExamId(institutionKey: string, name: string): string {
   return seedId(10001 + index * 10 + exam);
 }
 
+interface SeedPaper {
+  institution: 'A1' | 'B1';
+  /** The class by its place in the seeded list, and the section in it. */
+  classIndex: number;
+  sectionIndex: number;
+  /** The invigilator, by persona (the seeded teachers all teach Mathematics, so the same one marks it). */
+  teacher: string;
+}
+
 /**
- * Every two-worlds Institution grades on the same scale and holds the same exams, so a test can show one Society's
- * rows are hidden from another. Safe to run twice.
+ * The Mathematics paper of Unit Test 1 for the sections that have a timetable, on the first day of the test. Every
+ * world has one, so a test can show one Society's datesheet is hidden from another.
+ */
+export const papers: readonly SeedPaper[] = [
+  { institution: 'A1', classIndex: 0, sectionIndex: 0, teacher: 'IA-A12' },
+  { institution: 'B1', classIndex: 3, sectionIndex: 0, teacher: 'T-B1' },
+];
+
+/** The seeded paper of a two-worlds Institution, so a test can find its row. */
+export function seededPaperId(institutionKey: string): string {
+  const index = papers.findIndex((p) => p.institution === institutionKey);
+  if (index < 0) throw new Error(`No seeded paper in ${institutionKey}`);
+  return seedId(10201 + index);
+}
+
+/**
+ * Every two-worlds Institution grades on the same scale and holds the same exams, and two hold a paper, so a test can
+ * show one Society's rows are hidden from another. Safe to run twice.
  */
 export async function writeExamsSeed(db: Kysely<unknown>): Promise<void> {
   if (db.isTransaction) return writeIn(db);
@@ -146,4 +172,21 @@ async function writeIn(tx: Kysely<unknown>): Promise<void> {
     institutions.map((i) => ({ institutionId: i.id, academicYearId: seededYearId(i.key) })),
     (i, n) => seededExamId(institutions[i]!.key, examsOfTheYear[n]!.name),
   );
+  for (const paper of papers) {
+    const institution = institutions.find((i) => i.key === paper.institution)!;
+    const societyId = await scopeTo(tx, institution.id, `paper of ${paper.institution}`);
+    const teacher = seededStaffId(paper.teacher);
+    await sql`
+      insert into exam_papers (id, society_id, institution_id, academic_year_id, exam_id, section_id, subject_id,
+        exam_date, start_time, end_time, room_name, max_marks, passing_marks, subject_teacher_staff_member_id,
+        invigilator_staff_member_id)
+      select ${seededPaperId(paper.institution)}, ${societyId}, ${institution.id}, ${seededYearId(paper.institution)},
+        ${seededExamId(paper.institution, 'Unit Test 1')},
+        ${classes[paper.classIndex]!.sections[paper.sectionIndex]!.id},
+        (select id from subjects where society_id = ${societyId} and code = 'MATH'),
+        ${examsOfTheYear[0]!.startDate}, '09:00', '11:00', 'Room 1', 100, 35, ${teacher}::uuid, ${teacher}::uuid
+      on conflict (id) do nothing
+    `.execute(tx);
+  }
+  await clearScope(tx);
 }

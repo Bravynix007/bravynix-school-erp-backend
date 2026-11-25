@@ -1,5 +1,5 @@
 import { academicYears } from './academic-seed.js';
-import { examsOfTheYear, gradeScale } from './exams-seed.js';
+import { examsOfTheYear, gradeScale, papers } from './exams-seed.js';
 
 describe('the exams seed', () => {
   it('holds every exam inside the seeded year, the end not before the start', () => {
@@ -22,5 +22,10 @@ describe('the exams seed', () => {
     for (const [i, band] of bands.slice(1).entries()) {
       expect(Math.round((band.minPercentage - bands[i]!.maxPercentage) * 100)).toBe(1);
     }
+  });
+
+  it('sets each seeded paper on the first day of Unit Test 1, in one Institution once', () => {
+    expect(examsOfTheYear[0]!.name).toBe('Unit Test 1');
+    expect(new Set(papers.map((p) => p.institution)).size).toBe(papers.length);
   });
 });

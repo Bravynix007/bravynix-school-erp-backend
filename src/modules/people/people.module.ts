@@ -3,6 +3,7 @@ import { ChildContexts } from '../../platform/tenancy/index.js';
 import { AttendanceModule, SectionRoster, StudentAttendanceAccess } from '../attendance/index.js';
 import { DiaryPeople } from '../diary/index.js';
 import { EventPeople } from '../events/index.js';
+import { ExamPeople } from '../exams/index.js';
 import { TimetableChildren, TimetableStaff } from '../timetable/index.js';
 import {
   AcademicSetupModule,
@@ -43,6 +44,7 @@ import { PeopleTimetableChildren } from './people-timetable-children.js';
 import { PeopleStaffDirectory } from './people-staff-directory.js';
 import { PeopleStudentAttendance } from './people-student-attendance.js';
 import { PeopleSectionRoster } from './people-section-roster.js';
+import { PeopleExamPeople } from './people-exam-people.js';
 import { PeopleTimetableStaff } from './people-timetable-staff.js';
 import { PeopleSectionStudents } from './people-section-students.js';
 import { PeopleTeachingStaff } from './people-teaching-staff.js';
@@ -137,6 +139,8 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
     { provide: TimetableChildren, useExisting: PeopleTimetableChildren },
     PeopleTimetableStaff,
     { provide: TimetableStaff, useExisting: PeopleTimetableStaff },
+    PeopleExamPeople,
+    { provide: ExamPeople, useExisting: PeopleExamPeople },
     PeopleSectionRoster,
     { provide: SectionRoster, useExisting: PeopleSectionRoster },
     PeopleStudentAttendance,
@@ -153,6 +157,7 @@ import { TeachingAssignmentController } from './teaching-assignment.controller.j
     DiaryPeople,
     TimetableChildren,
     TimetableStaff,
+    ExamPeople,
     SectionRoster,
     StudentAttendanceAccess,
     StaffDirectory,

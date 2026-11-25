@@ -1,10 +1,10 @@
+import { clockOf } from '../../common/validation/clock-time.js';
 import {
   authorStamps,
   type AuthorRef,
   type AuthorStamps,
 } from '../../common/http/author-stamps.js';
 import type { TimeSlotRow } from './time-slot.repository.js';
-import { clockOf } from './time-slot.rules.js';
 
 /** One period as the API shows it (API design 9.4). */
 export interface TimeSlotResource extends AuthorStamps {
