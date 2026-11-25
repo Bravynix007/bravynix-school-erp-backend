@@ -26,6 +26,18 @@ export class ExamPaperRepository {
     return (lock ? query.forUpdate() : query).executeTakeFirst();
   }
 
+  /** Whether the exam still has an active paper. */
+  async anyActive(tx: Tx, examId: string): Promise<boolean> {
+    const found = await tx
+      .selectFrom('exam_papers')
+      .select('id')
+      .where('exam_id', '=', examId)
+      .where('status', '=', 1)
+      .limit(1)
+      .executeTakeFirst();
+    return found !== undefined;
+  }
+
   /** Whether an active paper of the exam falls on a day outside `startDate` to `endDate`. */
   async anyOutside(tx: Tx, examId: string, startDate: string, endDate: string): Promise<boolean> {
     const found = await tx

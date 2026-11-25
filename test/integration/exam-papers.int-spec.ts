@@ -113,6 +113,7 @@ describe('EXM-05 to EXM-08 exam papers (API design 9.8, 12.6)', () => {
     expect(results.map((r) => r.status).toSorted()).toEqual([201, 409]);
     expect(results.find((r) => r.status === 409)!.body.code).toBe(code);
   };
+  const removeExam = () => api('delete', `/v1/exams/${exam}`, owner.token);
   const moveTo = (fields: object, version = 1) =>
     api('patch', `/v1/exams/${exam}`, owner.token, { version, ...fields });
   const audit = (entityId: string) =>
@@ -702,7 +703,7 @@ describe('EXM-05 to EXM-08 exam papers (API design 9.8, 12.6)', () => {
     });
 
     it('is open to the Owner, the Admin and a teacher of the Institution, and not to one out of reach (404)', async () => {
-      await added();
+      const paper = await added();
       for (const token of [owner.token, firstAdmin.token, annaToken]) {
         expect(await papers('', token)).toHaveLength(1);
       }
@@ -710,6 +711,7 @@ describe('EXM-05 to EXM-08 exam papers (API design 9.8, 12.6)', () => {
         expect((await api('get', `/v1/exams/${exam}/papers`, token)).status).toBe(404);
       }
       expect((await api('get', `/v1/exams/${missing}/papers`, owner.token)).status).toBe(404);
+      await remove(paper.id);
       await api('delete', `/v1/exams/${exam}`, owner.token);
       expect((await api('get', `/v1/exams/${exam}/papers`, owner.token)).status).toBe(404);
     });
@@ -789,6 +791,26 @@ describe('EXM-05 to EXM-08 exam papers (API design 9.8, 12.6)', () => {
       expect(theirs.id).toBeDefined();
       await remove(mine.id);
       expect(await seenAsParent([childId])).toEqual([]);
+    });
+  });
+
+  describe('EXM-04 deactivate an exam with papers', () => {
+    it('refuses while the exam has an active paper (409 EXAM_IN_USE), and allows it once they are removed', async () => {
+      const paper = await added({ roomName: 'Room 9' });
+      const refused = await removeExam();
+      expect([refused.status, refused.body.code]).toEqual([409, 'EXAM_IN_USE']);
+      expect(await papers()).toHaveLength(1);
+      await remove(paper.id);
+      expect((await removeExam()).status).toBe(200);
+    });
+
+    it('lets two saves at once end with no orphan: the paper is added or the exam is deactivated', async () => {
+      const [added409, gone] = await Promise.all([add(), removeExam()]);
+      const outcomes = [added409.status, gone.status].toSorted();
+      expect([
+        [201, 409],
+        [200, 404],
+      ]).toContainEqual(outcomes);
     });
   });
 

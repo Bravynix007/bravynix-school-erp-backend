@@ -162,11 +162,15 @@ export class ExamService {
     return this.resource(row);
   }
 
-  /** EXM-04: deactivates the exam, and its name is free again. Nothing is deleted. */
+  /**
+   * EXM-04: deactivates the exam, and its name is free again. Nothing is deleted. 409 `EXAM_IN_USE` while it has an
+   * active paper: remove the papers first, so no paper is left holding a section, room or invigilator unseen.
+   */
   async deactivate(principal: Principal, id: string): Promise<{ id: string; status: 0 }> {
     const context = await this.contextOf(principal, id);
     await this.database.transaction(context.tenant, async (tx) => {
       const current = await this.lockedActive(tx, id);
+      if (await this.papers.anyActive(tx, id)) throw AppException.conflict(ErrorCode.EXAM_IN_USE);
       const updated = await this.exams.update(tx, id, {
         status: 0,
         ...updateStamp(principal.personId),
