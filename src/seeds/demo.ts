@@ -13,7 +13,7 @@ import {
   type SeedSubject,
 } from './academic-seed.js';
 import { DueStatus, dueAmounts } from '../modules/platform-billing/due.rules.js';
-import { insertGradeBands } from './exams-seed.js';
+import { insertExams, insertGradeBands } from './exams-seed.js';
 
 /**
  * The "demo" scenario: a small, realistic set of Phase 1 data for showing the console and the app side by side
@@ -535,6 +535,10 @@ export async function writeDemoSeed(db: Kysely<unknown>): Promise<void> {
     db,
     institutions.map((i) => i.id),
     (i, n) => id(9301 + i * 10 + n),
+  );
+  // The high school has this year's exams named, so a datesheet can be built without setting them up first.
+  await insertExams(db, [{ institutionId: id(9201), academicYearId: id(9702) }], (_i, n) =>
+    id(10301 + n),
   );
 
   for (const d of dues) {

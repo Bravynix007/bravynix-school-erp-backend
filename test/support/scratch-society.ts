@@ -46,6 +46,7 @@ export async function removeScratchSocieties(
     await sql`alter table timetable_entries no force row level security`.execute(tx);
     await sql`alter table diary_entries no force row level security`.execute(tx);
     await sql`alter table grade_bands no force row level security`.execute(tx);
+    await sql`alter table exams no force row level security`.execute(tx);
     await sql`alter table event_holiday_classes no force row level security`.execute(tx);
     await sql`alter table students no force row level security`.execute(tx);
     await sql`alter table student_guardians no force row level security`.execute(tx);
@@ -92,6 +93,7 @@ export async function removeScratchSocieties(
     await sql`delete from staff_institutions where society_id in (${sql.join(ids)})`.execute(tx);
     await sql`delete from diary_entries where society_id in (${sql.join(ids)})`.execute(tx);
     await sql`delete from grade_bands where society_id in (${sql.join(ids)})`.execute(tx);
+    await sql`delete from exams where society_id in (${sql.join(ids)})`.execute(tx);
     await sql`delete from timetable_entries where society_id in (${sql.join(ids)})`.execute(tx);
     await sql`delete from time_slots where society_id in (${sql.join(ids)})`.execute(tx);
     await sql`delete from academic_years where society_id in (${sql.join(ids)})`.execute(tx);
@@ -126,6 +128,7 @@ export async function removeScratchSocieties(
     await sql`alter table timetable_entries force row level security`.execute(tx);
     await sql`alter table diary_entries force row level security`.execute(tx);
     await sql`alter table grade_bands force row level security`.execute(tx);
+    await sql`alter table exams force row level security`.execute(tx);
     await sql`alter table event_holiday_classes force row level security`.execute(tx);
     await sql`alter table students force row level security`.execute(tx);
     await sql`alter table student_guardians force row level security`.execute(tx);
