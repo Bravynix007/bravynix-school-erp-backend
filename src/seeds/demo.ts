@@ -13,6 +13,7 @@ import {
   type SeedSubject,
 } from './academic-seed.js';
 import { DueStatus, dueAmounts } from '../modules/platform-billing/due.rules.js';
+import { insertGradeBands } from './exams-seed.js';
 
 /**
  * The "demo" scenario: a small, realistic set of Phase 1 data for showing the console and the app side by side
@@ -529,6 +530,12 @@ export async function writeDemoSeed(db: Kysely<unknown>): Promise<void> {
   await insertSubjects(db, subjects);
   await insertClassesOffered(db, classesOffered);
   await insertClasses(db, classes);
+  // Each school grades on the CBSE nine-point scale, so results can be published without setting one up first.
+  await insertGradeBands(
+    db,
+    institutions.map((i) => i.id),
+    (i, n) => id(10101 + i * 10 + n),
+  );
 
   for (const d of dues) {
     const institution = institutionOf(d.institution);
