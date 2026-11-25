@@ -101,6 +101,8 @@ const en: Catalogue = {
   // Period timings (API design 9.4)
   TIME_SLOT_OVERLAP: 'This period overlaps another period of the same year',
   TIME_SLOT_IN_USE: 'Timetable entries use this period; remove them first',
+  // Grade bands (API design 12.1)
+  GRADE_BAND_OVERLAP: 'This range overlaps another grade band of the Institution',
   // Class timetable (API design 12.6)
   INVALID_SLOT:
     'This period is not one of the Institution’s current year, or is a break and takes only a break',
