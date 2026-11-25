@@ -127,11 +127,15 @@ export class ExamService {
         };
         const changes = changedColumns(current, wanted) as ExamChanges;
         if (Object.keys(changes).length === 0) return current;
-        requireDates(
-          changes.start_date ?? current.start_date,
-          changes.end_date ?? current.end_date,
-          await this.spanOf(tx, current.academic_year_id, context),
-        );
+        // The dates are checked only when one changes: a year may have been shortened since, and the rename of an exam
+        // must not be refused for dates the caller did not touch.
+        if (changes.start_date !== undefined || changes.end_date !== undefined) {
+          requireDates(
+            changes.start_date ?? current.start_date,
+            changes.end_date ?? current.end_date,
+            await this.spanOf(tx, current.academic_year_id, context),
+          );
+        }
         const updated = await this.exams.update(tx, id, {
           ...changes,
           ...updateStamp(principal.personId),

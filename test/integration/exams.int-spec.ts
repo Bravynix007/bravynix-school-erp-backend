@@ -410,7 +410,8 @@ describe('EXM-01 to EXM-04 exams (API design 9.8)', () => {
 
     it('lets a parent read their child’s Institution, and nothing else', async () => {
       await added();
-      await added({ institutionId: second, name: 'Other' }).catch(() => undefined);
+      const secondYear = await kit.year(owner.token, second);
+      await added({ institutionId: second, academicYearId: secondYear, name: 'Other' });
       const mine = await exams(`studentId=${childId}`, parentToken);
       expect(mine.map((e) => [e.institutionId, e.name])).toEqual([[first, 'Unit Test 1']]);
       expect((await read(`studentId=${childId}`, strangerToken)).status).toBe(404);
@@ -420,6 +421,11 @@ describe('EXM-01 to EXM-04 exams (API design 9.8)', () => {
       expect([named.status, fieldsOf(named)]).toEqual([
         400,
         { institutionId: 'FIELD_NOT_ALLOWED' },
+      ]);
+      const yeared = await read(`studentId=${childId}&academicYearId=${year}`, parentToken);
+      expect([yeared.status, fieldsOf(yeared)]).toEqual([
+        400,
+        { academicYearId: 'FIELD_NOT_ALLOWED' },
       ]);
       const staff = await read(`institutionId=${first}&studentId=${childId}`);
       expect([staff.status, fieldsOf(staff)]).toEqual([400, { studentId: 'FIELD_NOT_ALLOWED' }]);
@@ -488,6 +494,21 @@ describe('EXM-01 to EXM-04 exams (API design 9.8)', () => {
       expect([outside.status, fieldsOf(outside)]).toEqual([400, { endDate: 'OUT_OF_RANGE' }]);
       expect((await edit(made.id, { version: 1, startDate: '2026-08-14' })).status).toBe(200);
       expect(await audit(made.id)).toHaveLength(2);
+    });
+
+    it('renames an exam whose year was shortened since, but refuses a date that is outside it', async () => {
+      const made = await added({ startDate: '2027-03-01', endDate: '2027-03-15' });
+      const shrunk = await api('patch', `/v1/academic-years/${year}`, owner.token, {
+        version: 1,
+        endDate: '2026-12-31',
+      });
+      expect(shrunk.status).toBe(200);
+      const renamed = await edit(made.id, { version: 1, name: 'Annual' });
+      expect(renamed.status).toBe(200);
+      expect(renamed.body.data).toMatchObject({ name: 'Annual', endDate: '2027-03-15' });
+      const moved = await edit(made.id, { version: 2, endDate: '2027-03-16' });
+      expect(moved.status).toBe(400);
+      expect(fieldsOf(moved)).toMatchObject({ endDate: 'OUT_OF_RANGE' });
     });
 
     it('refuses a name of another active exam of the year (409 DUPLICATE), but not its own', async () => {
@@ -581,6 +602,18 @@ describe('EXM-01 to EXM-04 exams (API design 9.8)', () => {
         ),
       ).rejects.toThrow(/ck_exams_type/);
       expect(await exams()).toHaveLength(1);
+    });
+
+    it('refuses an exam whose year belongs to another Institution', async () => {
+      const elsewhere = await kit.year(owner.token, second);
+      await expect(
+        database.transaction(asOwner(), (tx) =>
+          sql`
+            insert into exams (society_id, institution_id, academic_year_id, name, exam_type, start_date, end_date)
+            values (${societyA}, ${first}, ${elsewhere}, 'Stray', 1, date '2026-08-10', date '2026-08-14')
+          `.execute(tx),
+        ),
+      ).rejects.toThrow(/fk_exams_year/);
     });
 
     it('keeps another Society’s exams out of sight', async () => {
