@@ -845,6 +845,39 @@ describe('EXM-05 to EXM-10 exam papers and the datesheet (API design 9.8, 12.6)'
     });
   });
 
+  describe('what a parent’s row-level security shows of a published datesheet', () => {
+    it('follows the child to the section they sit in now, not the one they left', async () => {
+      const left = await added();
+      const joined = await added({ sectionId: sectionB });
+      await publish();
+      expect(await seenAsParent([childId])).toEqual([left.id]);
+      succeeded(
+        await api('patch', `/v1/students/${childId}/placement`, owner.token, {
+          sectionId: sectionB,
+          rollNumber: '7',
+        }),
+        200,
+        'move',
+      );
+      expect(await seenAsParent([childId])).toEqual([joined.id]);
+      expect((await papers(`?studentId=${childId}`, parentToken)).map((p) => p.id)).toEqual([
+        joined.id,
+      ]);
+    });
+
+    it('shows nothing of an enrolment that is not active, even with a placement still open', async () => {
+      await added();
+      await publish();
+      expect(await seenAsParent([childId])).toHaveLength(1);
+      await database.transaction(
+        { societyId: societyA, institutionIds: [first], roleCode: 2, personId: owner.person },
+        (tx) =>
+          sql`update student_enrolments set status = 0 where student_id = ${childId}`.execute(tx),
+      );
+      expect(await seenAsParent([childId])).toEqual([]);
+    });
+  });
+
   describe('EXM-03 dates against the papers', () => {
     it('refuses dates that leave an active paper outside them (409 PAPER_OUTSIDE_EXAM)', async () => {
       await added({ examDate: '2026-08-10' });
