@@ -534,7 +534,7 @@ export async function writeDemoSeed(db: Kysely<unknown>): Promise<void> {
   await insertGradeBands(
     db,
     institutions.map((i) => i.id),
-    (i, n) => id(9301 + i * 10 + n),
+    (i, n) => id(10101 + i * 10 + n),
   );
   // The high school has this year's exams named, so a datesheet can be built without setting them up first.
   await insertExams(db, [{ institutionId: id(9201), academicYearId: id(9702) }], (_i, n) =>
