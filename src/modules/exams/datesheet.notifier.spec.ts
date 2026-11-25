@@ -65,6 +65,7 @@ describe('DatesheetNotifier.published', () => {
         'section-2': [
           { userId: 'mother', studentId: 'child-1' },
           { userId: 'aunt', studentId: 'child-2' },
+          { userId: 'mother', studentId: 'child-3' },
         ],
       },
       staff: ['teacher-user'],
@@ -90,6 +91,7 @@ describe('DatesheetNotifier.published', () => {
     expect(notified[0]!.receivers).toEqual([
       { userId: 'mother', studentId: 'child-1' },
       { userId: 'aunt', studentId: 'child-2' },
+      { userId: 'mother', studentId: 'child-3' },
       { userId: 'teacher-user' },
     ]);
   });
