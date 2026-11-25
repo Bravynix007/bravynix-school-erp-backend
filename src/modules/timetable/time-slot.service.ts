@@ -100,10 +100,12 @@ export class TimeSlotService {
     requireTimes(body.startTime, body.endTime);
     const row = await this.database
       .transaction(context.tenant, async (tx) => {
-        const yearId =
-          body.academicYearId === undefined
-            ? await this.years.requireCurrentId(tx, context.institutionId)
-            : await this.openYear(tx, body.academicYearId, context.institutionId);
+        const yearId = await this.years.yearToWrite(
+          tx,
+          context.institutionId,
+          body.academicYearId,
+          'academicYearId',
+        );
         const created = await this.slots.insert(tx, {
           id: newId(),
           society_id: context.societyId,
@@ -213,12 +215,6 @@ export class TimeSlotService {
     ];
     if (errors.length > 0) throw AppException.validation(errors);
     return this.scope.requireInstitution(principal, query.institutionId!);
-  }
-
-  /** A year of the Institution to add to: 404 for any other, 422 `REFERENCE_INACTIVE` when it is deactivated. */
-  private async openYear(tx: Tx, yearId: string, institutionId: string): Promise<string> {
-    await this.years.requireActive(tx, yearId, institutionId, 'academicYearId');
-    return yearId;
   }
 
   /** The Institution of a period named by its ID alone, which the caller must reach (404 otherwise, and when deactivated). */

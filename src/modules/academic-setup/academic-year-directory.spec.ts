@@ -149,4 +149,41 @@ describe('AcademicYearDirectory', () => {
       });
     });
   });
+
+  describe('yearToWrite', () => {
+    it('answers the year named when it is an active one of the Institution’s', async () => {
+      await expect(
+        build(year()).directory.yearToWrite(tx, 'institution-1', 'year-1', 'academicYearId'),
+      ).resolves.toBe('year-1');
+    });
+
+    it('is 404 for a year that is not there or is another Institution’s, and 422 REFERENCE_INACTIVE for a deactivated one', async () => {
+      for (const found of [undefined, year({ institution_id: 'institution-2' })]) {
+        await expect(
+          build(found).directory.yearToWrite(tx, 'institution-1', 'year-1', 'academicYearId'),
+        ).rejects.toMatchObject({ status: 404 });
+      }
+      await expect(
+        build(year({ status: 0 })).directory.yearToWrite(
+          tx,
+          'institution-1',
+          'year-1',
+          'academicYearId',
+        ),
+      ).rejects.toMatchObject({
+        status: 422,
+        code: 'REFERENCE_INACTIVE',
+        options: { errors: [{ field: 'academicYearId' }] },
+      });
+    });
+
+    it('answers the current year when none is named, and is 422 CURRENT_YEAR_REQUIRED without one', async () => {
+      await expect(
+        build(year()).directory.yearToWrite(tx, 'institution-1', undefined, 'academicYearId'),
+      ).resolves.toBe('year-1');
+      await expect(
+        build().directory.yearToWrite(tx, 'institution-1', undefined, 'academicYearId'),
+      ).rejects.toMatchObject({ status: 422, code: 'CURRENT_YEAR_REQUIRED' });
+    });
+  });
 });

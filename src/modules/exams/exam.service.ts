@@ -75,10 +75,12 @@ export class ExamService {
     const context = await this.scope.requireInstitution(principal, body.institutionId);
     const row = await this.database
       .transaction(context.tenant, async (tx) => {
-        const yearId =
-          body.academicYearId === undefined
-            ? await this.years.requireCurrentId(tx, context.institutionId)
-            : await this.openYear(tx, body.academicYearId, context.institutionId);
+        const yearId = await this.years.yearToWrite(
+          tx,
+          context.institutionId,
+          body.academicYearId,
+          'academicYearId',
+        );
         requireDates(body.startDate, body.endDate, await this.spanOf(tx, yearId, context));
         const created = await this.exams.insert(tx, {
           id: newId(),
@@ -190,12 +192,6 @@ export class ExamService {
     ];
     if (errors.length > 0) throw AppException.validation(errors);
     return this.scope.requireInstitution(principal, query.institutionId!);
-  }
-
-  /** A year of the Institution to add to: 404 for any other, 422 `REFERENCE_INACTIVE` when it is deactivated. */
-  private async openYear(tx: Tx, yearId: string, institutionId: string): Promise<string> {
-    await this.years.requireActive(tx, yearId, institutionId, 'academicYearId');
-    return yearId;
   }
 
   /** The first and last day of an exam's year, which the caller reaches because it reaches the exam's Institution. */

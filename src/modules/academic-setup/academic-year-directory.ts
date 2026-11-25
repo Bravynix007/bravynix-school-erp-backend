@@ -80,4 +80,20 @@ export class AcademicYearDirectory {
     }
     return yearId;
   }
+
+  /**
+   * The year new work is added to: the one named, which must be one of this Institution's (404 otherwise) and active
+   * (422 `REFERENCE_INACTIVE` on `field`), or the Institution's current year when none is named (422
+   * `CURRENT_YEAR_REQUIRED` when it has none).
+   */
+  async yearToWrite(
+    tx: Tx,
+    institutionId: string,
+    yearId: string | undefined,
+    field: string,
+  ): Promise<string> {
+    if (yearId === undefined) return this.requireCurrentId(tx, institutionId);
+    await this.requireActive(tx, yearId, institutionId, field);
+    return yearId;
+  }
 }

@@ -114,6 +114,9 @@ function build(current: TimeSlotRow | null = slot()) {
   const yearToRead = vi
     .fn<AcademicYearDirectory['yearToRead']>()
     .mockImplementation((_tx, _institutionId, yearId) => Promise.resolve(yearId ?? 'year-1'));
+  const yearToWrite = vi
+    .fn<AcademicYearDirectory['yearToWrite']>()
+    .mockImplementation((_tx, _institutionId, yearId) => Promise.resolve(yearId ?? 'year-1'));
   const openYear = vi
     .fn<AcademicYearDirectory['openYear']>()
     .mockResolvedValue({ open: true, startDate: '2026-06-01', endDate: '2027-03-31' });
@@ -126,7 +129,13 @@ function build(current: TimeSlotRow | null = slot()) {
     { active, find, insert, update } as unknown as TimeSlotRepository,
     { usesSlot } as unknown as TimetableEntryRepository,
     { forPrincipal, requireInstitution } as unknown as ScopeService,
-    { requireCurrentId, yearToRead, openYear, requireActive } as unknown as AcademicYearDirectory,
+    {
+      requireCurrentId,
+      yearToRead,
+      yearToWrite,
+      openYear,
+      requireActive,
+    } as unknown as AcademicYearDirectory,
     { of: childContextOf } as unknown as ChildContexts,
     {
       describe: vi.fn<PersonDirectory['describe']>().mockResolvedValue(new Map()),
@@ -144,6 +153,7 @@ function build(current: TimeSlotRow | null = slot()) {
     requireInstitution,
     requireCurrentId,
     yearToRead,
+    yearToWrite,
     openYear,
     requireActive,
     childContextOf,
@@ -246,13 +256,12 @@ describe('TimeSlotService.create', () => {
   it('adds to the year named when it is an active year of the Institution', async () => {
     const t = build();
     await t.service.create(admin, { ...created, academicYearId: 'year-2' });
-    expect(t.requireActive).toHaveBeenCalledWith(
+    expect(t.yearToWrite).toHaveBeenCalledWith(
       expect.anything(),
-      'year-2',
       'inst-1',
+      'year-2',
       'academicYearId',
     );
-    expect(t.requireCurrentId).not.toHaveBeenCalled();
     expect(t.insert).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ academic_year_id: 'year-2' }),
@@ -286,12 +295,12 @@ describe('TimeSlotService.create', () => {
 
   it('passes on the refusal of a year that is gone or has no current year', async () => {
     const t = build();
-    t.requireCurrentId.mockRejectedValueOnce(AppException.businessRule('CURRENT_YEAR_REQUIRED'));
+    t.yearToWrite.mockRejectedValueOnce(AppException.businessRule('CURRENT_YEAR_REQUIRED'));
     expect(await refusal(t.service.create(admin, created))).toMatchObject({
       status: 422,
       code: 'CURRENT_YEAR_REQUIRED',
     });
-    t.requireActive.mockRejectedValueOnce(AppException.referenceInactive('academicYearId'));
+    t.yearToWrite.mockRejectedValueOnce(AppException.referenceInactive('academicYearId'));
     expect(
       await refusal(t.service.create(admin, { ...created, academicYearId: 'year-2' })),
     ).toMatchObject({ status: 422, code: 'REFERENCE_INACTIVE', fields: ['academicYearId'] });
