@@ -57,6 +57,7 @@ import * as m0055 from './2026_11_23_0055_inbox_target_date.js';
 import * as m0056 from './2026_11_23_0056_event_image_file.js';
 import * as m0057 from './2026_11_25_0057_exams_grade_bands.js';
 import * as m0058 from './2026_11_25_0058_exams_names.js';
+import * as m0059 from './2026_11_25_0059_exams_papers.js';
 
 /**
  * Every migration, in order. Listed explicitly (not read from disk) so the
@@ -125,6 +126,7 @@ const migrations: Record<string, Migration> = {
   '2026_11_23_0056_event_image_file': m0056,
   '2026_11_25_0057_exams_grade_bands': m0057,
   '2026_11_25_0058_exams_names': m0058,
+  '2026_11_25_0059_exams_papers': m0059,
 };
 
 export const migrationProvider: MigrationProvider = {

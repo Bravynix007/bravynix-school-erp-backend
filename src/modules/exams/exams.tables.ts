@@ -8,6 +8,7 @@ declare module '../../platform/database/schema.js' {
   interface Database {
     grade_bands: GradeBandsTable;
     exams: ExamsTable;
+    exam_papers: ExamPapersTable;
   }
 }
 
@@ -57,4 +58,38 @@ export interface ExamsTable {
   exam_type: number;
   start_date: string;
   end_date: string;
+  /** When the datesheet was published to the sections (EXM-09), and by whom; both empty until then. */
+  datesheet_published_at: Date | null;
+  datesheet_published_by: string | null;
+}
+
+/**
+ * One paper of an exam: a subject sat by a section on a day, from a time to a time (`HH:MM:SS`). Both people are
+ * optional and belong to the Institution. Deactivated (`status` 0), never deleted.
+ */
+export interface ExamPapersTable {
+  id: Generated<string>;
+  created_at: ColumnType<Date, Date | undefined, never>;
+  created_by: string | null;
+  updated_at: ColumnType<Date, never, Date>;
+  updated_by: string | null;
+  version: Generated<number>;
+  /** 1 active, 0 deactivated. */
+  status: Generated<number>;
+  society_id: string;
+  institution_id: string;
+  academic_year_id: string;
+  exam_id: string;
+  section_id: string;
+  subject_id: string;
+  exam_date: string;
+  start_time: string;
+  end_time: string;
+  room_name: string | null;
+  /** 1 to 1,000. */
+  max_marks: Generated<number>;
+  /** 0 up to `max_marks`. */
+  passing_marks: Generated<number>;
+  subject_teacher_staff_member_id: string | null;
+  invigilator_staff_member_id: string | null;
 }

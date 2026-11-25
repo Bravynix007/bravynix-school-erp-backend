@@ -8,6 +8,7 @@ import { changedColumns } from '../../common/http/changed-columns.js';
 import { ErrorCode, FieldErrorCode } from '../../common/http/error-codes.js';
 import { requireVersion } from '../../common/http/require-version.js';
 import { newId } from '../../common/ids/ids.js';
+import { clockOf, requireTimes } from '../../common/validation/clock-time.js';
 import { fieldError } from '../../common/validation/field-error.js';
 import { parentReadErrors, staffReadErrors } from '../../common/validation/parent-read.js';
 import { AuditService, type AuditValues } from '../../platform/audit/index.js';
@@ -35,7 +36,7 @@ import {
   type TimeSlotRow,
 } from './time-slot.repository.js';
 import { timeSlotResource, type TimeSlotResource } from './time-slot.resource.js';
-import { clockOf, requireTimes, translateTimeSlotError } from './time-slot.rules.js';
+import { translateTimeSlotError } from './time-slot.rules.js';
 import { TimetableEntryRepository } from './timetable-entry.repository.js';
 
 /** What the audit log keeps of a period. */

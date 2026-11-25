@@ -1,6 +1,6 @@
 import { HttpStatus } from '@nestjs/common';
 import { AppException } from '../../common/http/app-exception.js';
-import { ErrorCode, FieldErrorCode } from '../../common/http/error-codes.js';
+import { ErrorCode } from '../../common/http/error-codes.js';
 import { fieldError } from '../../common/validation/field-error.js';
 import {
   duplicateOn,
@@ -11,18 +11,6 @@ import {
 
 /** The longest school day the periods may number (DDD 9.4: `period_no` 1 to 30). */
 export const MAX_PERIOD_NO = 30;
-
-/** A period ends after it starts: the end on or before the start is 400 `OUT_OF_RANGE` on `endTime`. */
-export function requireTimes(startTime: string, endTime: string): void {
-  if (endTime <= startTime) {
-    throw AppException.validation([fieldError('endTime', FieldErrorCode.OUT_OF_RANGE)]);
-  }
-}
-
-/** A time as the API writes it: the database's `09:40:00` is `09:40` (API design 7.3). */
-export function clockOf(time: string): string {
-  return time.slice(0, 5);
-}
 
 /**
  * The database enforces the rules no race can break; a violation is the answer: a number already used by an active

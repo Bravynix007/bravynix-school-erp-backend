@@ -1,10 +1,10 @@
+import { clockOf } from '../../common/validation/clock-time.js';
 import {
   authorStamps,
   type AuthorRef,
   type AuthorStamps,
 } from '../../common/http/author-stamps.js';
 import type { TimetableEntryWithSlot } from './timetable-entry.repository.js';
-import { clockOf } from './time-slot.rules.js';
 
 /** One entry of a week as the API shows it (API design 9.7). */
 export interface TimetableEntryResource extends AuthorStamps {

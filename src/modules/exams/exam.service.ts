@@ -5,7 +5,7 @@ import { ApiResult } from '../../common/http/api-result.js';
 import { AppException } from '../../common/http/app-exception.js';
 import { authorIdsOf } from '../../common/http/author-stamps.js';
 import { changedColumns } from '../../common/http/changed-columns.js';
-import { FieldErrorCode } from '../../common/http/error-codes.js';
+import { ErrorCode, FieldErrorCode } from '../../common/http/error-codes.js';
 import { requireVersion } from '../../common/http/require-version.js';
 import { newId } from '../../common/ids/ids.js';
 import { fieldError } from '../../common/validation/field-error.js';
@@ -25,6 +25,7 @@ import {
 } from '../../platform/tenancy/index.js';
 import { AcademicYearDirectory, type YearSpan } from '../academic-setup/index.js';
 import type { CreateExamDto, ListExamsQueryDto, UpdateExamDto } from './exam.dto.js';
+import { ExamPaperRepository } from './exam-paper.repository.js';
 import { ExamRepository, type ExamChanges, type ExamRow } from './exam.repository.js';
 import { examResource, type ExamResource } from './exam.resource.js';
 import { requireDates, translateExamError } from './exam.rules.js';
@@ -51,6 +52,7 @@ export class ExamService {
   constructor(
     private readonly database: DatabaseService,
     private readonly exams: ExamRepository,
+    private readonly papers: ExamPaperRepository,
     private readonly scope: ScopeService,
     private readonly years: AcademicYearDirectory,
     private readonly children: ChildContexts,
@@ -112,7 +114,10 @@ export class ExamService {
     return this.resource(row);
   }
 
-  /** EXM-03: a request that changes nothing writes nothing. A deactivated exam is 404. */
+  /**
+   * EXM-03: a request that changes nothing writes nothing. A deactivated exam is 404. Dates that leave an active paper
+   * outside them are 409 `PAPER_OUTSIDE_EXAM`: move or remove the paper first.
+   */
   async update(principal: Principal, id: string, body: UpdateExamDto): Promise<ExamResource> {
     const context = await this.contextOf(principal, id);
     const row = await this.database
@@ -130,11 +135,16 @@ export class ExamService {
         // The dates are checked only when one changes: a year may have been shortened since, and the rename of an exam
         // must not be refused for dates the caller did not touch.
         if (changes.start_date !== undefined || changes.end_date !== undefined) {
+          const startDate = changes.start_date ?? current.start_date;
+          const endDate = changes.end_date ?? current.end_date;
           requireDates(
-            changes.start_date ?? current.start_date,
-            changes.end_date ?? current.end_date,
+            startDate,
+            endDate,
             await this.spanOf(tx, current.academic_year_id, context),
           );
+          if (await this.papers.anyOutside(tx, id, startDate, endDate)) {
+            throw AppException.conflict(ErrorCode.PAPER_OUTSIDE_EXAM);
+          }
         }
         const updated = await this.exams.update(tx, id, {
           ...changes,
@@ -152,11 +162,15 @@ export class ExamService {
     return this.resource(row);
   }
 
-  /** EXM-04: deactivates the exam, and its name is free again. Nothing is deleted. */
+  /**
+   * EXM-04: deactivates the exam, and its name is free again. Nothing is deleted. 409 `EXAM_IN_USE` while it has an
+   * active paper: remove the papers first, so no paper is left holding a section, room or invigilator unseen.
+   */
   async deactivate(principal: Principal, id: string): Promise<{ id: string; status: 0 }> {
     const context = await this.contextOf(principal, id);
     await this.database.transaction(context.tenant, async (tx) => {
       const current = await this.lockedActive(tx, id);
+      if (await this.papers.anyActive(tx, id)) throw AppException.conflict(ErrorCode.EXAM_IN_USE);
       const updated = await this.exams.update(tx, id, {
         status: 0,
         ...updateStamp(principal.personId),

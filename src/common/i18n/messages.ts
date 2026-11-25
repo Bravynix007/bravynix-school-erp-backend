@@ -108,6 +108,13 @@ const en: Catalogue = {
     'This period is not one of the Institution’s current year, or is a break and takes only a break',
   SECTION_SLOT_TAKEN: 'This section already has an entry in that period',
   TEACHER_DOUBLE_BOOKED: 'This teacher already has an entry in that period',
+  // Exam papers (API design 12.6)
+  PAPER_OVERLAP: 'This section already has a paper that overlaps that time',
+  INVIGILATOR_DOUBLE_BOOKED: 'This invigilator already has a paper that overlaps that time',
+  ROOM_TAKEN: 'This room already has a paper that overlaps that time',
+  EXAM_IN_USE: 'This exam still has papers; remove them first',
+  PAPER_OUTSIDE_EXAM:
+    'A paper of this exam is dated outside the new dates; move or remove it first',
   // Attendance (API design 10.10, 10.11)
   ATTENDANCE_ALREADY_SUBMITTED: 'Attendance for this section and date has already been submitted',
   SESSION_VOIDED: 'This attendance session was voided and can no longer be changed',
