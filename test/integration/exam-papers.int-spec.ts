@@ -1,4 +1,5 @@
 import { sql, Kysely, PostgresDialect } from 'kysely';
+import { addDays } from '../../src/common/time/calendar-days.js';
 import { DatabaseService } from '../../src/platform/database/index.js';
 import { createPool } from '../../src/platform/database/database.service.js';
 import { runMigrations } from '../../src/platform/database/migrator.js';
@@ -824,6 +825,7 @@ describe('EXM-05 to EXM-08 exam papers (API design 9.8, 12.6)', () => {
         await api('patch', `/v1/students/${childId}/placement`, owner.token, {
           sectionId: sectionB,
           rollNumber: '7',
+          effectiveDate: addDays(t.clock.todayIst(), 1),
         }),
         200,
         'move',
